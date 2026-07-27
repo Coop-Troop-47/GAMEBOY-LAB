@@ -590,8 +590,9 @@ export default function Emulator() {
       const mobile = window.innerWidth <= 620;
       const reservedWidth = drawerOpen && window.innerWidth >= 1150 ? 570 : 0;
       const availableWidth = window.innerWidth - reservedWidth - (mobile ? 24 : 56);
-      const availableHeight = window.innerHeight - (mobile ? 82 : 106);
-      const next = Math.min(1.14, availableWidth / 397, availableHeight / 652);
+      // Leave room for the header, the console's lower edge, and browser UI.
+      const availableHeight = window.innerHeight - (mobile ? 110 : 126);
+      const next = Math.min(1.12, availableWidth / 397, availableHeight / 652);
       setConsoleScale(Math.max(0.64, next));
     };
     resize();

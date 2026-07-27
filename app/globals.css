@@ -21,10 +21,7 @@ html {
 body {
   margin: 0;
   color: var(--ink);
-  background:
-    radial-gradient(circle at 13% 18%, rgba(66, 214, 208, 0.16), transparent 25rem),
-    radial-gradient(circle at 88% 75%, rgba(198, 240, 80, 0.17), transparent 31rem),
-    var(--paper);
+  background: var(--paper);
   font-family: "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
 }
 
@@ -204,7 +201,7 @@ input:focus-visible {
     inset 5px 0 rgba(255,255,255,.4),
     inset -7px -8px rgba(49,48,53,.17),
     0 4px 0 #89877f,
-    0 25px 44px rgba(28, 33, 36, 0.19);
+    0 6px 12px rgba(28, 33, 36, 0.19);
   transform: rotateY(3deg) rotateX(1deg);
   transition: background-color 180ms ease, transform 180ms ease;
   user-select: none;
@@ -219,7 +216,7 @@ input:focus-visible {
     inset 5px 0 rgba(255,255,255,.2),
     inset -7px -8px rgba(20,16,58,.28),
     0 4px 0 #2f2a68,
-    0 25px 44px rgba(28, 33, 36, 0.26);
+    0 6px 12px rgba(28, 33, 36, 0.26);
 }
 
 .handheld-top {
@@ -1112,19 +1109,14 @@ html[data-theme="dark"] body {
 
 html[data-theme="dark"] body {
   color: #f2f1e9;
-  background:
-    radial-gradient(circle at 13% 18%, rgba(66, 214, 208, 0.1), transparent 25rem),
-    radial-gradient(circle at 88% 75%, rgba(198, 240, 80, 0.08), transparent 31rem),
-    #111318;
+  background: #111318;
 }
 
 .app-shell {
   min-height: 100svh;
   overflow-x: hidden;
   overflow-y: auto;
-  background:
-    radial-gradient(circle at 13% 18%, rgba(66, 214, 208, 0.16), transparent 25rem),
-    radial-gradient(circle at 88% 75%, rgba(198, 240, 80, 0.17), transparent 31rem);
+  background: var(--paper);
 }
 
 .theme-dark {
@@ -1134,9 +1126,7 @@ html[data-theme="dark"] body {
   --muted: #a7abb2;
   --line: rgba(242, 241, 233, 0.18);
   color: var(--ink);
-  background:
-    radial-gradient(circle at 13% 18%, rgba(66, 214, 208, 0.1), transparent 25rem),
-    radial-gradient(circle at 88% 75%, rgba(198, 240, 80, 0.08), transparent 31rem);
+  background: var(--paper);
 }
 
 .theme-dark .ambient-grid {
@@ -1173,7 +1163,7 @@ html[data-theme="dark"] body {
 }
 
 .workspace {
-  min-height: calc(100svh - 76px);
+  min-height: calc(100dvh - 105px);
 }
 
 .console-wrap {
@@ -1357,12 +1347,12 @@ html[data-theme="dark"] body {
 
 /* Screen-only mode keeps the exact shader stack and removes all console chrome. */
 .screen-only .workspace {
-  min-height: calc(100svh - 76px);
+  min-height: calc(100dvh - 105px);
 }
 
 .screen-only .console-wrap {
   width: 100%;
-  height: calc(100svh - 102px);
+  height: calc(100dvh - 126px);
   min-height: 360px;
 }
 
@@ -1399,17 +1389,15 @@ html[data-theme="dark"] body {
 }
 
 .screen-only .screen-frame {
-  width: min(92vw, calc((100svh - 132px) * 1.111111), 1050px);
+  width: min(92vw, calc((100dvh - 166px) * 1.111111), 1050px);
   border-width: 4px;
   border-radius: 3px;
-  box-shadow:
-    0 0 0 8px #23262d,
-    0 28px 70px rgba(10, 14, 16, .28);
+  box-shadow: 0 0 0 8px #23262d;
 }
 
 @media (max-width: 620px) {
   .workspace {
-    min-height: calc(100svh - 62px);
+    min-height: calc(100dvh - 85px);
     padding-top: 8px;
   }
 
@@ -1451,11 +1439,11 @@ html[data-theme="dark"] body {
   }
 
   .screen-only .console-wrap {
-    height: calc(100svh - 78px);
+    height: calc(100dvh - 110px);
   }
 
   .screen-only .screen-frame {
-    width: min(94vw, calc((100svh - 108px) * 1.111111));
+    width: min(94vw, calc((100dvh - 144px) * 1.111111));
   }
 }
 
