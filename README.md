@@ -14,9 +14,13 @@ bundled with the app.
 - Four-channel stereo audio synthesis
 - Hardware-inspired timer edges, interrupt behavior, delayed `EI`, and HALT bug
 - Sharp, adjacent-frame transparency blend, and multi-frame LCD response modes
-- Keyboard, pointer, and touch controls
+- Remappable keyboard controls with optional physical-button motion
+- Pointer and touch controls, volume/mute controls, and light/dark themes
+- Console and large screen-only presentation modes
 - Browser-local battery-backed saves
 - Header/logo lockout checks and model-specific startup animation
+- Optional user-supplied DMG and CGB boot ROM support
+- A self-contained, offline-capable HTML build at `public/gbc-lab.html`
 
 ## Controls
 
@@ -34,4 +38,6 @@ npm run dev
 npm test
 ```
 
-ROMs remain local to the browser and are never uploaded.
+`npm run build:single` regenerates the one-file browser build. ROMs, boot ROMs,
+preferences, and battery saves remain local to the browser and are never
+uploaded.

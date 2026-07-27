@@ -29,6 +29,20 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      const assetUrl = new URL("/gbc-lab.html", request.url);
+      const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
+      const headers = new Headers(assetResponse.headers);
+      headers.set("content-type", "text/html; charset=utf-8");
+      headers.set("cache-control", "no-cache");
+      headers.set("x-content-type-options", "nosniff");
+      return new Response(assetResponse.body, {
+        status: assetResponse.status,
+        statusText: assetResponse.statusText,
+        headers,
+      });
+    }
+
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return handleImageOptimization(request, {

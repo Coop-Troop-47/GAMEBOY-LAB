@@ -3,17 +3,34 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GAMEBOY_HEIGHT, GAMEBOY_WIDTH, GameBoy } from "./lib/gameboy";
 
-const KEY_MAP = {
-  ArrowRight: "right",
-  ArrowLeft: "left",
-  ArrowUp: "up",
-  ArrowDown: "down",
-  KeyX: "a",
-  KeyZ: "b",
-  Enter: "start",
-  ShiftLeft: "select",
-  ShiftRight: "select",
+const DEFAULT_BINDINGS = {
+  right: "ArrowRight",
+  left: "ArrowLeft",
+  up: "ArrowUp",
+  down: "ArrowDown",
+  a: "KeyX",
+  b: "KeyZ",
+  start: "Enter",
+  select: "ShiftLeft",
 };
+
+const BINDING_ORDER = ["up", "down", "left", "right", "a", "b", "select", "start"];
+
+function keyLabel(code) {
+  const labels = {
+    ArrowRight: "→",
+    ArrowLeft: "←",
+    ArrowUp: "↑",
+    ArrowDown: "↓",
+    Enter: "ENTER",
+    Space: "SPACE",
+    ShiftLeft: "L SHIFT",
+    ShiftRight: "R SHIFT",
+    ControlLeft: "L CTRL",
+    ControlRight: "R CTRL",
+  };
+  return labels[code] ?? code.replace(/^Key/, "").replace(/^Digit/, "");
+}
 
 const EMPTY_INFO = {
   title: "NO CARTRIDGE",
@@ -85,26 +102,22 @@ function drawBootScreen(context, model, progress, title) {
   context.textAlign = "center";
   if (cgb) {
     context.font = "italic 900 21px Arial Black, sans-serif";
-    const word = "GAME BOY";
-    const colors = ["#4d64b4", "#4d64b4", "#4d64b4", "#4d64b4", "#4d64b4", "#4d64b4", "#4d64b4", "#4d64b4"];
-    let x = 34;
-    context.textAlign = "left";
-    for (let i = 0; i < word.length; i += 1) {
-      context.fillStyle = colors[i];
-      context.fillText(word[i], x, y);
-      x += context.measureText(word[i]).width - 0.5;
-    }
+    context.fillStyle = "#4d64b4";
+    context.textAlign = "center";
+    context.fillText("GAME BOY", 80, y);
     context.font = "700 5px monospace";
-    context.fillStyle = "#e34868";
-    context.fillText("C", 109, y + 8);
-    context.fillStyle = "#755bb0";
-    context.fillText("O", 114, y + 8);
-    context.fillStyle = "#4eaa73";
-    context.fillText("L", 119, y + 8);
-    context.fillStyle = "#d3a739";
-    context.fillText("O", 124, y + 8);
-    context.fillStyle = "#3f7db4";
-    context.fillText("R", 129, y + 8);
+    const colorWord = "COLOR";
+    const colorPalette = ["#e34868", "#755bb0", "#4eaa73", "#d3a739", "#3f7db4"];
+    const letterGap = 1;
+    const widths = [...colorWord].map((letter) => context.measureText(letter).width);
+    const totalWidth = widths.reduce((sum, width) => sum + width, 0) + letterGap * (colorWord.length - 1);
+    let colorX = 80 - totalWidth / 2;
+    context.textAlign = "left";
+    [...colorWord].forEach((letter, index) => {
+      context.fillStyle = colorPalette[index];
+      context.fillText(letter, colorX, y + 8);
+      colorX += widths[index] + letterGap;
+    });
   } else {
     context.fillStyle = "#1c443c";
     context.font = "italic 900 20px Arial Black, sans-serif";
@@ -130,14 +143,14 @@ function drawBootScreen(context, model, progress, title) {
   context.restore();
 }
 
-function ControlButton({ label, sublabel, button, onPress, className = "" }) {
+function ControlButton({ label, sublabel, button, onPress, pressed = false, className = "" }) {
   const stop = (event) => {
     event.preventDefault();
     window.setTimeout(() => onPress(button, false), 70);
   };
   return (
     <button
-      className={`control-button ${className}`}
+      className={`control-button ${className} ${pressed ? "is-pressed" : ""}`}
       aria-label={sublabel || label}
       onPointerDown={(event) => {
         event.preventDefault();
@@ -170,12 +183,15 @@ export default function Emulator() {
   const animationRef = useRef(0);
   const previousFrameRef = useRef(null);
   const persistentFrameRef = useRef(null);
-  const audioRef = useRef({ context: null, node: null, queue: [] });
+  const audioRef = useRef({ context: null, node: null, queue: [], readIndex: 0, peak: 0, maxPeak: 0 });
   const bootRef = useRef({ active: false, start: 0 });
   const lastAnimationRef = useRef(0);
   const frameAccumulatorRef = useRef(0);
   const fpsRef = useRef({ start: 0, frames: 0 });
   const volumeRef = useRef(70);
+  const mutedRef = useRef(false);
+  const keyBindingsRef = useRef(DEFAULT_BINDINGS);
+  const bindingTargetRef = useRef(null);
   const runningRef = useRef(false);
   const pausedRef = useRef(false);
   const modelRef = useRef("dmg");
@@ -192,7 +208,19 @@ export default function Emulator() {
   const [lcdMode, setLcdMode] = useState("response");
   const [ghostStrength, setGhostStrength] = useState(42);
   const [volume, setVolume] = useState(70);
-  const [diagnostics, setDiagnostics] = useState({ fps: "—", frame: 0, pc: "0100", ly: 0, ppu: 0, runs: 0 });
+  const [muted, setMuted] = useState(false);
+  const [audioState, setAudioState] = useState("LOCKED");
+  const [theme, setTheme] = useState("light");
+  const [viewMode, setViewMode] = useState("console");
+  const [consoleScale, setConsoleScale] = useState(1);
+  const [keyboardMotion, setKeyboardMotion] = useState(true);
+  const [keyBindings, setKeyBindings] = useState(DEFAULT_BINDINGS);
+  const [bindingTarget, setBindingTarget] = useState(null);
+  const [pressedButtons, setPressedButtons] = useState(() => new Set());
+  const [preferencesReady, setPreferencesReady] = useState(false);
+  const [diagnostics, setDiagnostics] = useState({
+    fps: "—", frame: 0, pc: "0100", ly: 0, ppu: 0, runs: 0, audioBuffered: 0, audioPeak: 0,
+  });
   const [message, setMessage] = useState("Choose a legally obtained ROM. Nothing is uploaded.");
   const [booting, setBooting] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -210,23 +238,43 @@ export default function Emulator() {
   }, []);
 
   const startAudio = useCallback(() => {
-    if (audioRef.current.context || typeof window === "undefined") return;
+    if (typeof window === "undefined") return;
+    if (audioRef.current.context) {
+      audioRef.current.context.resume().then(() => setAudioState("ON")).catch(() => setAudioState("LOCKED"));
+      return;
+    }
     const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-    const context = new AudioContext({ sampleRate: 48000, latencyHint: "interactive" });
-    const node = context.createScriptProcessor(2048, 0, 2);
+    if (!AudioContext) {
+      setAudioState("UNAVAILABLE");
+      return;
+    }
+    const context = new AudioContext({ latencyHint: "interactive" });
+    const node = context.createScriptProcessor(1024, 0, 2);
+    const audioStateRef = { context, node, queue: [], readIndex: 0, peak: 0, maxPeak: 0 };
     node.onaudioprocess = (event) => {
       const left = event.outputBuffer.getChannelData(0);
       const right = event.outputBuffer.getChannelData(1);
-      const queue = audioRef.current.queue;
-      const gain = volumeRef.current / 100;
+      const audio = audioRef.current;
+      const gain = mutedRef.current ? 0 : volumeRef.current / 100;
+      let peak = 0;
       for (let i = 0; i < left.length; i += 1) {
-        left[i] = (queue.shift() || 0) * gain;
-        right[i] = (queue.shift() || 0) * gain;
+        const leftSample = audio.queue[audio.readIndex++] || 0;
+        const rightSample = audio.queue[audio.readIndex++] || 0;
+        left[i] = leftSample * gain;
+        right[i] = rightSample * gain;
+        peak = Math.max(peak, Math.abs(left[i]), Math.abs(right[i]));
+      }
+      audio.peak = peak;
+      audio.maxPeak = Math.max(audio.maxPeak, peak);
+      if (audio.readIndex > 8192) {
+        audio.queue = audio.queue.slice(audio.readIndex);
+        audio.readIndex = 0;
       }
     };
     node.connect(context.destination);
-    audioRef.current = { context, node, queue: [] };
+    audioRef.current = audioStateRef;
+    context.onstatechange = () => setAudioState(context.state === "running" ? "ON" : context.state.toUpperCase());
+    context.resume().then(() => setAudioState("ON")).catch(() => setAudioState("LOCKED"));
   }, []);
 
   const presentFrame = useCallback(() => {
@@ -422,36 +470,134 @@ export default function Emulator() {
     setMessage(`${model.toUpperCase()} boot ROM removed. The documented fallback startup is active.`);
   }, [model]);
 
-  const pressButton = useCallback((button, pressed) => {
-    emulatorRef.current.setButton(button, pressed);
+  const setButtonVisual = useCallback((button, pressed) => {
+    setPressedButtons((current) => {
+      const next = new Set(current);
+      if (pressed) next.add(button);
+      else next.delete(button);
+      return next;
+    });
   }, []);
 
+  const pressButton = useCallback((button, pressed) => {
+    if (pressed) startAudio();
+    emulatorRef.current.setButton(button, pressed);
+    setButtonVisual(button, pressed);
+  }, [setButtonVisual, startAudio]);
+
   useEffect(() => {
-    const context = canvasRef.current?.getContext("2d", { alpha: false });
-    if (context) drawWaitingScreen(context, model);
+    const draw = () => {
+      if (runningRef.current) return;
+      const context = canvasRef.current?.getContext("2d", { alpha: false });
+      if (context) drawWaitingScreen(context, model);
+    };
+    draw();
+    const animation = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(animation);
   }, [model]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = JSON.parse(localStorage.getItem("gbc-lab-preferences") || "{}");
+        if (saved.theme === "dark" || saved.theme === "light") setTheme(saved.theme);
+        if (saved.viewMode === "console" || saved.viewMode === "screen") setViewMode(saved.viewMode);
+        if (typeof saved.keyboardMotion === "boolean") setKeyboardMotion(saved.keyboardMotion);
+        if (typeof saved.muted === "boolean") setMuted(saved.muted);
+        if (Number.isFinite(saved.volume)) setVolume(Math.max(0, Math.min(100, saved.volume)));
+        if (saved.keyBindings && BINDING_ORDER.every((button) => typeof saved.keyBindings[button] === "string")) {
+          setKeyBindings(saved.keyBindings);
+        }
+      } catch {
+        // Corrupt local preferences should never block the emulator.
+      }
+      setPreferencesReady(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    keyBindingsRef.current = keyBindings;
+    bindingTargetRef.current = bindingTarget;
+    document.documentElement.dataset.theme = theme;
+    if (!preferencesReady) return;
+    try {
+      localStorage.setItem("gbc-lab-preferences", JSON.stringify({
+        theme, viewMode, keyboardMotion, muted, volume, keyBindings,
+      }));
+    } catch {
+      // Preferences are optional.
+    }
+  }, [theme, viewMode, keyboardMotion, muted, volume, keyBindings, bindingTarget, preferencesReady]);
+
+  useEffect(() => {
     const down = (event) => {
-      const button = KEY_MAP[event.code];
-      if (!button || event.repeat) return;
-      event.preventDefault();
-      emulatorRef.current.setButton(button, true);
-    };
-    const up = (event) => {
-      const button = KEY_MAP[event.code];
+      const target = bindingTargetRef.current;
+      if (target) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.code === "Escape") {
+          setBindingTarget(null);
+          return;
+        }
+        setKeyBindings((current) => {
+          const next = { ...current };
+          const duplicate = BINDING_ORDER.find((button) => button !== target && current[button] === event.code);
+          if (duplicate) next[duplicate] = current[target];
+          next[target] = event.code;
+          return next;
+        });
+        setBindingTarget(null);
+        return;
+      }
+      const button = BINDING_ORDER.find((name) => keyBindingsRef.current[name] === event.code);
       if (!button) return;
       event.preventDefault();
-      window.setTimeout(() => emulatorRef.current.setButton(button, false), 70);
+      event.stopPropagation();
+      if (event.repeat) return;
+      startAudio();
+      emulatorRef.current.setButton(button, true);
+      if (keyboardMotion) setButtonVisual(button, true);
     };
-    window.addEventListener("keydown", down, { passive: false });
-    window.addEventListener("keyup", up, { passive: false });
-    window.addEventListener("blur", () => { emulatorRef.current.joypad = 0xff; });
+    const up = (event) => {
+      const button = BINDING_ORDER.find((name) => keyBindingsRef.current[name] === event.code);
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      window.setTimeout(() => emulatorRef.current.setButton(button, false), 45);
+      window.setTimeout(() => setButtonVisual(button, false), 115);
+    };
+    const blur = () => {
+      emulatorRef.current.joypad = 0xff;
+      setPressedButtons(new Set());
+    };
+    window.addEventListener("keydown", down, { passive: false, capture: true });
+    window.addEventListener("keyup", up, { passive: false, capture: true });
+    window.addEventListener("blur", blur);
     return () => {
-      window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
+      window.removeEventListener("keydown", down, true);
+      window.removeEventListener("keyup", up, true);
+      window.removeEventListener("blur", blur);
     };
-  }, []);
+  }, [keyboardMotion, setButtonVisual, startAudio]);
+
+  useEffect(() => {
+    const resize = () => {
+      if (viewMode === "screen") {
+        setConsoleScale(1);
+        return;
+      }
+      const mobile = window.innerWidth <= 620;
+      const reservedWidth = drawerOpen && window.innerWidth >= 1150 ? 570 : 0;
+      const availableWidth = window.innerWidth - reservedWidth - (mobile ? 24 : 56);
+      const availableHeight = window.innerHeight - (mobile ? 82 : 106);
+      const next = Math.min(1.14, availableWidth / 397, availableHeight / 652);
+      setConsoleScale(Math.max(0.64, next));
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, [drawerOpen, viewMode]);
 
   useEffect(() => {
     runningRef.current = running;
@@ -524,9 +670,14 @@ export default function Emulator() {
         }
         const audio = emulator.drainAudio();
         if (audio.length) {
-          const queue = audioRef.current.queue;
+          const audioOutput = audioRef.current;
+          const queue = audioOutput.queue;
           for (let i = 0; i < audio.length; i += 1) queue.push(audio[i]);
-          if (queue.length > 48000) queue.splice(0, queue.length - 24000);
+          const unread = queue.length - audioOutput.readIndex;
+          if (unread > 96000) {
+            audioOutput.queue = queue.slice(queue.length - 48000);
+            audioOutput.readIndex = 0;
+          }
         }
       }
       if (!fpsRef.current.start) fpsRef.current.start = wallTime;
@@ -540,6 +691,8 @@ export default function Emulator() {
           ly: debug.ly,
           ppu: debug.mode,
           runs: debug.runFrameCalls,
+          audioBuffered: Math.max(0, audioRef.current.queue.length - audioRef.current.readIndex),
+          audioPeak: audioRef.current.maxPeak,
         });
         fpsRef.current = { start: wallTime, frames: 0 };
       }
@@ -568,12 +721,15 @@ export default function Emulator() {
 
   useEffect(() => {
     volumeRef.current = volume;
-    if (audioRef.current.context) audioRef.current.context.resume();
-  }, [paused, volume]);
+    mutedRef.current = muted;
+    if (!paused && audioRef.current.context) {
+      audioRef.current.context.resume().then(() => setAudioState("ON")).catch(() => setAudioState("LOCKED"));
+    }
+  }, [paused, volume, muted]);
 
   return (
     <main
-      className="app-shell"
+      className={`app-shell theme-${theme} ${viewMode === "screen" ? "screen-only" : ""}`}
       onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
       onDragOver={(event) => event.preventDefault()}
       onDragLeave={(event) => {
@@ -609,7 +765,14 @@ export default function Emulator() {
       </header>
 
       <section className="workspace">
-        <div className={`console-wrap ${dragging ? "is-dragging" : ""}`}>
+        <div
+          className={`console-wrap ${dragging ? "is-dragging" : ""}`}
+          style={{
+            "--console-scale": consoleScale,
+            "--console-height": `${652 * consoleScale}px`,
+            "--console-width": `${397 * consoleScale}px`,
+          }}
+        >
           <div className={`handheld ${model}`}>
             <div className="handheld-top">
               <span>DOT MATRIX</span>
@@ -642,19 +805,19 @@ export default function Emulator() {
 
             <div className="hardware-controls" aria-label="Game Boy controls">
               <div className="dpad" aria-label="Directional pad">
-                <ControlButton className="dpad-up" label="▲" sublabel="Up" button="up" onPress={pressButton} />
-                <ControlButton className="dpad-left" label="◀" sublabel="Left" button="left" onPress={pressButton} />
+                <ControlButton className="dpad-up" label="▲" sublabel="Up" button="up" onPress={pressButton} pressed={pressedButtons.has("up")} />
+                <ControlButton className="dpad-left" label="◀" sublabel="Left" button="left" onPress={pressButton} pressed={pressedButtons.has("left")} />
                 <span className="dpad-center" aria-hidden="true" />
-                <ControlButton className="dpad-right" label="▶" sublabel="Right" button="right" onPress={pressButton} />
-                <ControlButton className="dpad-down" label="▼" sublabel="Down" button="down" onPress={pressButton} />
+                <ControlButton className="dpad-right" label="▶" sublabel="Right" button="right" onPress={pressButton} pressed={pressedButtons.has("right")} />
+                <ControlButton className="dpad-down" label="▼" sublabel="Down" button="down" onPress={pressButton} pressed={pressedButtons.has("down")} />
               </div>
               <div className="action-buttons">
-                <ControlButton className="button-b" label="B" button="b" onPress={pressButton} />
-                <ControlButton className="button-a" label="A" button="a" onPress={pressButton} />
+                <ControlButton className="button-b" label="B" button="b" onPress={pressButton} pressed={pressedButtons.has("b")} />
+                <ControlButton className="button-a" label="A" button="a" onPress={pressButton} pressed={pressedButtons.has("a")} />
               </div>
               <div className="meta-buttons">
-                <ControlButton label="" sublabel="Select" button="select" onPress={pressButton} />
-                <ControlButton label="" sublabel="Start" button="start" onPress={pressButton} />
+                <ControlButton label="" sublabel="Select" button="select" onPress={pressButton} pressed={pressedButtons.has("select")} />
+                <ControlButton label="" sublabel="Start" button="start" onPress={pressButton} pressed={pressedButtons.has("start")} />
               </div>
               <div className="speaker" aria-hidden="true">
                 <i /><i /><i /><i /><i />
@@ -714,7 +877,14 @@ export default function Emulator() {
                 <p>Runs entirely on this device</p>
               </div>
             </div>
-            <button className="load-button" onClick={() => fileRef.current?.click()} data-testid="load-rom">
+            <button
+              className="load-button"
+              onClick={() => {
+                startAudio();
+                fileRef.current?.click();
+              }}
+              data-testid="load-rom"
+            >
               <span>LOAD ROM</span>
               <kbd>.GB / .GBC</kbd>
             </button>
@@ -772,6 +942,32 @@ export default function Emulator() {
             <div className="section-heading">
               <span>03</span>
               <div>
+                <h2>Presentation</h2>
+                <p>Console shell, screen focus, and theme</p>
+              </div>
+            </div>
+            <div className="option-stack">
+              <div>
+                <span className="option-label">View</span>
+                <div className="segmented two-way" aria-label="Presentation mode">
+                  <button className={viewMode === "console" ? "active" : ""} onClick={() => setViewMode("console")} aria-pressed={viewMode === "console"}>Console</button>
+                  <button className={viewMode === "screen" ? "active" : ""} onClick={() => setViewMode("screen")} aria-pressed={viewMode === "screen"}>Screen only</button>
+                </div>
+              </div>
+              <div>
+                <span className="option-label">Theme</span>
+                <div className="segmented two-way" aria-label="Color theme">
+                  <button className={theme === "light" ? "active" : ""} onClick={() => setTheme("light")} aria-pressed={theme === "light"}>Light</button>
+                  <button className={theme === "dark" ? "active" : ""} onClick={() => setTheme("dark")} aria-pressed={theme === "dark"}>Dark</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="deck-section">
+            <div className="section-heading">
+              <span>04</span>
+              <div>
                 <h2>LCD response</h2>
                 <p>Persistence restores flicker transparency</p>
               </div>
@@ -808,6 +1004,28 @@ export default function Emulator() {
                 aria-label="LCD ghosting strength"
               />
             </label>
+          </section>
+
+          <section className="deck-section">
+            <div className="section-heading">
+              <span>05</span>
+              <div>
+                <h2>Audio</h2>
+                <p>Browser output · {audioState}</p>
+              </div>
+            </div>
+            <button
+              className={`sound-toggle ${muted ? "" : "active"}`}
+              onClick={() => {
+                startAudio();
+                setMuted((value) => !value);
+              }}
+              aria-pressed={!muted}
+              data-testid="mute-toggle"
+            >
+              <span>{muted ? "MUTED" : "SOUND ON"}</span>
+              <b>{muted ? "UNMUTE" : "MUTE"}</b>
+            </button>
             <label className="range-control">
               <span><b>Volume</b><output>{volume}%</output></span>
               <input
@@ -821,10 +1039,54 @@ export default function Emulator() {
             </label>
           </section>
 
+          <section className="deck-section">
+            <div className="section-heading">
+              <span>06</span>
+              <div>
+                <h2>Controls</h2>
+                <p>Click a key, then press its replacement</p>
+              </div>
+            </div>
+            <button
+              className={`preference-toggle ${keyboardMotion ? "active" : ""}`}
+              onClick={() => setKeyboardMotion((value) => !value)}
+              aria-pressed={keyboardMotion}
+            >
+              <span>Keyboard button motion</span>
+              <b>{keyboardMotion ? "ON" : "OFF"}</b>
+            </button>
+            <div className="keybind-grid" aria-label="Keyboard bindings">
+              {BINDING_ORDER.map((button) => (
+                <div key={button}>
+                  <span>{button.toUpperCase()}</span>
+                  <button
+                    className={bindingTarget === button ? "listening" : ""}
+                    onClick={() => setBindingTarget((current) => current === button ? null : button)}
+                    aria-label={`Bind ${button}`}
+                  >
+                    {bindingTarget === button ? "PRESS KEY…" : keyLabel(keyBindings[button])}
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              className="reset-bindings"
+              onClick={() => {
+                setKeyBindings(DEFAULT_BINDINGS);
+                setBindingTarget(null);
+              }}
+            >
+              RESET KEYBINDS
+            </button>
+          </section>
+
           <section
             className="diagnostic-strip"
             aria-label="Live emulator diagnostics"
             data-run-calls={diagnostics.runs}
+            data-audio-state={audioState}
+            data-audio-buffered={diagnostics.audioBuffered}
+            data-audio-peak={diagnostics.audioPeak.toFixed(4)}
           >
             <div><span>FPS</span><b>{diagnostics.fps}</b></div>
             <div><span>FRAME</span><b>{diagnostics.frame}</b></div>
@@ -835,7 +1097,12 @@ export default function Emulator() {
 
           <p className="key-hint">
             <span>KEYS</span>
-            <kbd>ARROWS</kbd> MOVE · <kbd>Z</kbd> B · <kbd>X</kbd> A · <kbd>SHIFT</kbd> SELECT · <kbd>ENTER</kbd> START
+            {BINDING_ORDER.map((button, index) => (
+              <span key={button}>
+                {index > 0 ? " · " : ""}
+                <kbd>{keyLabel(keyBindings[button])}</kbd> {button.toUpperCase()}
+              </span>
+            ))}
           </p>
         </aside>
         {drawerOpen && (
