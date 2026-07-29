@@ -3,11 +3,142 @@ const SCREEN_HEIGHT = 144;
 const FRAME_CYCLES = 70224;
 const CPU_CLOCK = 4194304;
 const AUDIO_RATE = 48000;
+const STATE_VERSION = 1;
+
+const DUTY_PATTERNS = [
+  new Uint8Array([0, 0, 0, 0, 0, 0, 0, 1]),
+  new Uint8Array([1, 0, 0, 0, 0, 0, 0, 1]),
+  new Uint8Array([1, 0, 0, 0, 0, 1, 1, 1]),
+  new Uint8Array([0, 1, 1, 1, 1, 1, 1, 0]),
+];
+const NOISE_DIVISORS = new Float64Array([0.5, 1, 2, 3, 4, 5, 6, 7]);
+const NOISE_STEP_8_LONG = new Uint16Array(0x8000);
+const NOISE_STEP_8_SHORT = new Uint16Array(0x8000);
+for (let state = 0; state < 0x8000; state += 1) {
+  let longState = state;
+  let shortState = state;
+  for (let step = 0; step < 8; step += 1) {
+    let bit = (longState & 1) ^ ((longState >> 1) & 1);
+    longState = (longState >> 1) | (bit << 14);
+    bit = (shortState & 1) ^ ((shortState >> 1) & 1);
+    shortState = (shortState >> 1) | (bit << 14);
+    shortState = (shortState & ~(1 << 6)) | (bit << 6);
+  }
+  NOISE_STEP_8_LONG[state] = longState;
+  NOISE_STEP_8_SHORT[state] = shortState;
+}
 
 const FLAG_Z = 0x80;
 const FLAG_N = 0x40;
 const FLAG_H = 0x20;
 const FLAG_C = 0x10;
+
+const DMG_GREEN_PALETTE = [
+  [202, 220, 159],
+  [139, 172, 88],
+  [52, 104, 86],
+  [20, 46, 42],
+];
+
+// Color conversion used to be recomputed with six Math.pow calls for almost
+// every CGB pixel. Hardware only exposes 32,768 RGB555 colors, so a compact
+// lookup table makes the exact same transform allocation-free in the hot PPU
+// path.
+const CGB_COLOR_LUT = new Uint8Array(0x8000 * 3);
+for (let value = 0; value < 0x8000; value += 1) {
+  const r = value & 31;
+  const g = (value >> 5) & 31;
+  const b = (value >> 10) & 31;
+  const rr = Math.pow(r / 31, 1.42);
+  const gg = Math.pow(g / 31, 1.42);
+  const bb = Math.pow(b / 31, 1.42);
+  const offset = value * 3;
+  CGB_COLOR_LUT[offset] = Math.min(255, Math.round(245 * (rr * 0.82 + gg * 0.12 + bb * 0.02)));
+  CGB_COLOR_LUT[offset + 1] = Math.min(255, Math.round(245 * (gg * 0.78 + rr * 0.10 + bb * 0.08)));
+  CGB_COLOR_LUT[offset + 2] = Math.min(255, Math.round(245 * (bb * 0.74 + gg * 0.18 + rr * 0.04)));
+}
+
+const STATE_SCALARS = [
+  "a", "f", "b", "c", "d", "e", "h", "l", "sp", "pc",
+  "ime", "imeDelay", "halted", "stopped", "haltBug", "ie", "iflag",
+  "joypad", "joypSelect", "divCounter", "tima", "tma", "tac",
+  "timerReload", "timerReloading", "serialData", "serialControl", "serialCycles",
+  "vramBank", "wramBank", "romBank", "ramBank", "ramEnabled", "mbc1Mode",
+  "mbc1High", "rtcSelect", "rtcLatchValue", "dmaCycles", "dmaSource",
+  "dmaIndex", "dmaSubcycle", "hdmaSource", "hdmaDestination", "hdmaBlocks",
+  "hdmaActive", "bgPaletteIndex", "objPaletteIndex", "opri", "ppuDot", "ly",
+  "ppuMode", "ppuMode3End", "statSignal", "windowLine", "frameReady",
+  "frameNumber", "cycles", "bootEnabled", "doubleSpeed", "speedSwitchArmed",
+  "speedSubcycle", "audioClock", "audioFrameStep", "cgbMode",
+];
+
+// Production CGB boot-ROM palette dictionary in RGB555 form. Compatibility
+// mode uses independent background, OBJ0, and OBJ1 palettes just like hardware.
+const CGB_COMPATIBILITY_COLORS = [
+  [0x7fff, 0x32bf, 0x00d0, 0x0000],
+  [0x639f, 0x4279, 0x15b0, 0x04cb],
+  [0x7fff, 0x6e31, 0x454a, 0x0000],
+  [0x7fff, 0x1bef, 0x0200, 0x0000],
+  [0x7fff, 0x421f, 0x1cf2, 0x0000],
+  [0x7fff, 0x5294, 0x294a, 0x0000],
+  [0x7fff, 0x03ff, 0x012f, 0x0000],
+  [0x7fff, 0x03ef, 0x01d6, 0x0000],
+  [0x7fff, 0x42b5, 0x3dc8, 0x0000],
+  [0x7e74, 0x03ff, 0x0180, 0x0000],
+  [0x67ff, 0x77ac, 0x1a13, 0x2d6b],
+  [0x7ed6, 0x4bff, 0x2175, 0x0000],
+  [0x53ff, 0x4a5f, 0x7e52, 0x0000],
+  [0x4fff, 0x7ed2, 0x3a4c, 0x1ce0],
+  [0x03ed, 0x7fff, 0x255f, 0x0000],
+  [0x036a, 0x021f, 0x03ff, 0x7fff],
+  [0x7fff, 0x01df, 0x0112, 0x0000],
+  [0x231f, 0x035f, 0x00f2, 0x0009],
+  [0x7fff, 0x03ea, 0x011f, 0x0000],
+  [0x299f, 0x001a, 0x000c, 0x0000],
+  [0x7fff, 0x027f, 0x001f, 0x0000],
+  [0x7fff, 0x03e0, 0x0206, 0x0120],
+  [0x7fff, 0x7eeb, 0x001f, 0x7c00],
+  [0x7fff, 0x3fff, 0x7e00, 0x001f],
+  [0x7fff, 0x03ff, 0x001f, 0x0000],
+  [0x03ff, 0x001f, 0x000c, 0x0000],
+  [0x7fff, 0x033f, 0x0193, 0x0000],
+  [0x0000, 0x4200, 0x037f, 0x7fff],
+  [0x7fff, 0x7e8c, 0x7c00, 0x0000],
+  [0x7fff, 0x1bef, 0x6180, 0x0000],
+];
+
+const CGB_MANUAL_PALETTES = [
+  { id: "blue", label: "Blue", buttons: "LEFT", combination: [4, 3, 28] },
+  { id: "dark-blue", label: "Dark Blue", buttons: "LEFT + A", combination: [4, 0, 2] },
+  { id: "gray", label: "Gray", buttons: "LEFT + B", combination: [5, 5, 5] },
+  { id: "green", label: "Green", buttons: "RIGHT", combination: [18, 18, 18] },
+  { id: "dark-green", label: "Dark Green", buttons: "RIGHT + A", combination: [4, 4, 29] },
+  { id: "reverse", label: "Reverse", buttons: "RIGHT + B", combination: [27, 27, 27] },
+  { id: "brown", label: "Brown", buttons: "UP", combination: [0, 0, 0] },
+  { id: "red", label: "Red", buttons: "UP + A", combination: [3, 28, 4] },
+  { id: "dark-brown", label: "Dark Brown", buttons: "UP + B", combination: [0, 0, 1] },
+  { id: "pastel", label: "Pastel Mix", buttons: "DOWN", combination: [12, 12, 12] },
+  { id: "orange", label: "Orange", buttons: "DOWN + A", combination: [24, 24, 24] },
+  { id: "yellow", label: "Yellow", buttons: "DOWN + B", combination: [28, 3, 6] },
+];
+
+function rgb555Preview(value) {
+  return [
+    Math.round((value & 31) * 255 / 31),
+    Math.round(((value >> 5) & 31) * 255 / 31),
+    Math.round(((value >> 10) & 31) * 255 / 31),
+  ];
+}
+
+export const CGB_COMPATIBILITY_PALETTES = Object.freeze([
+  Object.freeze({ id: "auto", label: "Auto (cartridge)", buttons: "BOOT ROM", colors: [] }),
+  ...CGB_MANUAL_PALETTES.map((palette) => Object.freeze({
+    id: palette.id,
+    label: palette.label,
+    buttons: palette.buttons,
+    colors: Object.freeze(CGB_COMPATIBILITY_COLORS[palette.combination[2]].map(rgb555Preview)),
+  })),
+]);
 
 const NINTENDO_LOGO = [
   0xce, 0xed, 0x66, 0x66, 0xcc, 0x0d, 0x00, 0x0b, 0x03, 0x73, 0x00, 0x83,
@@ -64,13 +195,20 @@ export class GameBoy {
     this.bgPalette = new Uint8Array(0x40);
     this.objPalette = new Uint8Array(0x40);
     this.framebuffer = new Uint8ClampedArray(SCREEN_WIDTH * SCREEN_HEIGHT * 4);
-    this.audioSamples = [];
-    this.dmgPalette = [
-      [202, 220, 159],
-      [139, 172, 88],
-      [52, 104, 86],
-      [20, 46, 42],
-    ];
+    this.lineBgColors = new Uint8Array(SCREEN_WIDTH);
+    this.lineBgPriority = new Uint8Array(SCREEN_WIDTH);
+    this.lineSprites = [];
+    this.colorScratch = new Uint8Array(3);
+    this.audioMix = new Float64Array(4);
+    this.audioSamples = new Float32Array(4096);
+    this.audioSampleCount = 0;
+    this.audioRate = AUDIO_RATE;
+    this.compatibilityPaletteId = "auto";
+    this.capturedCompatibilityPalette = null;
+    this.dmgBgPalette = DMG_GREEN_PALETTE.map((color) => [...color]);
+    this.dmgObj0Palette = DMG_GREEN_PALETTE.map((color) => [...color]);
+    this.dmgObj1Palette = DMG_GREEN_PALETTE.map((color) => [...color]);
+    this.dmgPalette = this.dmgBgPalette;
     this.onFrame = null;
     this.onBatterySave = null;
     this.hasROM = false;
@@ -94,6 +232,15 @@ export class GameBoy {
     }
     this.bootRom = bytes;
     return { model: this.model, size: bytes.length };
+  }
+
+  setAudioSampleRate(rate) {
+    if (!Number.isFinite(rate)) return false;
+    this.audioRate = Math.max(8000, Math.min(192000, Math.round(rate)));
+    this.audioClock = 0;
+    this.audioSampleCount = 0;
+    this.refreshAudioSteps();
+    return true;
   }
 
   readBootROM(address) {
@@ -132,7 +279,10 @@ export class GameBoy {
     const ramSizes = { 0: 0, 1: 0x800, 2: 0x2000, 3: 0x8000, 4: 0x20000, 5: 0x10000 };
     const ramSize = this.mapper === 2 ? 0x200 : (ramSizes[ramCode] || 0);
     this.eram = new Uint8Array(ramSize || 0x2000);
-    if (batteryData) this.eram.set(new Uint8Array(batteryData).subarray(0, this.eram.length));
+    const batteryRam = batteryData && !(batteryData instanceof ArrayBuffer) && !ArrayBuffer.isView(batteryData)
+      ? batteryData.ram
+      : batteryData;
+    if (batteryRam) this.eram.set(new Uint8Array(batteryRam).subarray(0, this.eram.length));
 
     const titleBytes = bytes.slice(0x134, (bytes[0x143] & 0x80) ? 0x13f : 0x144);
     this.title = Array.from(titleBytes)
@@ -149,11 +299,16 @@ export class GameBoy {
       mapper: cartridgeName(this.cartType),
       romSize: bytes.length,
       ramSize,
+      battery: this.hasBattery,
+      rtc: this.hasRTC,
       logoValid,
       checksumValid: headerChecksum === bytes[0x14d],
     };
     this.hasROM = true;
     this.reset();
+    if (batteryData?.rtc && this.hasRTC) {
+      this.rtc = { ...this.rtc, ...batteryData.rtc, last: Number(batteryData.rtc.last) || Date.now() };
+    }
     return this.header;
   }
 
@@ -163,20 +318,22 @@ export class GameBoy {
     if (this.hasROM) this.reset();
   }
 
+  cgbRegistersAvailable() {
+    return this.model === "cgb" && (this.cgbMode || this.bootEnabled);
+  }
+
   reset() {
     const useBootRom = !!this.bootRom;
     this.cgbMode = this.model === "cgb" && !!this.cgbCartridge;
     this.bootEnabled = useBootRom;
-    this.dmgPalette = this.model === "cgb" && !this.cgbCartridge
-      ? this.compatibilityPalette()
-      : [
-          [202, 220, 159],
-          [139, 172, 88],
-          [52, 104, 86],
-          [20, 46, 42],
-        ];
+    this.capturedCompatibilityPalette = null;
+    this.dmgBgPalette = DMG_GREEN_PALETTE.map((color) => [...color]);
+    this.dmgObj0Palette = DMG_GREEN_PALETTE.map((color) => [...color]);
+    this.dmgObj1Palette = DMG_GREEN_PALETTE.map((color) => [...color]);
+    this.dmgPalette = this.dmgBgPalette;
     this.doubleSpeed = false;
     this.speedSwitchArmed = false;
+    this.speedSubcycle = 0;
     this.a = this.cgbMode ? 0x11 : 0x01;
     this.f = 0xb0;
     this.b = 0x00;
@@ -230,12 +387,14 @@ export class GameBoy {
     this.ppuDot = 0;
     this.ly = 0;
     this.ppuMode = 2;
+    this.ppuMode3End = 252;
     this.statSignal = false;
     this.windowLine = 0;
     this.frameReady = false;
     this.frameNumber = 0;
     this.runFrameCalls = 0;
     this.cycles = 0;
+    this.batteryDirty = false;
     this.io.fill(0);
     this.vram.fill(0);
     this.wram.fill(0);
@@ -244,6 +403,7 @@ export class GameBoy {
     this.bgPalette.fill(0xff);
     this.objPalette.fill(0xff);
     this.framebuffer.fill(0xff);
+    if (this.model === "cgb" && !this.cgbCartridge) this.applyCompatibilityPalette();
     this.io[0x40] = 0x91;
     this.io[0x41] = 0x80;
     this.io[0x42] = 0;
@@ -283,23 +443,101 @@ export class GameBoy {
   }
 
   compatibilityPalette() {
-    // The CGB boot ROM assigns Tetris its well-known white/yellow/red/black set.
-    // Unlisted monochrome cartridges use the console's dark-green fallback.
-    if (this.title === "TETRIS") {
-      return [[250, 248, 242], [241, 211, 52], [216, 67, 52], [32, 30, 35]];
+    if (this.compatibilityPaletteId !== "auto") {
+      return CGB_MANUAL_PALETTES.find((palette) => palette.id === this.compatibilityPaletteId)?.combination
+        ?? [4, 4, 29];
     }
-    return [[248, 248, 236], [151, 211, 73], [47, 125, 66], [25, 45, 36]];
+    // The production CGB boot ROM maps Tetris to the orange combination.
+    if (this.title === "TETRIS") return [24, 24, 24];
+    return [4, 4, 29];
+  }
+
+  setCompatibilityPalette(id) {
+    if (id !== "auto" && !CGB_MANUAL_PALETTES.some((palette) => palette.id === id)) return false;
+    this.compatibilityPaletteId = id;
+    if (this.model === "cgb" && !this.cgbCartridge) this.applyCompatibilityPalette();
+    return true;
+  }
+
+  writeCompatibilityPalette(target, paletteIndex) {
+    const palette = CGB_COMPATIBILITY_COLORS[paletteIndex] ?? CGB_COMPATIBILITY_COLORS[0];
+    for (let color = 0; color < 4; color += 1) {
+      target[color * 2] = palette[color] & 0xff;
+      target[color * 2 + 1] = palette[color] >> 8;
+    }
+  }
+
+  captureCompatibilityPalettes() {
+    this.capturedCompatibilityPalette = {
+      bg: this.bgPalette.slice(0, 8),
+      obj0: this.objPalette.slice(0, 8),
+      obj1: this.objPalette.slice(8, 16),
+    };
+  }
+
+  updateCompatibilityPaletteAliases() {
+    const convert = (memory, palette) => [0, 1, 2, 3]
+      .map((color) => Array.from(this.cgbColor(memory, palette, color)));
+    this.dmgBgPalette = convert(this.bgPalette, 0);
+    this.dmgObj0Palette = convert(this.objPalette, 0);
+    this.dmgObj1Palette = convert(this.objPalette, 1);
+    this.dmgPalette = this.dmgBgPalette;
+  }
+
+  applyCompatibilityPalette() {
+    if (
+      this.compatibilityPaletteId === "auto" &&
+      this.capturedCompatibilityPalette
+    ) {
+      this.bgPalette.set(this.capturedCompatibilityPalette.bg, 0);
+      this.objPalette.set(this.capturedCompatibilityPalette.obj0, 0);
+      this.objPalette.set(this.capturedCompatibilityPalette.obj1, 8);
+    } else {
+      const [obj0, obj1, bg] = this.compatibilityPalette();
+      this.writeCompatibilityPalette(this.bgPalette.subarray(0, 8), bg);
+      this.writeCompatibilityPalette(this.objPalette.subarray(0, 8), obj0);
+      this.writeCompatibilityPalette(this.objPalette.subarray(8, 16), obj1);
+    }
+    this.updateCompatibilityPaletteAliases();
   }
 
   apuReset() {
-    this.audioSamples.length = 0;
+    this.audioSampleCount = 0;
     this.audioClock = 0;
     this.audioFrameStep = 0;
-    this.audioFrameCounter = 8192;
-    this.ch1 = { enabled: false, phase: 0, length: 0, volume: 0, envCounter: 0, sweepCounter: 0, shadow: 0 };
-    this.ch2 = { enabled: false, phase: 0, length: 0, volume: 0, envCounter: 0 };
-    this.ch3 = { enabled: false, phase: 0, length: 0 };
-    this.ch4 = { enabled: false, phase: 0, length: 0, volume: 0, envCounter: 0, lfsr: 0x7fff };
+    this.ch1 = {
+      enabled: false,
+      phase: 0,
+      length: 0,
+      volume: 0,
+      envCounter: 0,
+      envRunning: false,
+      sweepCounter: 0,
+      sweepEnabled: false,
+      sweepNegated: false,
+      shadow: 0,
+      phaseStep: 0,
+    };
+    this.ch2 = {
+      enabled: false,
+      phase: 0,
+      length: 0,
+      volume: 0,
+      envCounter: 0,
+      envRunning: false,
+      phaseStep: 0,
+    };
+    this.ch3 = { enabled: false, phase: 0, phaseStep: 0, length: 0 };
+    this.ch4 = {
+      enabled: false,
+      phase: 0,
+      length: 0,
+      volume: 0,
+      envCounter: 0,
+      envRunning: false,
+      lfsr: 0x7fff,
+      phaseStep: 0,
+    };
   }
 
   getAF() { return (this.a << 8) | this.f; }
@@ -424,7 +662,7 @@ export class GameBoy {
         return this.readRTC(this.rtcSelect);
       }
       const offset = (this.selectedRamBank() * 0x2000 + address - 0xa000) % this.eram.length;
-      return this.eram[offset];
+      return this.mapper === 2 ? 0xf0 | this.eram[offset] : this.eram[offset];
     }
     if (address < 0xd000) return this.wram[address - 0xc000];
     if (address < 0xe000) return this.wram[this.wramBank * 0x1000 + address - 0xd000];
@@ -474,6 +712,7 @@ export class GameBoy {
       } else {
         const offset = (this.selectedRamBank() * 0x2000 + address - 0xa000) % this.eram.length;
         this.eram[offset] = this.mapper === 2 ? value & 0x0f : value;
+        if (this.hasBattery) this.batteryDirty = true;
       }
       return;
     }
@@ -552,15 +791,21 @@ export class GameBoy {
     }
     if (register === 0x44) return this.displayLy();
     if (register === 0x4d) return (this.doubleSpeed ? 0x80 : 0) | (this.speedSwitchArmed ? 1 : 0) | 0x7e;
-    if (register === 0x4f) return 0xfe | this.vramBank;
+    if (register === 0x4f) return this.cgbRegistersAvailable() ? 0xfe | this.vramBank : 0xff;
     if (register === 0x50) return this.bootEnabled ? 0x00 : 0xff;
-    if (register === 0x55) return (this.hdmaActive ? 0 : 0x80) | Math.max(0, this.hdmaBlocks - 1);
-    if (register === 0x68) return this.bgPaletteIndex | 0x40;
-    if (register === 0x69) return this.ppuMode === 3 ? 0xff : this.bgPalette[this.bgPaletteIndex & 0x3f];
-    if (register === 0x6a) return this.objPaletteIndex | 0x40;
-    if (register === 0x6b) return this.ppuMode === 3 ? 0xff : this.objPalette[this.objPaletteIndex & 0x3f];
-    if (register === 0x6c) return 0xfe | this.opri;
-    if (register === 0x70) return 0xf8 | this.wramBank;
+    if (register === 0x55) return this.cgbRegistersAvailable()
+      ? (this.hdmaActive ? 0 : 0x80) | Math.max(0, this.hdmaBlocks - 1)
+      : 0xff;
+    if (register === 0x68) return this.cgbRegistersAvailable() ? this.bgPaletteIndex | 0x40 : 0xff;
+    if (register === 0x69) return !this.cgbRegistersAvailable() || this.ppuMode === 3
+      ? 0xff
+      : this.bgPalette[this.bgPaletteIndex & 0x3f];
+    if (register === 0x6a) return this.cgbRegistersAvailable() ? this.objPaletteIndex | 0x40 : 0xff;
+    if (register === 0x6b) return !this.cgbRegistersAvailable() || this.ppuMode === 3
+      ? 0xff
+      : this.objPalette[this.objPaletteIndex & 0x3f];
+    if (register === 0x6c) return this.cgbRegistersAvailable() ? 0xfe | this.opri : 0xff;
+    if (register === 0x70) return this.cgbRegistersAvailable() ? 0xf8 | this.wramBank : 0xff;
     if (register >= 0x10 && register <= 0x3f) return this.readAPU(register);
     return this.io[register] ?? 0xff;
   }
@@ -580,8 +825,10 @@ export class GameBoy {
     }
     if (register === 0x04) {
       const before = this.timerSignal();
+      const apuBefore = this.apuDividerSignal();
       this.divCounter = 0;
       if (before && !this.timerSignal()) this.incrementTima();
+      if (apuBefore && !this.apuDividerSignal()) this.clockAPUFrameSequencer();
       return;
     }
     if (register === 0x05) {
@@ -652,36 +899,43 @@ export class GameBoy {
       return;
     }
     if (register === 0x4f) {
-      if (this.cgbMode) this.vramBank = value & 1;
+      if (this.cgbRegistersAvailable()) this.vramBank = value & 1;
       return;
     }
     if (register === 0x50) {
-      if (value !== 0) this.bootEnabled = false;
+      if (value !== 0 && this.bootEnabled) {
+        if (this.model === "cgb" && !this.cgbCartridge) this.captureCompatibilityPalettes();
+        this.bootEnabled = false;
+        if (this.model === "cgb" && !this.cgbCartridge) {
+          if (this.compatibilityPaletteId !== "auto") this.applyCompatibilityPalette();
+          else this.updateCompatibilityPaletteAliases();
+        }
+      }
       this.io[0x50] = value;
       return;
     }
     if (register >= 0x51 && register <= 0x55) {
-      this.writeHDMA(register, value);
+      if (this.cgbRegistersAvailable()) this.writeHDMA(register, value);
       return;
     }
-    if (register === 0x68) { if (this.cgbMode) this.bgPaletteIndex = value & 0xbf; return; }
+    if (register === 0x68) { if (this.cgbRegistersAvailable()) this.bgPaletteIndex = value & 0xbf; return; }
     if (register === 0x69) {
-      if (this.cgbMode && this.ppuMode !== 3) {
+      if (this.cgbRegistersAvailable() && this.ppuMode !== 3) {
         this.bgPalette[this.bgPaletteIndex & 0x3f] = value;
         if (this.bgPaletteIndex & 0x80) this.bgPaletteIndex = 0x80 | ((this.bgPaletteIndex + 1) & 0x3f);
       }
       return;
     }
-    if (register === 0x6a) { if (this.cgbMode) this.objPaletteIndex = value & 0xbf; return; }
+    if (register === 0x6a) { if (this.cgbRegistersAvailable()) this.objPaletteIndex = value & 0xbf; return; }
     if (register === 0x6b) {
-      if (this.cgbMode && this.ppuMode !== 3) {
+      if (this.cgbRegistersAvailable() && this.ppuMode !== 3) {
         this.objPalette[this.objPaletteIndex & 0x3f] = value;
         if (this.objPaletteIndex & 0x80) this.objPaletteIndex = 0x80 | ((this.objPaletteIndex + 1) & 0x3f);
       }
       return;
     }
-    if (register === 0x6c) { if (this.cgbMode) this.opri = value & 1; return; }
-    if (register === 0x70) { if (this.cgbMode) this.wramBank = value & 7 || 1; return; }
+    if (register === 0x6c) { if (this.cgbRegistersAvailable()) this.opri = value & 1; return; }
+    if (register === 0x70) { if (this.cgbRegistersAvailable()) this.wramBank = value & 7 || 1; return; }
     this.io[register] = value;
   }
 
@@ -715,6 +969,10 @@ export class GameBoy {
     return !!(this.divCounter & (1 << bits[this.tac & 3]));
   }
 
+  apuDividerSignal() {
+    return !!(this.divCounter & (1 << (this.doubleSpeed ? 13 : 12)));
+  }
+
   incrementTima() {
     if (this.timerReload) return;
     if (this.tima === 0xff) {
@@ -727,8 +985,10 @@ export class GameBoy {
     for (let i = 0; i < cycles; i += 1) {
       if (!this.stopped) {
         const before = this.timerSignal();
+        const apuBefore = this.apuDividerSignal();
         this.divCounter = (this.divCounter + 1) & 0xffff;
         if (before && !this.timerSignal()) this.incrementTima();
+        if (apuBefore && !this.apuDividerSignal()) this.clockAPUFrameSequencer();
       }
       if (this.timerReload > 0) {
         this.timerReload -= 1;
@@ -759,8 +1019,14 @@ export class GameBoy {
           }
         }
       }
-      this.tickPPU();
-      this.tickAPU();
+      // In CGB double-speed mode the CPU, divider, serial unit, and OAM DMA
+      // receive two clocks per PPU/APU dot. Keeping the base-clock domains
+      // separate fixes half-speed video and pitched-up audio after KEY1/STOP.
+      this.speedSubcycle = (this.speedSubcycle + 1) & 1;
+      if (!this.doubleSpeed || this.speedSubcycle === 0) {
+        this.tickPPU();
+        this.tickAPU();
+      }
       this.cycles += 1;
     }
   }
@@ -772,11 +1038,12 @@ export class GameBoy {
   tickPPU() {
     if (!(this.io[0x40] & 0x80)) return;
     this.ppuDot += 1;
+    if (this.ly < 144 && this.ppuDot === 1) this.ppuMode3End = this.calculateMode3End(this.ly);
 
     let newMode = this.ppuMode;
     if (this.ly >= 144) newMode = 1;
     else if (this.ppuDot < 80) newMode = 2;
-    else if (this.ppuDot < 252) newMode = 3;
+    else if (this.ppuDot < this.ppuMode3End) newMode = 3;
     else newMode = 0;
 
     if (newMode !== this.ppuMode) {
@@ -826,16 +1093,43 @@ export class GameBoy {
     this.statSignal = signal;
   }
 
+  calculateMode3End(line) {
+    const lcdc = this.io[0x40];
+    let selected = 0;
+    let visibleSprites = 0;
+    if (lcdc & 0x02) {
+      const spriteHeight = lcdc & 0x04 ? 16 : 8;
+      for (let index = 0; index < 40 && selected < 10; index += 1) {
+        const y = this.oam[index * 4] - 16;
+        if (line < y || line >= y + spriteHeight) continue;
+        selected += 1;
+        const x = this.oam[index * 4 + 1];
+        if (x > 0 && x < 168) visibleSprites += 1;
+      }
+    }
+    const windowStarts = !!(lcdc & 0x20)
+      && line >= this.io[0x4a]
+      && this.io[0x4b] <= 166;
+    // The exact FIFO penalty depends on alignment and fetch collisions. This
+    // bounded model preserves the documented 172-dot baseline, SCX discard,
+    // window restart, and per-object stalls instead of the old fixed Mode 3.
+    return Math.min(369, 252 + (this.io[0x43] & 7) + visibleSprites * 6 + (windowStarts ? 6 : 0));
+  }
+
   renderLine(line) {
     const lcdc = this.io[0x40];
+    const cgbRendering = this.cgbMode || (this.model === "cgb" && this.bootEnabled);
+    const cgbCompatibility = this.model === "cgb" && !cgbRendering;
     const scrollY = this.io[0x42];
     const scrollX = this.io[0x43];
     const windowY = this.io[0x4a];
     const windowX = this.io[0x4b] - 7;
-    const bgEnabled = this.cgbMode || !!(lcdc & 1);
+    const bgEnabled = cgbRendering || !!(lcdc & 1);
     const windowEnabled = bgEnabled && !!(lcdc & 0x20) && line >= windowY && windowX < 160;
-    const bgColors = new Uint8Array(160);
-    const bgPriority = new Uint8Array(160);
+    const bgColors = this.lineBgColors;
+    const bgPriority = this.lineBgPriority;
+    bgColors.fill(0);
+    bgPriority.fill(0);
 
     for (let x = 0; x < 160; x += 1) {
       let colorIndex = 0;
@@ -849,7 +1143,7 @@ export class GameBoy {
         const mapBase = useWindow ? ((lcdc & 0x40) ? 0x1c00 : 0x1800) : ((lcdc & 0x08) ? 0x1c00 : 0x1800);
         const mapOffset = mapBase + ((pixelY >> 3) * 32) + (pixelX >> 3);
         const tileNumber = this.vram[mapOffset];
-        const attr = this.cgbMode ? this.vram[0x2000 + mapOffset] : 0;
+        const attr = cgbRendering ? this.vram[0x2000 + mapOffset] : 0;
         let tileX = pixelX & 7;
         let tileY = pixelY & 7;
         if (attr & 0x20) tileX = 7 - tileX;
@@ -857,7 +1151,7 @@ export class GameBoy {
         let tileAddress;
         if (lcdc & 0x10) tileAddress = tileNumber * 16;
         else tileAddress = 0x1000 + signed8(tileNumber) * 16;
-        const bank = this.cgbMode && (attr & 0x08) ? 0x2000 : 0;
+        const bank = cgbRendering && (attr & 0x08) ? 0x2000 : 0;
         const low = this.vram[bank + tileAddress + tileY * 2];
         const high = this.vram[bank + tileAddress + tileY * 2 + 1];
         const bit = 7 - tileX;
@@ -867,9 +1161,11 @@ export class GameBoy {
       }
       bgColors[x] = colorIndex;
       bgPriority[x] = priority;
-      const rgb = this.cgbMode
+      const rgb = cgbRendering
         ? this.cgbColor(this.bgPalette, palette, colorIndex)
-        : this.dmgColor(this.io[0x47], colorIndex);
+        : cgbCompatibility
+          ? this.cgbCompatibilityColor(this.bgPalette, 0, this.io[0x47], colorIndex)
+          : this.dmgColor(this.io[0x47], colorIndex, this.dmgBgPalette);
       this.setPixel(x, line, rgb);
     }
 
@@ -877,14 +1173,15 @@ export class GameBoy {
     if (!(lcdc & 0x02)) return;
 
     const spriteHeight = lcdc & 0x04 ? 16 : 8;
-    const sprites = [];
+    const sprites = this.lineSprites;
+    sprites.length = 0;
     for (let i = 0; i < 40 && sprites.length < 10; i += 1) {
       const y = this.oam[i * 4] - 16;
       if (line >= y && line < y + spriteHeight) {
         sprites.push({ index: i, y, x: this.oam[i * 4 + 1] - 8, tile: this.oam[i * 4 + 2], attr: this.oam[i * 4 + 3] });
       }
     }
-    if (!this.cgbMode || this.opri) sprites.sort((left, right) => left.x - right.x || left.index - right.index);
+    if (!cgbRendering || this.opri) sprites.sort((left, right) => left.x - right.x || left.index - right.index);
 
     for (let x = 0; x < 160; x += 1) {
       for (const sprite of sprites) {
@@ -896,7 +1193,7 @@ export class GameBoy {
         let tile = sprite.tile;
         if (spriteHeight === 16) tile = (tile & 0xfe) + (tileY >= 8 ? 1 : 0);
         tileY &= 7;
-        const bank = this.cgbMode && (sprite.attr & 0x08) ? 0x2000 : 0;
+        const bank = cgbRendering && (sprite.attr & 0x08) ? 0x2000 : 0;
         const low = this.vram[bank + tile * 16 + tileY * 2];
         const high = this.vram[bank + tile * 16 + tileY * 2 + 1];
         const bit = 7 - tileX;
@@ -905,13 +1202,21 @@ export class GameBoy {
 
         const bgOpaque = bgColors[x] !== 0;
         const bgMasterPriority = !!(lcdc & 1);
-        const hiddenByBg = this.cgbMode
+        const hiddenByBg = cgbRendering
           ? bgMasterPriority && bgOpaque && (bgPriority[x] || (sprite.attr & 0x80))
           : bgOpaque && !!(sprite.attr & 0x80);
         if (!hiddenByBg) {
-          const rgb = this.cgbMode
+          const objectPalette = (sprite.attr & 0x10) ? 1 : 0;
+          const objectRegister = this.io[objectPalette ? 0x49 : 0x48];
+          const rgb = cgbRendering
             ? this.cgbColor(this.objPalette, sprite.attr & 7, colorIndex)
-            : this.dmgColor(this.io[(sprite.attr & 0x10) ? 0x49 : 0x48], colorIndex);
+            : cgbCompatibility
+              ? this.cgbCompatibilityColor(this.objPalette, objectPalette, objectRegister, colorIndex)
+              : this.dmgColor(
+                  objectRegister,
+                  colorIndex,
+                  objectPalette ? this.dmgObj1Palette : this.dmgObj0Palette,
+                );
           this.setPixel(x, line, rgb);
         }
         break;
@@ -919,25 +1224,23 @@ export class GameBoy {
     }
   }
 
-  dmgColor(register, colorIndex) {
-    return this.dmgPalette[(register >> (colorIndex * 2)) & 3];
+  dmgColor(register, colorIndex, palette = this.dmgPalette) {
+    return palette[(register >> (colorIndex * 2)) & 3];
+  }
+
+  cgbCompatibilityColor(memory, palette, register, colorIndex) {
+    const mappedColor = (register >> (colorIndex * 2)) & 3;
+    return this.cgbColor(memory, palette, mappedColor);
   }
 
   cgbColor(memory, palette, colorIndex) {
     const offset = palette * 8 + colorIndex * 2;
     const value = memory[offset] | (memory[offset + 1] << 8);
-    const r = value & 31;
-    const g = (value >> 5) & 31;
-    const b = (value >> 10) & 31;
-    // Measured-looking LCD transform: gamma expansion, channel mixing and muted peaks.
-    const rr = Math.pow(r / 31, 1.42);
-    const gg = Math.pow(g / 31, 1.42);
-    const bb = Math.pow(b / 31, 1.42);
-    return [
-      Math.min(255, Math.round(245 * (rr * 0.82 + gg * 0.12 + bb * 0.02))),
-      Math.min(255, Math.round(245 * (gg * 0.78 + rr * 0.10 + bb * 0.08))),
-      Math.min(255, Math.round(245 * (bb * 0.74 + gg * 0.18 + rr * 0.04))),
-    ];
+    const lutOffset = (value & 0x7fff) * 3;
+    this.colorScratch[0] = CGB_COLOR_LUT[lutOffset];
+    this.colorScratch[1] = CGB_COLOR_LUT[lutOffset + 1];
+    this.colorScratch[2] = CGB_COLOR_LUT[lutOffset + 2];
+    return this.colorScratch;
   }
 
   setPixel(x, y, rgb) {
@@ -949,7 +1252,7 @@ export class GameBoy {
   }
 
   writeHDMA(register, value) {
-    if (!this.cgbMode) return;
+    if (!this.cgbRegistersAvailable()) return;
     this.io[register] = value;
     if (register < 0x55) return;
     if (this.hdmaActive && !(value & 0x80)) {
@@ -1027,6 +1330,7 @@ export class GameBoy {
       this.rtc.carry = !!(value & 0x80);
     }
     this.rtc.last = Date.now();
+    this.batteryDirty = true;
   }
 
   readAPU(register) {
@@ -1050,37 +1354,104 @@ export class GameBoy {
         for (let i = 0x10; i <= 0x25; i += 1) this.io[i] = 0;
         this.apuReset();
         this.io[0x26] = 0;
-      } else this.io[0x26] = 0x80;
+      } else {
+        this.io[0x26] = 0x80;
+        this.refreshAudioSteps();
+      }
       return;
     }
     if (!(this.io[0x26] & 0x80) && register < 0x30) return;
+    const previous = this.io[register];
+    if (
+      register === 0x10
+      && this.ch1.sweepNegated
+      && (previous & 0x08)
+      && !(value & 0x08)
+    ) {
+      this.ch1.enabled = false;
+    }
     this.io[register] = value;
-    if (register === 0x14 && (value & 0x80)) this.triggerSquare(this.ch1, 0x11, 0x12);
-    if (register === 0x19 && (value & 0x80)) this.triggerSquare(this.ch2, 0x16, 0x17);
+    if (register === 0x13 || register === 0x14) {
+      this.updateSquareStep(this.ch1, 0x13, 0x14);
+    }
+    if (register === 0x18 || register === 0x19) {
+      this.updateSquareStep(this.ch2, 0x18, 0x19);
+    }
+    if (register === 0x1d || register === 0x1e) this.updateWaveStep();
+    if (register === 0x22) this.updateNoiseStep();
+    if (register === 0x11) this.ch1.length = 64 - (value & 0x3f);
+    if (register === 0x16) this.ch2.length = 64 - (value & 0x3f);
+    if (register === 0x1b) this.ch3.length = 256 - value;
+    if (register === 0x20) this.ch4.length = 64 - (value & 0x3f);
+    if (register === 0x12 && (value & 0xf8) === 0) this.ch1.enabled = false;
+    if (register === 0x17 && (value & 0xf8) === 0) this.ch2.enabled = false;
+    if (register === 0x1a && !(value & 0x80)) this.ch3.enabled = false;
+    if (register === 0x21 && (value & 0xf8) === 0) this.ch4.enabled = false;
+    if (register === 0x14) {
+      if (value & 0x80) this.triggerSquare(this.ch1, 0x12);
+      this.applyLengthControl(this.ch1, previous, value, 64, !!(value & 0x80));
+    }
+    if (register === 0x19) {
+      if (value & 0x80) this.triggerSquare(this.ch2, 0x17);
+      this.applyLengthControl(this.ch2, previous, value, 64, !!(value & 0x80));
+    }
     if (register === 0x1e && (value & 0x80)) {
       this.ch3.enabled = !!(this.io[0x1a] & 0x80);
-      this.ch3.length = 256 - this.io[0x1b] || 256;
+      if (this.ch3.length === 0) this.ch3.length = 256;
       this.ch3.phase = 0;
     }
+    if (register === 0x1e) {
+      this.applyLengthControl(this.ch3, previous, value, 256, !!(value & 0x80));
+    }
     if (register === 0x23 && (value & 0x80)) {
+      this.updateNoiseStep();
       this.ch4.enabled = (this.io[0x21] & 0xf8) !== 0;
-      this.ch4.length = 64 - (this.io[0x20] & 0x3f) || 64;
+      if (this.ch4.length === 0) this.ch4.length = 64;
       this.ch4.volume = this.io[0x21] >> 4;
-      this.ch4.envCounter = this.io[0x21] & 7;
+      this.ch4.envCounter = (this.io[0x21] & 7) || 8;
+      this.ch4.envRunning = (this.io[0x21] & 7) !== 0;
       this.ch4.lfsr = 0x7fff;
       this.ch4.phase = 0;
     }
+    if (register === 0x23) {
+      this.applyLengthControl(this.ch4, previous, value, 64, !!(value & 0x80));
+    }
   }
 
-  triggerSquare(channel, dutyRegister, envelopeRegister) {
+  applyLengthControl(channel, previous, value, maximum, triggered) {
+    const wasEnabled = !!(previous & 0x40);
+    const enabled = !!(value & 0x40);
+    // The frame-sequencer step stored here is the next step to run. Odd steps
+    // do not clock length, so enabling length on one performs the hardware's
+    // immediate extra clock.
+    const nextStepDoesNotClockLength = (this.audioFrameStep & 1) === 1;
+    if (!wasEnabled && enabled && nextStepDoesNotClockLength && channel.length > 0) {
+      channel.length -= 1;
+      if (channel.length === 0 && !triggered) channel.enabled = false;
+    }
+    // A trigger that reloads an expired length on the same odd sequencer phase
+    // starts at max - 1 rather than max.
+    if (triggered && enabled && nextStepDoesNotClockLength && channel.length === maximum) {
+      channel.length = maximum - 1;
+    }
+  }
+
+  triggerSquare(channel, envelopeRegister) {
     channel.enabled = (this.io[envelopeRegister] & 0xf8) !== 0;
-    channel.length = 64 - (this.io[dutyRegister] & 0x3f) || 64;
+    if (channel.length === 0) channel.length = 64;
     channel.volume = this.io[envelopeRegister] >> 4;
-    channel.envCounter = this.io[envelopeRegister] & 7;
-    channel.phase = 0;
+    channel.envCounter = (this.io[envelopeRegister] & 7) || 8;
+    channel.envRunning = (this.io[envelopeRegister] & 7) !== 0;
+    // Trigger resets the period timer but not the duty step counter.
+    channel.phase = Math.floor(channel.phase * 8) / 8;
     if (channel === this.ch1) {
       channel.shadow = this.squareFrequency(0x13, 0x14);
-      channel.sweepCounter = (this.io[0x10] >> 4) & 7;
+      const pace = (this.io[0x10] >> 4) & 7;
+      const shift = this.io[0x10] & 7;
+      channel.sweepCounter = pace || 8;
+      channel.sweepEnabled = pace !== 0 || shift !== 0;
+      channel.sweepNegated = false;
+      if (shift && this.calculateSweep() > 0x7ff) channel.enabled = false;
     }
   }
 
@@ -1088,20 +1459,81 @@ export class GameBoy {
     return this.io[lowRegister] | ((this.io[highRegister] & 7) << 8);
   }
 
+  updateSquareStep(channel, lowRegister, highRegister) {
+    if (!channel) return;
+    const frequency = this.squareFrequency(lowRegister, highRegister);
+    channel.phaseStep = 131072 / Math.max(1, 2048 - frequency) / this.audioRate;
+  }
+
+  updateWaveStep() {
+    if (!this.ch3) return;
+    const frequency = this.squareFrequency(0x1d, 0x1e);
+    this.ch3.phaseStep = 65536 / Math.max(1, 2048 - frequency) / this.audioRate;
+  }
+
+  updateNoiseStep() {
+    if (!this.ch4) return;
+    const nr43 = this.io[0x22];
+    const shift = nr43 >> 4;
+    this.ch4.phaseStep = shift >= 14
+      ? 0
+      : 262144 / NOISE_DIVISORS[nr43 & 7] / (1 << shift) / this.audioRate;
+  }
+
+  refreshAudioSteps() {
+    this.updateSquareStep(this.ch1, 0x13, 0x14);
+    this.updateSquareStep(this.ch2, 0x18, 0x19);
+    this.updateWaveStep();
+    this.updateNoiseStep();
+  }
+
   tickAPU() {
     if (!(this.io[0x26] & 0x80)) return;
-    this.audioFrameCounter -= 1;
-    if (this.audioFrameCounter <= 0) {
-      this.audioFrameCounter += 8192;
-      this.audioFrameStep = (this.audioFrameStep + 1) & 7;
-      if ((this.audioFrameStep & 1) === 0) this.clockLengths();
-      if (this.audioFrameStep === 7) this.clockEnvelopes();
-    }
-    this.audioClock += AUDIO_RATE;
+    this.audioClock += this.audioRate;
     if (this.audioClock >= CPU_CLOCK) {
       this.audioClock -= CPU_CLOCK;
       this.mixAudioSample();
     }
+  }
+
+  clockAPUFrameSequencer() {
+    if (!(this.io[0x26] & 0x80)) return;
+    const step = this.audioFrameStep;
+    if ((step & 1) === 0) this.clockLengths();
+    if (step === 2 || step === 6) this.clockSweeps();
+    if (step === 7) this.clockEnvelopes();
+    this.audioFrameStep = (step + 1) & 7;
+  }
+
+  calculateSweep() {
+    const shift = this.io[0x10] & 7;
+    const delta = this.ch1.shadow >> shift;
+    if (this.io[0x10] & 0x08) {
+      this.ch1.sweepNegated = true;
+      return this.ch1.shadow - delta;
+    }
+    return this.ch1.shadow + delta;
+  }
+
+  clockSweeps() {
+    const channel = this.ch1;
+    channel.sweepCounter -= 1;
+    if (channel.sweepCounter > 0) return;
+    const pace = (this.io[0x10] >> 4) & 7;
+    channel.sweepCounter = pace || 8;
+    if (!channel.sweepEnabled || pace === 0) return;
+    const shift = this.io[0x10] & 7;
+    const frequency = this.calculateSweep();
+    if (frequency > 0x7ff) {
+      channel.enabled = false;
+      return;
+    }
+    if (shift === 0) return;
+    channel.shadow = frequency;
+    this.io[0x13] = frequency & 0xff;
+    this.io[0x14] = (this.io[0x14] & 0xf8) | (frequency >> 8);
+    this.updateSquareStep(this.ch1, 0x13, 0x14);
+    if (this.calculateSweep() > 0x7ff) channel.enabled = false;
   }
 
   clockLengths() {
@@ -1123,41 +1555,37 @@ export class GameBoy {
     const channels = [[this.ch1, 0x12], [this.ch2, 0x17], [this.ch4, 0x21]];
     for (const [channel, register] of channels) {
       const period = this.io[register] & 7;
-      if (!channel.enabled || period === 0) continue;
+      if (!channel.enabled || !channel.envRunning || period === 0) continue;
       channel.envCounter -= 1;
       if (channel.envCounter <= 0) {
         channel.envCounter = period;
         const delta = (this.io[register] & 8) ? 1 : -1;
         const volume = channel.volume + delta;
         if (volume >= 0 && volume <= 15) channel.volume = volume;
+        else channel.envRunning = false;
       }
     }
   }
 
   mixAudioSample() {
-    const dutyPatterns = [
-      [0, 0, 0, 0, 0, 0, 0, 1],
-      [1, 0, 0, 0, 0, 0, 0, 1],
-      [1, 0, 0, 0, 0, 1, 1, 1],
-      [0, 1, 1, 1, 1, 1, 1, 0],
-    ];
-    const outputs = [0, 0, 0, 0];
-    const squareChannels = [
-      [this.ch1, 0x11, 0x13, 0x14],
-      [this.ch2, 0x16, 0x18, 0x19],
-    ];
+    const outputs = this.audioMix;
+    outputs[0] = 0;
+    outputs[1] = 0;
+    outputs[2] = 0;
+    outputs[3] = 0;
     for (let index = 0; index < 2; index += 1) {
-      const [channel, dutyRegister, lowRegister, highRegister] = squareChannels[index];
+      const channel = index === 0 ? this.ch1 : this.ch2;
+      const dutyRegister = index === 0 ? 0x11 : 0x16;
       if (!channel.enabled) continue;
-      const frequency = this.squareFrequency(lowRegister, highRegister);
-      channel.phase = (channel.phase + (131072 / Math.max(1, 2048 - frequency)) / AUDIO_RATE) % 1;
+      channel.phase = (channel.phase + channel.phaseStep) % 1;
       const duty = this.io[dutyRegister] >> 6;
-      outputs[index] = (dutyPatterns[duty][Math.floor(channel.phase * 8)] ? 1 : -1) * (channel.volume / 15);
+      outputs[index] = (
+        DUTY_PATTERNS[duty][Math.floor(channel.phase * 8)] ? 1 : -1
+      ) * (channel.volume / 15);
     }
 
     if (this.ch3.enabled && (this.io[0x1a] & 0x80)) {
-      const frequency = this.squareFrequency(0x1d, 0x1e);
-      this.ch3.phase = (this.ch3.phase + (65536 / Math.max(1, 2048 - frequency)) / AUDIO_RATE) % 1;
+      this.ch3.phase = (this.ch3.phase + this.ch3.phaseStep) % 1;
       const wavePosition = Math.floor(this.ch3.phase * 32);
       const byte = this.io[0x30 + (wavePosition >> 1)];
       let sample = (wavePosition & 1) ? (byte & 0x0f) : (byte >> 4);
@@ -1167,15 +1595,21 @@ export class GameBoy {
     }
 
     if (this.ch4.enabled) {
-      const divisorCodes = [8, 16, 32, 48, 64, 80, 96, 112];
       const nr43 = this.io[0x22];
-      const noiseHz = 524288 / divisorCodes[nr43 & 7] / (1 << ((nr43 >> 4) + 1));
-      this.ch4.phase += noiseHz / AUDIO_RATE;
-      while (this.ch4.phase >= 1) {
-        this.ch4.phase -= 1;
+      this.ch4.phase += this.ch4.phaseStep;
+      let clocks = Math.floor(this.ch4.phase);
+      this.ch4.phase -= clocks;
+      const shortMode = !!(nr43 & 8);
+      const step8 = shortMode ? NOISE_STEP_8_SHORT : NOISE_STEP_8_LONG;
+      while (clocks >= 8) {
+        this.ch4.lfsr = step8[this.ch4.lfsr];
+        clocks -= 8;
+      }
+      while (clocks > 0) {
         const bit = (this.ch4.lfsr & 1) ^ ((this.ch4.lfsr >> 1) & 1);
         this.ch4.lfsr = (this.ch4.lfsr >> 1) | (bit << 14);
-        if (nr43 & 8) this.ch4.lfsr = (this.ch4.lfsr & ~(1 << 6)) | (bit << 6);
+        if (shortMode) this.ch4.lfsr = (this.ch4.lfsr & ~(1 << 6)) | (bit << 6);
+        clocks -= 1;
       }
       outputs[3] = ((~this.ch4.lfsr & 1) ? 1 : -1) * (this.ch4.volume / 15);
     }
@@ -1190,13 +1624,31 @@ export class GameBoy {
     }
     left *= (((volume >> 4) & 7) + 1) / 32;
     right *= ((volume & 7) + 1) / 32;
-    this.audioSamples.push(Math.max(-1, Math.min(1, left)), Math.max(-1, Math.min(1, right)));
-    if (this.audioSamples.length > AUDIO_RATE * 4) this.audioSamples.splice(0, this.audioSamples.length - AUDIO_RATE * 2);
+    if (this.audioSampleCount + 2 > this.audioSamples.length) {
+      const maximum = this.audioRate * 4;
+      if (this.audioSamples.length >= maximum) {
+        const keep = Math.min(this.audioRate * 2, this.audioSampleCount) & ~1;
+        this.audioSamples.copyWithin(0, this.audioSampleCount - keep, this.audioSampleCount);
+        this.audioSampleCount = keep;
+      } else {
+        const capacity = Math.min(
+          maximum,
+          Math.max(this.audioSamples.length * 2, this.audioSampleCount + 2),
+        );
+        const expanded = new Float32Array(capacity);
+        expanded.set(this.audioSamples.subarray(0, this.audioSampleCount));
+        this.audioSamples = expanded;
+      }
+    }
+    this.audioSamples[this.audioSampleCount] = Math.max(-1, Math.min(1, left));
+    this.audioSamples[this.audioSampleCount + 1] = Math.max(-1, Math.min(1, right));
+    this.audioSampleCount += 2;
   }
 
   drainAudio() {
-    const samples = new Float32Array(this.audioSamples);
-    this.audioSamples.length = 0;
+    if (this.audioSampleCount === 0) return new Float32Array(0);
+    const samples = this.audioSamples.slice(0, this.audioSampleCount);
+    this.audioSampleCount = 0;
     return samples;
   }
 
@@ -1309,6 +1761,7 @@ export class GameBoy {
             this.doubleSpeed = !this.doubleSpeed;
             this.speedSwitchArmed = false;
             this.divCounter = 0;
+            this.speedSubcycle = 0;
           } else this.stopped = true;
           return 4;
         }
@@ -1545,11 +1998,12 @@ export class GameBoy {
     return z === 6 ? 16 : 8;
   }
 
-  runFrame(maxCycles = FRAME_CYCLES) {
+  runFrame(maxCycles = null) {
     this.runFrameCalls += 1;
     this.frameReady = false;
     const start = this.cycles;
-    while (!this.frameReady && this.cycles - start < maxCycles) this.step();
+    const budget = maxCycles ?? FRAME_CYCLES * 2 + 32;
+    while (!this.frameReady && this.cycles - start < budget) this.step();
     return this.frameReady;
   }
 
@@ -1571,6 +2025,122 @@ export class GameBoy {
 
   exportBattery() {
     return this.hasBattery ? this.eram.slice() : null;
+  }
+
+  exportBatteryState() {
+    if (!this.hasBattery) return null;
+    if (this.hasRTC) this.updateRTC();
+    return {
+      version: 2,
+      ram: this.eram.slice(),
+      rtc: this.hasRTC ? { ...this.rtc } : null,
+    };
+  }
+
+  importBattery(input) {
+    if (!this.hasBattery || !input) return false;
+    const ram = input.ram ?? input;
+    this.eram.fill(0);
+    this.eram.set(new Uint8Array(ram).subarray(0, this.eram.length));
+    if (this.hasRTC && input.rtc) {
+      this.rtc = { ...this.rtc, ...input.rtc, last: Number(input.rtc.last) || Date.now() };
+    }
+    this.batteryDirty = true;
+    return true;
+  }
+
+  markBatterySaved() {
+    this.batteryDirty = false;
+  }
+
+  exportState() {
+    if (!this.hasROM) return null;
+    const scalars = {};
+    for (const key of STATE_SCALARS) scalars[key] = this[key];
+    return {
+      version: STATE_VERSION,
+      model: this.model,
+      title: this.title,
+      scalars,
+      memory: {
+        vram: this.vram.slice(),
+        wram: this.wram.slice(),
+        eram: this.eram.slice(),
+        oam: this.oam.slice(),
+        hram: this.hram.slice(),
+        io: this.io.slice(),
+        bgPalette: this.bgPalette.slice(),
+        objPalette: this.objPalette.slice(),
+        framebuffer: this.framebuffer.slice(),
+      },
+      rtc: { ...this.rtc },
+      latchedRTC: this.latchedRTC ? { ...this.latchedRTC } : null,
+      channels: {
+        ch1: { ...this.ch1 },
+        ch2: { ...this.ch2 },
+        ch3: { ...this.ch3 },
+        ch4: { ...this.ch4 },
+      },
+      serialOutput: this.serialOutput,
+      compatibilityPaletteId: this.compatibilityPaletteId,
+      capturedCompatibilityPalette: this.capturedCompatibilityPalette
+        ? {
+            bg: this.capturedCompatibilityPalette.bg.slice(),
+            obj0: this.capturedCompatibilityPalette.obj0.slice(),
+            obj1: this.capturedCompatibilityPalette.obj1.slice(),
+          }
+        : null,
+    };
+  }
+
+  importState(snapshot) {
+    if (
+      !snapshot
+      || snapshot.version !== STATE_VERSION
+      || snapshot.model !== this.model
+      || snapshot.title !== this.title
+    ) return false;
+    for (const key of STATE_SCALARS) {
+      if (Object.hasOwn(snapshot.scalars ?? {}, key)) this[key] = snapshot.scalars[key];
+    }
+    const memory = snapshot.memory ?? {};
+    const restore = (target, source) => {
+      if (!source || source.length !== target.length) return false;
+      target.set(source);
+      return true;
+    };
+    if (
+      !restore(this.vram, memory.vram)
+      || !restore(this.wram, memory.wram)
+      || !restore(this.eram, memory.eram)
+      || !restore(this.oam, memory.oam)
+      || !restore(this.hram, memory.hram)
+      || !restore(this.io, memory.io)
+      || !restore(this.bgPalette, memory.bgPalette)
+      || !restore(this.objPalette, memory.objPalette)
+      || !restore(this.framebuffer, memory.framebuffer)
+    ) return false;
+    this.rtc = { ...this.rtc, ...(snapshot.rtc ?? {}) };
+    this.latchedRTC = snapshot.latchedRTC ? { ...snapshot.latchedRTC } : null;
+    this.ch1 = { ...this.ch1, ...(snapshot.channels?.ch1 ?? {}) };
+    this.ch2 = { ...this.ch2, ...(snapshot.channels?.ch2 ?? {}) };
+    this.ch3 = { ...this.ch3, ...(snapshot.channels?.ch3 ?? {}) };
+    this.ch4 = { ...this.ch4, ...(snapshot.channels?.ch4 ?? {}) };
+    this.refreshAudioSteps();
+    this.serialOutput = snapshot.serialOutput ?? "";
+    this.compatibilityPaletteId = snapshot.compatibilityPaletteId ?? "auto";
+    this.capturedCompatibilityPalette = snapshot.capturedCompatibilityPalette
+      ? {
+          bg: new Uint8Array(snapshot.capturedCompatibilityPalette.bg),
+          obj0: new Uint8Array(snapshot.capturedCompatibilityPalette.obj0),
+          obj1: new Uint8Array(snapshot.capturedCompatibilityPalette.obj1),
+        }
+      : null;
+    if (this.model === "cgb" && !this.cgbMode) this.updateCompatibilityPaletteAliases();
+    this.audioSampleCount = 0;
+    this.batteryDirty = this.hasBattery;
+    this.updateStat();
+    return true;
   }
 }
 

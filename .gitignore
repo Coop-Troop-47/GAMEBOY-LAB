@@ -1,47 +1,12 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+/node_modules/
+/coverage/
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/.vinext/
-/out/
-
-# misc
 .DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
+*.log
 .env*
 
-# vercel
-.vercel
-
-# typescript
-next-env.d.ts
-/dist/
-/.wrangler/
-/outputs/
-/work/
-
-# User-supplied cartridges and boot ROMs must never be committed or deployed.
+# Keep raw cartridge and firmware dumps out of source control. Approved
+# production firmware for the local one-file build is encoded in source.
 *.gb
 *.gbc
 *.rom

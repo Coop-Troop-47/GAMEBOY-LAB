@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { GameBoy } from "../app/lib/gameboy.js";
+import { CGB_COMPATIBILITY_PALETTES, GameBoy } from "../app/lib/gameboy.js";
+import { EMBEDDED_BIOS_INFO, getEmbeddedBootROM } from "../app/lib/embeddedBios.js";
 
 const logo = [
   0xce, 0xed, 0x66, 0x66, 0xcc, 0x0d, 0x00, 0x0b, 0x03, 0x73, 0x00, 0x83,
@@ -11,7 +13,7 @@ const logo = [
   0x6e, 0x0e, 0xec, 0xcc, 0xdd, 0xdc, 0x99, 0x9f, 0xbb, 0xb9, 0x33, 0x3e,
 ];
 
-function makeRom(program = [], { banks = 2, type = 0, cgb = 0 } = {}) {
+function makeRom(program = [], { banks = 2, type = 0, cgb = 0, ram = 0 } = {}) {
   const rom = new Uint8Array(banks * 0x4000);
   rom.fill(0);
   rom.set([0xc3, 0x50, 0x01], 0x100);
@@ -20,6 +22,7 @@ function makeRom(program = [], { banks = 2, type = 0, cgb = 0 } = {}) {
   rom[0x143] = cgb;
   rom[0x147] = type;
   rom[0x148] = banks <= 2 ? 0 : Math.log2(banks) - 1;
+  rom[0x149] = ram;
   rom.set(program, 0x150);
   let checksum = 0;
   for (let i = 0x134; i <= 0x14c; i += 1) checksum = (checksum - rom[i] - 1) & 0xff;
@@ -122,6 +125,171 @@ test("handles MBC1 ROM-bank selection without exposing bank zero in the switch w
   assert.equal(gb.read8(0x4000), 0x11);
 });
 
+test("round-trips complete save states without confusing them with cartridge saves", () => {
+  const gb = new GameBoy("dmg");
+  gb.loadROM(makeRom([0x18, 0xfe], { type: 3, ram: 2 }));
+  gb.ramEnabled = true;
+  gb.write8(0xa123, 0x5a);
+  gb.a = 0x42;
+  gb.pc = 0x2345;
+  gb.ppuDot = 191;
+  gb.ly = 77;
+  gb.framebuffer[1234] = 91;
+  const cartridgeSave = gb.exportBattery();
+  const state = gb.exportState();
+
+  gb.write8(0xa123, 0x11);
+  gb.a = 0;
+  gb.pc = 0x100;
+  gb.ppuDot = 0;
+  gb.ly = 0;
+  gb.framebuffer[1234] = 0;
+  assert.equal(gb.importState(state), true);
+  assert.equal(gb.read8(0xa123), 0x5a);
+  assert.equal(gb.a, 0x42);
+  assert.equal(gb.pc, 0x2345);
+  assert.equal(gb.ppuDot, 191);
+  assert.equal(gb.ly, 77);
+  assert.equal(gb.framebuffer[1234], 91);
+  assert.equal(cartridgeSave.length, 0x2000);
+  assert.equal(state.memory.framebuffer.length, 160 * 144 * 4);
+
+  const other = new GameBoy("cgb");
+  other.loadROM(makeRom([], { type: 3, ram: 2 }));
+  assert.equal(other.importState(state), false);
+});
+
+test("persists battery RAM and RTC metadata while preserving standard .sav bytes", () => {
+  const mbc3 = new GameBoy("dmg");
+  mbc3.loadROM(makeRom([], { type: 0x10, ram: 2 }));
+  mbc3.ramEnabled = true;
+  mbc3.write8(0xa000, 0x7c);
+  mbc3.writeRTC(0x08, 37);
+  const stored = mbc3.exportBatteryState();
+  assert.equal(stored.ram[0], 0x7c);
+  assert.equal(stored.rtc.seconds, 37);
+  assert.equal(mbc3.exportBattery()[0], 0x7c);
+
+  const restored = new GameBoy("dmg");
+  restored.loadROM(makeRom([], { type: 0x10, ram: 2 }), stored);
+  restored.ramEnabled = true;
+  assert.equal(restored.read8(0xa000), 0x7c);
+  assert.equal(restored.rtc.seconds, 37);
+
+  const mbc2 = new GameBoy("dmg");
+  mbc2.loadROM(makeRom([], { type: 0x06 }));
+  mbc2.write8(0x0000, 0x0a);
+  mbc2.write8(0xa000, 0xab);
+  assert.equal(mbc2.read8(0xa000), 0xfb);
+});
+
+test("advances, latches, halts, and overflows the MBC3 real-time clock", () => {
+  const originalNow = Date.now;
+  let now = 1_000_000;
+  Date.now = () => now;
+  try {
+    const gb = new GameBoy("dmg");
+    gb.loadROM(makeRom([], { type: 0x10, ram: 2 }));
+    gb.ramEnabled = true;
+    gb.writeRTC(0x08, 58);
+    gb.writeRTC(0x09, 59);
+    gb.writeRTC(0x0a, 23);
+    gb.writeRTC(0x0b, 0xff);
+    gb.writeRTC(0x0c, 0x01);
+
+    now += 3000;
+    gb.updateRTC();
+    assert.equal(gb.rtc.seconds, 1);
+    assert.equal(gb.rtc.minutes, 0);
+    assert.equal(gb.rtc.hours, 0);
+    assert.equal(gb.rtc.days, 0);
+    assert.equal(gb.rtc.carry, true);
+
+    gb.latchRTC();
+    now += 2000;
+    assert.equal(gb.readRTC(0x08), 1);
+    gb.latchedRTC = null;
+    assert.equal(gb.readRTC(0x08), 3);
+
+    gb.writeRTC(0x0c, 0xc0);
+    now += 5000;
+    gb.latchedRTC = null;
+    assert.equal(gb.readRTC(0x08), 3);
+    gb.writeRTC(0x0c, 0x80);
+    now += 1000;
+    assert.equal(gb.readRTC(0x08), 4);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("keeps PPU and APU at base clock in GBC double-speed mode", () => {
+  const gb = new GameBoy("cgb");
+  gb.loadROM(makeRom([0x18, 0xfe], { cgb: 0x80 }));
+  gb.doubleSpeed = true;
+  const startCycles = gb.cycles;
+  assert.equal(gb.runFrame(), true);
+  assert.ok(gb.cycles - startCycles > 120000);
+  assert.equal(gb.frameNumber, 1);
+  const audio = gb.drainAudio();
+  assert.ok(audio.length > 1200 && audio.length < 1800);
+});
+
+test("matches audio generation to the host sample rate without per-sample mixer allocation", () => {
+  const gb = new GameBoy("dmg");
+  assert.equal(gb.setAudioSampleRate(44100), true);
+  assert.equal(gb.audioRate, 44100);
+  gb.io[0x26] = 0x80;
+  gb.audioClock = 4194304 - 44100;
+  gb.tickAPU();
+  assert.equal(gb.drainAudio().length, 2);
+  assert.equal(gb.audioMix instanceof Float64Array, true);
+  assert.equal(gb.audioSamples instanceof Float32Array, true);
+  assert.equal(gb.audioSampleCount, 0);
+  assert.equal(gb.setAudioSampleRate(Number.NaN), false);
+  assert.equal(gb.audioRate, 44100);
+});
+
+test("clocks the noise channel at the hardware NR43 rate used by impact effects", () => {
+  const gb = new GameBoy("dmg");
+  gb.io[0x26] = 0x80;
+  gb.io[0x24] = 0x77;
+  gb.io[0x25] = 0x88;
+  gb.writeAPU(0x21, 0xf0);
+  gb.writeAPU(0x22, 0x00);
+  gb.writeAPU(0x23, 0x80);
+  const initialLfsr = gb.ch4.lfsr;
+  gb.mixAudioSample();
+  assert.notEqual(gb.ch4.lfsr, initialLfsr);
+  assert.ok(gb.ch4.phase > 0.9 && gb.ch4.phase < 1);
+
+  gb.writeAPU(0x22, 0xe0);
+  const lockedLfsr = gb.ch4.lfsr;
+  gb.mixAudioSample();
+  assert.equal(gb.ch4.lfsr, lockedLfsr);
+});
+
+test("keeps zero-period envelopes silent and clocks channel-one frequency sweep", () => {
+  const gb = new GameBoy("dmg");
+  gb.io[0x26] = 0x80;
+  gb.writeAPU(0x16, 0);
+  gb.writeAPU(0x17, 0x08);
+  gb.writeAPU(0x19, 0x80);
+  assert.equal(gb.ch2.volume, 0);
+  assert.equal(gb.ch2.envCounter, 8);
+  for (let index = 0; index < 8; index += 1) gb.clockEnvelopes();
+  assert.equal(gb.ch2.volume, 0);
+
+  gb.writeAPU(0x10, 0x11);
+  gb.writeAPU(0x12, 0xf0);
+  gb.writeAPU(0x13, 0x00);
+  gb.writeAPU(0x14, 0x85);
+  assert.equal(gb.ch1.enabled, true);
+  gb.clockSweeps();
+  assert.equal(gb.squareFrequency(0x13, 0x14), 0x780);
+  assert.equal(gb.ch1.enabled, false);
+});
+
 test("renders a complete 160×144 frame and raises VBlank", () => {
   const gb = new GameBoy("dmg");
   gb.loadROM(makeRom([0x18, 0xfe]));
@@ -136,7 +304,7 @@ test("renders a complete 160×144 frame and raises VBlank", () => {
   assert.ok(gb.frameNumber >= 1);
 });
 
-test("distinguishes native CGB mode and the CGB compatibility palette", () => {
+test("distinguishes native GBC mode and the GBC compatibility palette", () => {
   const native = new GameBoy("cgb");
   native.loadROM(makeRom([], { cgb: 0x80 }));
   assert.equal(native.cgbMode, true);
@@ -149,10 +317,15 @@ test("distinguishes native CGB mode and the CGB compatibility palette", () => {
   const compatibility = new GameBoy("cgb");
   compatibility.loadROM(tetrisHeader);
   assert.equal(compatibility.cgbMode, false);
-  assert.deepEqual(compatibility.dmgPalette[1], [241, 211, 52]);
+  assert.deepEqual(compatibility.dmgPalette[1], [230, 216, 54]);
+  assert.equal(CGB_COMPATIBILITY_PALETTES.length, 13);
+
+  assert.equal(compatibility.setCompatibilityPalette("blue"), true);
+  assert.notDeepEqual(compatibility.dmgBgPalette, compatibility.dmgObj0Palette);
+  assert.equal(compatibility.setCompatibilityPalette("not-a-palette"), false);
 });
 
-test("maps and executes user-supplied DMG and CGB boot ROMs without bundling one", () => {
+test("maps and executes DMG and GBC boot ROMs", () => {
   const dmgBoot = new Uint8Array(0x100);
   dmgBoot.set([0xc3, 0xfc, 0x00], 0);
   dmgBoot.set([0x3e, 0x01, 0xe0, 0x50], 0xfc);
@@ -175,6 +348,34 @@ test("maps and executes user-supplied DMG and CGB boot ROMs without bundling one
   cgb.loadROM(makeRom([], { cgb: 0x80 }));
   assert.equal(cgb.read8(0x200), 0x5a);
   assert.throws(() => new GameBoy("dmg").setBootROM(new Uint8Array(255)), /256 bytes/);
+});
+
+test("embeds the supplied production BIOS revisions byte-for-byte", () => {
+  const expected = {
+    dmg: ["cf053eccb4ccafff9e67339d4e78e98dce7d1ed59be819d2a1ba2232c6fce1c7", 0x100],
+    cgb: ["b4f2e416a35eef52cba161b159c7c8523a92594facb924b3ede0d722867c50c7", 0x900],
+  };
+  for (const [model, [hash, size]] of Object.entries(expected)) {
+    const bios = getEmbeddedBootROM(model);
+    assert.equal(bios.length, size);
+    assert.equal(EMBEDDED_BIOS_INFO[model].size, size);
+    assert.equal(createHash("sha256").update(bios).digest("hex"), hash);
+  }
+});
+
+test("boots through both embedded production BIOS images", () => {
+  for (const [model, cgb] of [["dmg", 0], ["cgb", 0], ["cgb", 0x80]]) {
+    const gb = new GameBoy(model);
+    gb.setBootROM(getEmbeddedBootROM(model));
+    gb.loadROM(makeRom([0x18, 0xfe], { cgb }));
+    let frames = 0;
+    while (gb.bootEnabled && frames < 400) {
+      gb.runFrame();
+      frames += 1;
+    }
+    assert.equal(gb.bootEnabled, false, `${model} BIOS did not hand off`);
+    assert.ok(gb.pc >= 0x0100);
+  }
 });
 
 test("boots and renders the supplied Tetris cartridge in both console models", () => {
@@ -208,4 +409,72 @@ test("boots and renders the supplied Tetris cartridge in both console models", (
       assert.equal(gb.sp, 0xcfff);
     }
   }
+});
+
+test("validates and starts every cartridge in the built-in ROM folder", () => {
+  const cartridgeRoot = fileURLToPath(new URL("../SELECT_ROMS/", import.meta.url));
+  const cartridgeFiles = readdirSync(cartridgeRoot)
+    .filter((fileName) => /\.(gb|gbc)$/i.test(fileName))
+    .sort((left, right) => left.localeCompare(right));
+  assert.equal(cartridgeFiles.length, 40);
+  for (const fileName of cartridgeFiles) {
+    const rom = new Uint8Array(readFileSync(`${cartridgeRoot}/${fileName}`));
+    const model = rom[0x143] === 0xc0 ? "cgb" : "dmg";
+    const gb = new GameBoy(model);
+    const header = gb.loadROM(rom);
+    assert.equal(header.logoValid, true, `${fileName}: Nintendo logo`);
+    assert.equal(header.checksumValid, true, `${fileName}: header checksum`);
+    assert.doesNotMatch(header.mapper, /^Unsupported/, `${fileName}: mapper`);
+    gb.runFrame();
+    assert.equal(gb.runFrameCalls, 1, `${fileName}: first host run`);
+    assert.ok(gb.cycles > 0, `${fileName}: CPU advanced`);
+  }
+});
+
+test("boots, renders, accepts input, and deterministically restores Super Mario Land", () => {
+  const cartridgePath = fileURLToPath(
+    new URL("../SELECT_ROMS/Super Mario Land (World) (Rev 1).gb", import.meta.url),
+  );
+  assert.equal(existsSync(cartridgePath), true);
+  const rom = new Uint8Array(readFileSync(cartridgePath));
+  const gb = new GameBoy("dmg");
+  gb.setBootROM(getEmbeddedBootROM("dmg"));
+  const header = gb.loadROM(rom);
+  assert.equal(header.title, "SUPER MARIOLAND");
+  assert.equal(header.mapper, "MBC1");
+  assert.equal(header.checksumValid, true);
+  let titlePeak = 0;
+  for (let frame = 0; frame < 370; frame += 1) {
+    gb.runFrame();
+    const audio = gb.drainAudio();
+    if (frame >= 350) {
+      for (const sample of audio) titlePeak = Math.max(titlePeak, Math.abs(sample));
+    }
+  }
+  assert.equal(titlePeak, 0, "Mario title should not turn $08 silence into noise");
+  gb.setButton("start", true);
+  let gameplayPeak = 0;
+  for (let frame = 0; frame < 3; frame += 1) {
+    gb.runFrame();
+    for (const sample of gb.drainAudio()) gameplayPeak = Math.max(gameplayPeak, Math.abs(sample));
+  }
+  gb.setButton("start", false);
+  for (let frame = 0; frame < 30; frame += 1) {
+    gb.runFrame();
+    for (const sample of gb.drainAudio()) gameplayPeak = Math.max(gameplayPeak, Math.abs(sample));
+  }
+  assert.ok(gameplayPeak > 0.05, "Mario gameplay should produce tonal APU output");
+
+  const state = gb.exportState();
+  for (let frame = 0; frame < 12; frame += 1) gb.runFrame();
+  const expected = {
+    pc: gb.pc,
+    frame: gb.frameNumber,
+    framebuffer: createHash("sha256").update(gb.framebuffer).digest("hex"),
+  };
+  assert.equal(gb.importState(state), true);
+  for (let frame = 0; frame < 12; frame += 1) gb.runFrame();
+  assert.equal(gb.pc, expected.pc);
+  assert.equal(gb.frameNumber, expected.frame);
+  assert.equal(createHash("sha256").update(gb.framebuffer).digest("hex"), expected.framebuffer);
 });

@@ -1,0 +1,285 @@
+{
+  "generatedAt": "2026-07-29T15:52:58.019Z",
+  "entries": [
+    {
+      "fileName": "Bionic Commando (USA).gb",
+      "artwork": "artwork/Bionic Commando (USA).png",
+      "libretroName": "Bionic Commando (USA)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 142525
+    },
+    {
+      "fileName": "Castlevania II - Belmont's Revenge (USA, Europe).gb",
+      "artwork": "artwork/Castlevania II - Belmont's Revenge (USA, Europe).png",
+      "libretroName": "Castlevania II - Belmont's Revenge (USA, Europe)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 637070
+    },
+    {
+      "fileName": "Donkey Kong (World) (Rev 1) (SGB Enhanced).gb",
+      "artwork": "artwork/Donkey Kong (World) (Rev 1) (SGB Enhanced).png",
+      "libretroName": "Donkey Kong (World) (Rev 1) (SGB Enhanced)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 454219
+    },
+    {
+      "fileName": "Donkey Kong Country (USA, Europe) (En,Fr,De,Es,It).gbc",
+      "artwork": "artwork/Donkey Kong Country (USA, Europe) (En,Fr,De,Es,It).png",
+      "libretroName": "Donkey Kong Country (USA, Europe) (En,Fr,De,Es,It)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 486622
+    },
+    {
+      "fileName": "Donkey Kong Land (USA, Europe) (SGB Enhanced).gb",
+      "artwork": "artwork/Donkey Kong Land (USA, Europe) (SGB Enhanced).png",
+      "libretroName": "Donkey Kong Land (USA, Europe) (SGB Enhanced)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 466151
+    },
+    {
+      "fileName": "Dr. Mario (World) (Rev 1).gb",
+      "artwork": "artwork/Dr. Mario (World) (Rev 1).png",
+      "libretroName": "Dr. Mario (World) (Rev 1)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 451156
+    },
+    {
+      "fileName": "Dragon Warrior III (USA).gbc",
+      "artwork": "artwork/Dragon Warrior III (USA).png",
+      "libretroName": "Dragon Warrior III (USA)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 472224
+    },
+    {
+      "fileName": "Dragon Warrior Monsters (USA, Europe) (SGB Enhanced) (GB Compatible).gbc",
+      "artwork": "artwork/Dragon Warrior Monsters (USA, Europe) (SGB Enhanced) (GB Compatible).png",
+      "libretroName": "Dragon Warrior Monsters (USA, Europe) (SGB Enhanced) (GB Compatible)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 129121
+    },
+    {
+      "fileName": "DuckTales (USA).gb",
+      "artwork": "artwork/DuckTales (USA).png",
+      "libretroName": "DuckTales (USA)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 528728
+    },
+    {
+      "fileName": "Final Fantasy Adventure (USA).gb",
+      "artwork": "artwork/Final Fantasy Adventure (USA).png",
+      "libretroName": "Final Fantasy Adventure (USA)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 495705
+    },
+    {
+      "fileName": "Gargoyle's Quest (USA, Europe).gb",
+      "artwork": "artwork/Gargoyle's Quest (USA, Europe).png",
+      "libretroName": "Gargoyle's Quest (USA, Europe)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 443856
+    },
+    {
+      "fileName": "Kirby's Dream Land (USA, Europe).gb",
+      "artwork": "artwork/Kirby's Dream Land (USA, Europe).png",
+      "libretroName": "Kirby's Dream Land (USA, Europe)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 439146
+    },
+    {
+      "fileName": "Kirby's Dream Land 2 (USA, Europe) (SGB Enhanced).gb",
+      "artwork": "artwork/Kirby's Dream Land 2 (USA, Europe) (SGB Enhanced).png",
+      "libretroName": "Kirby's Dream Land 2 (USA, Europe) (SGB Enhanced)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 422114
+    },
+    {
+      "fileName": "Legend of Zelda, The - Link's Awakening (USA, Europe) (Rev 2).gb",
+      "artwork": "artwork/Legend of Zelda, The - Link's Awakening (USA, Europe) (Rev 2).png",
+      "libretroName": "Legend of Zelda, The - Link's Awakening (USA, Europe) (Rev 2)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 482654
+    },
+    {
+      "fileName": "Legend of Zelda, The - Link's Awakening DX (USA, Europe) (Rev B) (SGB Enhanced) (GB Compatible).gbc",
+      "artwork": "artwork/Legend of Zelda, The - Link's Awakening DX (USA, Europe) (Rev B) (SGB Enhanced) (GB Compatible).png",
+      "libretroName": "Legend of Zelda, The - Link's Awakening DX (USA, Europe) (Rev 1) (SGB Enhanced) (GB Compatible)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 117083
+    },
+    {
+      "fileName": "Legend of Zelda, The - Oracle of Ages (USA).gbc",
+      "artwork": "artwork/Legend of Zelda, The - Oracle of Ages (USA).png",
+      "libretroName": "Legend of Zelda, The - Oracle of Ages (USA, Australia)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 472796
+    },
+    {
+      "fileName": "Legend of Zelda, The - Oracle of Seasons (USA).gbc",
+      "artwork": "artwork/Legend of Zelda, The - Oracle of Seasons (USA).png",
+      "libretroName": "Legend of Zelda, The - Oracle of Seasons (USA, Australia)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 425221
+    },
+    {
+      "fileName": "Mario Golf (USA).gbc",
+      "artwork": "artwork/Mario Golf (USA).png",
+      "libretroName": "Mario Golf (USA)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 429076
+    },
+    {
+      "fileName": "Mario Tennis (USA).gbc",
+      "artwork": "artwork/Mario Tennis (USA).png",
+      "libretroName": "Mario Tennis (USA)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 446090
+    },
+    {
+      "fileName": "Mega Man V (USA) (SGB Enhanced).gb",
+      "artwork": "artwork/Mega Man V (USA) (SGB Enhanced).png",
+      "libretroName": "Mega Man V (USA) (SGB Enhanced)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 467545
+    },
+    {
+      "fileName": "Metal Gear Solid (USA).gbc",
+      "artwork": "artwork/Metal Gear Solid (USA).png",
+      "libretroName": "Metal Gear Solid (USA)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 427164
+    },
+    {
+      "fileName": "Metroid II - Return of Samus (World).gb",
+      "artwork": "artwork/Metroid II - Return of Samus (World).png",
+      "libretroName": "Metroid II - Return of Samus (World)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 441391
+    },
+    {
+      "fileName": "Mole Mania (USA, Europe) (SGB Enhanced).gb",
+      "artwork": "artwork/Mole Mania (USA, Europe) (SGB Enhanced).png",
+      "libretroName": "Mole Mania (USA, Europe) (SGB Enhanced)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 144772
+    },
+    {
+      "fileName": "Pokemon - Blue Version (USA, Europe) (SGB Enhanced).gb",
+      "artwork": "artwork/Pokemon - Blue Version (USA, Europe) (SGB Enhanced).png",
+      "libretroName": "Pokemon - Blue Version (USA, Europe) (SGB Enhanced)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 570913
+    },
+    {
+      "fileName": "Pokemon - Crystal Version (USA, Europe) (Rev A).gbc",
+      "artwork": "artwork/Pokemon - Crystal Version (USA, Europe) (Rev A).png",
+      "libretroName": "Pokemon - Crystal Version (USA, Europe) (Rev 1)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 427867
+    },
+    {
+      "fileName": "Pokemon - Gold Version (USA, Europe) (SGB Enhanced) (GB Compatible).gbc",
+      "artwork": "artwork/Pokemon - Gold Version (USA, Europe) (SGB Enhanced) (GB Compatible).png",
+      "libretroName": "Pokemon - Gold Version (USA, Europe) (SGB Enhanced) (GB Compatible)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 448661
+    },
+    {
+      "fileName": "Pokemon - Red Version (USA, Europe) (SGB Enhanced).gb",
+      "artwork": "artwork/Pokemon - Red Version (USA, Europe) (SGB Enhanced).png",
+      "libretroName": "Pokemon - Red Version (USA, Europe) (SGB Enhanced)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 478309
+    },
+    {
+      "fileName": "Pokemon - Silver Version (USA, Europe) (SGB Enhanced) (GB Compatible).gbc",
+      "artwork": "artwork/Pokemon - Silver Version (USA, Europe) (SGB Enhanced) (GB Compatible).png",
+      "libretroName": "Pokemon - Silver Version (USA, Europe) (SGB Enhanced) (GB Compatible)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 370307
+    },
+    {
+      "fileName": "Pokemon Pinball (USA) (Rumble Version) (SGB Enhanced) (GB Compatible).gbc",
+      "artwork": "artwork/Pokemon Pinball (USA) (Rumble Version) (SGB Enhanced) (GB Compatible).png",
+      "libretroName": "Pokemon Pinball (USA, Australia) (Rumble Version) (SGB Enhanced) (GB Compatible)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 461093
+    },
+    {
+      "fileName": "Pokemon Trading Card Game (USA) (SGB Enhanced) (GB Compatible).gbc",
+      "artwork": "artwork/Pokemon Trading Card Game (USA) (SGB Enhanced) (GB Compatible).png",
+      "libretroName": "Pokemon Trading Card Game (USA, Australia) (SGB Enhanced) (GB Compatible)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 416977
+    },
+    {
+      "fileName": "Rayman 2 - The Great Escape (USA) (En,Fr,De,Es,It).gbc",
+      "artwork": "artwork/Rayman 2 - The Great Escape (USA) (En,Fr,De,Es,It).png",
+      "libretroName": "Rayman 2 (USA) (En,Fr,De,Es,It)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 112618
+    },
+    {
+      "fileName": "Shantae (USA).gbc",
+      "artwork": "artwork/Shantae (USA).png",
+      "libretroName": "Shantae (USA)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 387089
+    },
+    {
+      "fileName": "Super Mario Bros. Deluxe (USA, Europe) (Rev B).gbc",
+      "artwork": "artwork/Super Mario Bros. Deluxe (USA, Europe) (Rev B).png",
+      "libretroName": "Super Mario Bros. Deluxe (USA, Europe) (Rev 1)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 576567
+    },
+    {
+      "fileName": "Super Mario Land (World) (Rev 1).gb",
+      "artwork": "artwork/Super Mario Land (World) (Rev 1).png",
+      "libretroName": "Super Mario Land (World) (Rev 1)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 476267
+    },
+    {
+      "fileName": "Super Mario Land 2 - 6 Golden Coins (USA, Europe) (Rev 2).gb",
+      "artwork": "artwork/Super Mario Land 2 - 6 Golden Coins (USA, Europe) (Rev 2).png",
+      "libretroName": "Super Mario Land 2 - 6 Golden Coins (USA, Europe) (Rev 2)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 469259
+    },
+    {
+      "fileName": "Survival Kids (USA) (SGB Enhanced) (GB Compatible).gbc",
+      "artwork": "artwork/Survival Kids (USA) (SGB Enhanced) (GB Compatible).png",
+      "libretroName": "Survival Kids (USA) (SGB Enhanced) (GB Compatible)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 580026
+    },
+    {
+      "fileName": "Tetris (World) (Rev 1).gb",
+      "artwork": "artwork/Tetris (World) (Rev 1).png",
+      "libretroName": "Tetris (World) (Rev 1)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 402583
+    },
+    {
+      "fileName": "Tetris DX (World) (SGB Enhanced) (GB Compatible).gbc",
+      "artwork": "artwork/Tetris DX (World) (SGB Enhanced) (GB Compatible).png",
+      "libretroName": "Tetris DX (World) (SGB Enhanced) (GB Compatible)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 418347
+    },
+    {
+      "fileName": "Wario Land - Super Mario Land 3 (World).gb",
+      "artwork": "artwork/Wario Land - Super Mario Land 3 (World).png",
+      "libretroName": "Wario Land - Super Mario Land 3 (World)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy",
+      "bytes": 461856
+    },
+    {
+      "fileName": "Wario Land 3 (World) (En,Ja).gbc",
+      "artwork": "artwork/Wario Land 3 (World) (En,Ja).png",
+      "libretroName": "Wario Land 3 (World) (En,Ja)",
+      "repository": "libretro-thumbnails/Nintendo_-_Game_Boy_Color",
+      "bytes": 453094
+    }
+  ]
+}
