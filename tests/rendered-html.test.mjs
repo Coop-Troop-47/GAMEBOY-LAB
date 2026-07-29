@@ -258,7 +258,7 @@ test("keeps every hardware input and new option accessible", async () => {
     source.slice(replayStart, replayEnd),
     /setShowSaveTooltip\(true\)/,
   );
-  assert.match(source, /setCartridgePreflight\(true\)[\s\S]*afterNextPaint\(\)[\s\S]*CARTRIDGE_DUCK_DURATION[\s\S]*setCartridgeInserting\(true\)/);
+  assert.match(source, /setCartridgePreflight\(true\)[\s\S]*afterNextPaint\(\)[\s\S]*waitForVisualStability\(deviceRigRef\.current\)[\s\S]*setCartridgeInserting\(true\)/);
   assert.match(css, /\.screen-only \.console-wrap\s*\{[^}]*--cartridge-width:\s*64%/s);
   assert.match(css, /\.screen-only \.cartridge-visual-rig\s*\{[^}]*clip-path:\s*inset\(-200vh -200vw 0 -200vw\)/s);
   assert.match(css, /\.screen-only \.device-rig\s*\{[^}]*transform:\s*scale\(var\(--screen-only-scale,\s*1\)\)[^}]*transform 180ms cubic-bezier\(\.2,\s*\.8,\s*\.2,\s*1\)/s);
@@ -289,7 +289,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /const nextCartridgeKind = librarySystem/);
   assert.match(source, /cartridgeKind=\{rom\.system === "gbc" \? "gbc" : "gb"\}/);
   assert.match(source, /BATTERY SAVE READY/);
-  assert.match(source, /replayCartridgeInsertion\(\)/);
+  assert.match(source, /replayCartridgeInsertion\(/);
   assert.doesNotMatch(source, /INSTANT MACHINE STATE/);
   assert.doesNotMatch(source, /"CGB hardware|>CGB<|CGB LCD color correction|Original CGB startup/);
   assert.match(source, /className=\{`pause-overlay pause-/);
@@ -325,7 +325,12 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.save-deck\s*\{[^}]*var\(--cyan\)/s);
   assert.match(css, /\.game-cartridge\s*\{[^}]*aspect-ratio:\s*57 \/ 66/s);
   assert.match(css, /\.gbc-cartridge\s*\{[^}]*--cart-shell:\s*#24252a/s);
-  assert.match(css, /\.cgb \.dpad-up > span\s*\{[^}]*border-bottom:\s*7px solid currentColor/s);
+  assert.match(source, /function waitForVisualStability\(/);
+  assert.match(source, /await waitForVisualStability\(deviceRigRef\.current\)/);
+  assert.match(css, /\.cartridge-preflight \.game-cartridge\s*\{[^}]*translate\(-50%,\s*-58%\)/s);
+  assert.match(source, /className="dpad-glyphs"/);
+  assert.match(css, /\.dpad-glyphs\s*\{[^}]*translate\(var\(--dpad-press-x,[^}]*rotateX\(var\(--dpad-tilt-x/s);
+  assert.match(css, /\.cgb \.dpad-glyph-up\s*\{[^}]*clip-path:\s*polygon/s);
   assert.match(css, /\.library-tabletop\s*\{[^}]*overflow:\s*auto/s);
   assert.match(css, /\.screen-frame\s*\{[^}]*container-type:\s*inline-size/s);
   assert.match(css, /\.console-wrap\s*\{[^}]*overflow:\s*clip/s);

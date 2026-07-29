@@ -1611,6 +1611,42 @@ html[data-theme="dark"] body {
   vector-effect: non-scaling-stroke;
 }
 
+.dpad-glyphs {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  color: #777b83;
+  pointer-events: none;
+  transform:
+    translate(var(--dpad-press-x, 0), var(--dpad-press-y, 0))
+    rotateX(var(--dpad-tilt-x, 0deg))
+    rotateY(var(--dpad-tilt-y, 0deg));
+  transform-origin: center;
+  transition: transform 78ms cubic-bezier(.2, .85, .25, 1);
+  will-change: transform;
+}
+
+.dpad-glyphs i {
+  position: absolute;
+  display: block;
+  font: 900 7px/1 Arial, sans-serif;
+  font-style: normal;
+  transform: translate(-50%, -50%);
+}
+
+.dpad-glyph-up { left: 50%; top: 16.667%; }
+.dpad-glyph-left { left: 16.667%; top: 50%; }
+.dpad-glyph-right { left: 83.333%; top: 50%; }
+.dpad-glyph-down { left: 50%; top: 83.333%; }
+
+.dpad .control-button > span {
+  opacity: 0;
+}
+
+.dmg .dpad-glyphs {
+  color: #55575d;
+}
+
 .dpad-cross::after {
   position: absolute;
   left: 50%;
@@ -2368,41 +2404,17 @@ html[data-theme="dark"] body {
     inset -1px -1px 2px rgba(255, 255, 255, .08);
 }
 
-.cgb .dpad .control-button > span {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 0;
-  height: 0;
-  display: block;
+.cgb .dpad-glyphs i {
+  width: 7px;
+  height: 7px;
+  background: currentColor;
   font-size: 0;
-  line-height: 0;
-  transform: translate(-50%, -50%);
 }
 
-.cgb .dpad-up > span {
-  border-right: 4px solid transparent;
-  border-bottom: 7px solid currentColor;
-  border-left: 4px solid transparent;
-}
-
-.cgb .dpad-down > span {
-  border-top: 7px solid currentColor;
-  border-right: 4px solid transparent;
-  border-left: 4px solid transparent;
-}
-
-.cgb .dpad-left > span {
-  border-top: 4px solid transparent;
-  border-right: 7px solid currentColor;
-  border-bottom: 4px solid transparent;
-}
-
-.cgb .dpad-right > span {
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  border-left: 7px solid currentColor;
-}
+.cgb .dpad-glyph-up { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.cgb .dpad-glyph-down { clip-path: polygon(0 0, 100% 0, 50% 100%); }
+.cgb .dpad-glyph-left { clip-path: polygon(0 50%, 100% 0, 100% 100%); }
+.cgb .dpad-glyph-right { clip-path: polygon(0 0, 100% 50%, 0 100%); }
 
 .cgb .action-buttons {
   right: 19px;
@@ -3596,7 +3608,7 @@ html[data-theme="dark"] body {
 }
 
 .cartridge-preflight .game-cartridge {
-  transform: translate(-50%, -170px) rotate(-3deg);
+  transform: translate(-50%, -58%) rotate(-3deg);
   transition: none;
 }
 
@@ -3610,16 +3622,16 @@ html[data-theme="dark"] body {
 
 @keyframes cartridge-slide-in {
   0% {
-    transform: translate(-50%, -170px) rotate(-3deg);
+    transform: translate(-50%, -58%) rotate(-3deg);
   }
   48% {
-    transform: translate(-50%, -12px) rotate(1.5deg);
+    transform: translate(-50%, -4%) rotate(1.5deg);
   }
   62% {
-    transform: translate(-50%, 8px) rotate(-.7deg);
+    transform: translate(-50%, 2.7%) rotate(-.7deg);
   }
   76% {
-    transform: translate(-50%, -4px) rotate(.3deg);
+    transform: translate(-50%, -1.35%) rotate(.3deg);
   }
   100% {
     transform: translate(-50%, 0) rotate(0deg);

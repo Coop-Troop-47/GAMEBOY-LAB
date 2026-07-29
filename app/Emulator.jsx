@@ -47,7 +47,6 @@ const SCREEN_ONLY_CARTRIDGE_CENTER_OFFSET = (
   SCREEN_ONLY_CARTRIDGE_OVERHANG - SCREEN_ONLY_BEZEL_OUTLINE
 ) / 2;
 const SCREEN_ONLY_EDGE_GUARD = 1;
-const CARTRIDGE_DUCK_DURATION = 250;
 const SAVE_TOOLTIP_DURATION = 1500;
 const TECHNICAL_READOUT_MEDIA = "(min-width: 1180px)";
 
@@ -221,6 +220,34 @@ function downloadBytes(bytes, name, type = "application/octet-stream") {
 function afterNextPaint() {
   return new Promise((resolve) => {
     window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+  });
+}
+
+function waitForVisualStability(element, {
+  minimumDuration = 180,
+  stableFrames = 4,
+  timeout = 1200,
+} = {}) {
+  if (!element) return Promise.resolve();
+  return new Promise((resolve) => {
+    const started = window.performance.now();
+    let previous = null;
+    let stable = 0;
+    const sample = (now) => {
+      const rect = element.getBoundingClientRect();
+      const current = [rect.left, rect.top, rect.width, rect.height];
+      const motion = previous
+        ? Math.max(...current.map((value, index) => Math.abs(value - previous[index])))
+        : Number.POSITIVE_INFINITY;
+      stable = motion <= 0.2 && now - started >= minimumDuration ? stable + 1 : 0;
+      previous = current;
+      if (stable >= stableFrames || now - started >= timeout) {
+        resolve();
+        return;
+      }
+      window.requestAnimationFrame(sample);
+    };
+    window.requestAnimationFrame(sample);
   });
 }
 
@@ -1594,24 +1621,11 @@ export default function Emulator() {
     setCartridgePreflight(true);
     await afterNextPaint();
     if (cartridgeAnimationRunRef.current !== run) return;
-
-    const wrap = consoleWrapRef.current;
-    const computedScale = wrap
-      ? Number.parseFloat(
-        window.getComputedStyle(wrap).getPropertyValue("--console-scale"),
-      ) || 1
-      : 1;
-    const baselineOffset = wrap?.closest(".screen-only")
-      ? SCREEN_ONLY_CARTRIDGE_CENTER_OFFSET * (
-        Number.parseFloat(
-          window.getComputedStyle(wrap).getPropertyValue("--screen-only-scale"),
-        ) || 1
-      )
-      : 10 * computedScale;
-    if (consoleOffsetYRef.current > baselineOffset + 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, CARTRIDGE_DUCK_DURATION));
-      if (cartridgeAnimationRunRef.current !== run) return;
-    }
+    // Resizing, drawer movement, model changes, and presentation switches all
+    // converge here. Start the cartridge only after the single shared rig has
+    // actually stopped changing, rather than guessing which transition is active.
+    await waitForVisualStability(deviceRigRef.current);
+    if (cartridgeAnimationRunRef.current !== run) return;
 
     setCartridgeAnimationKey((value) => value + 1);
     setCartridgePreflight(false);
@@ -2034,14 +2048,7 @@ export default function Emulator() {
         // the shared rig completes its single duck before the cartridge moves.
         setCartridgePreflight(true);
         await afterNextPaint();
-        const baselineOffset = viewMode === "screen"
-          ? SCREEN_ONLY_CARTRIDGE_CENTER_OFFSET * (
-            integerScaling ? 1 : manualScale / 100
-          )
-          : 10 * consoleScale;
-        if (consoleOffsetYRef.current > baselineOffset + 1) {
-          await new Promise((resolve) => window.setTimeout(resolve, CARTRIDGE_DUCK_DURATION));
-        }
+        await waitForVisualStability(deviceRigRef.current);
         setCartridgeInserting(true);
         await new Promise((resolve) => window.setTimeout(resolve, 560));
         setShowSaveTooltip(true);
@@ -3586,6 +3593,12 @@ export default function Emulator() {
                 <svg className="dpad-outline" viewBox="0 0 100 100" aria-hidden="true">
                   <path d="M33.333 1H66.667V33.333H99V66.667H66.667V99H33.333V66.667H1V33.333H33.333Z" />
                 </svg>
+                <span className="dpad-glyphs" aria-hidden="true">
+                  <i className="dpad-glyph-up">▲</i>
+                  <i className="dpad-glyph-left">◀</i>
+                  <i className="dpad-glyph-right">▶</i>
+                  <i className="dpad-glyph-down">▼</i>
+                </span>
                 <ControlButton className="dpad-up" label="▲" sublabel="Up" button="up" onPress={pressButton} pressed={pressedButtons.has("up")} />
                 <ControlButton className="dpad-left" label="◀" sublabel="Left" button="left" onPress={pressButton} pressed={pressedButtons.has("left")} />
                 <span className="dpad-center" aria-hidden="true" />
