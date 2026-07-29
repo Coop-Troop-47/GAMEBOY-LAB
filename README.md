@@ -1,9 +1,7 @@
 # GAMEBOY LAB
 
 A browser-based Game Boy and Game Boy Color emulator written from scratch in
-JavaScript. No third-party emulator core or WebAssembly binary is used. This
-private local build contains the project owner's supplied production DMG/GBC
-boot ROM images and locally supplied cartridge library.
+JavaScript. No third-party emulator core or WebAssembly binary is used.
 
 ## Features
 
