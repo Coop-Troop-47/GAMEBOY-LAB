@@ -1,10 +1,10 @@
 {
-  "version": "1.2.8",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.8/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.8",
+  "version": "1.2.9",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.9/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.9",
   "changes": [
-    "The same live LCD now grows out of the console into screen-only mode and shrinks smoothly back into the console without disappearing or duplicating.",
-    "The cartridge remains hidden during the shared-screen transition and is restored by insertion immediately afterward.",
-    "Pause dimming now operates directly on the rendered LCD surfaces, eliminating the remaining one-pixel bright seam around the darkened image."
+    "Console and screen-only changes now animate only a captured LCD layer between measured screen rectangles; the console shell never translates or scales diagonally.",
+    "The destination shell remains fixed and centered underneath the continuous LCD zoom, with cartridge insertion following immediately afterward.",
+    "Pause dimming is now calculated inside the WebGL LCD shader—and directly in fallback framebuffer pixels—so no CSS filter edge exists to bleed."
   ]
 }

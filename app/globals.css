@@ -283,7 +283,6 @@ input:focus-visible {
   position: relative;
   container-type: inline-size;
   isolation: isolate;
-  view-transition-name: gameboy-lcd;
   left: 50%;
   width: 264px;
   aspect-ratio: auto;
@@ -303,7 +302,6 @@ input:focus-visible {
   height: auto;
   aspect-ratio: 160 / 144;
   image-rendering: auto;
-  transition: filter 260ms cubic-bezier(.16, 1, .3, 1);
 }
 
 .screen-frame canvas.lcd-output,
@@ -328,7 +326,6 @@ input:focus-visible {
   opacity: 0;
   image-rendering: auto;
   pointer-events: none;
-  transition: filter 260ms cubic-bezier(.16, 1, .3, 1);
 }
 
 .screen-frame canvas.frame-transition.is-active {
@@ -340,13 +337,6 @@ input:focus-visible {
 .screen-frame canvas.frame-transition.is-active.is-fading {
   opacity: 0;
   transition: opacity 180ms ease-out;
-}
-
-.screen-frame.is-dimmed canvas.lcd-output,
-.screen-frame.is-dimmed canvas.frame-transition {
-  /* Dim the rendered surface itself. A separate translucent layer can leave a
-     one-device-pixel seam where fractional CSS clipping meets WebGL output. */
-  filter: brightness(.34);
 }
 
 .screen-glass {
@@ -4445,18 +4435,14 @@ html[data-theme="dark"] body {
   transform: none !important;
 }
 
-.console-wrap:not(.native-view-transition).view-zoom-in .device-rig {
-  animation: view-mode-zoom-in 360ms cubic-bezier(.22, 1, .36, 1) both;
-  transition: none;
-}
-
-.console-wrap:not(.native-view-transition).view-zoom-out .device-rig {
-  animation: view-mode-zoom-out 360ms cubic-bezier(.22, 1, .36, 1) both;
-  transition: none;
-}
-
 .console-wrap.view-zoom-in .screen-frame,
 .console-wrap.view-zoom-out .screen-frame {
+  visibility: hidden;
+  transition: none;
+}
+
+.console-wrap.view-zoom-in .device-rig,
+.console-wrap.view-zoom-out .device-rig {
   transition: none;
 }
 
@@ -4467,63 +4453,23 @@ html[data-theme="dark"] body {
   visibility: hidden;
 }
 
-@keyframes view-mode-zoom-in {
-  from {
-    scale: .78;
-  }
-  to {
-    scale: 1;
-  }
-}
-
-@keyframes view-mode-zoom-out {
-  from {
-    scale: 1.2;
-  }
-  to {
-    scale: 1;
-  }
-}
-
-/* Chromium's native shared-element transition keeps the actual LCD visible
-   while it grows out of the shell or shrinks back into it. The root snapshots
-   do not cross-fade, so there is never a second LCD image underneath. */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation: none;
-  mix-blend-mode: normal;
-}
-
-::view-transition-old(root) {
-  opacity: 0;
-}
-
-::view-transition-new(root) {
-  opacity: 1;
-}
-
-::view-transition-group(gameboy-lcd) {
+.lcd-view-transition-overlay {
+  position: fixed;
   z-index: 1000;
-  animation-duration: 420ms;
-  animation-timing-function: cubic-bezier(.22, 1, .36, 1);
+  display: block;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform-origin: 0 0;
+  will-change: transform;
 }
 
-::view-transition-image-pair(gameboy-lcd) {
-  isolation: auto;
-}
-
-::view-transition-old(gameboy-lcd),
-::view-transition-new(gameboy-lcd) {
-  animation: none;
-  mix-blend-mode: normal;
-}
-
-::view-transition-old(gameboy-lcd) {
-  opacity: 0;
-}
-
-::view-transition-new(gameboy-lcd) {
-  opacity: 1;
+.lcd-view-transition-overlay canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 /* Split drawer navigation and selective visual wayfinding. */
@@ -5140,8 +5086,4 @@ html[data-theme="dark"] body {
     animation-duration: 1ms !important;
   }
 
-  .console-wrap.view-zoom-in .device-rig,
-  .console-wrap.view-zoom-out .device-rig {
-    animation-duration: 1ms !important;
-  }
 }

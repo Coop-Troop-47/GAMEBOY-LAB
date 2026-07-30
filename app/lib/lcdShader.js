@@ -59,6 +59,7 @@ uniform vec2 uOutputSize;
 uniform int uDisplayModel;
 uniform bool uLcdEnabled;
 uniform float uDmgContrast;
+uniform float uDimFactor;
 
 in vec2 vUv;
 out vec4 fragColor;
@@ -178,7 +179,7 @@ void main() {
           1.0
         )
       : center;
-    fragColor = vec4(sharpColor, 1.0);
+    fragColor = vec4(sharpColor * uDimFactor, 1.0);
     return;
   }
 
@@ -204,7 +205,7 @@ void main() {
   vec3 color = uDisplayModel == 0
     ? renderDmg(signal, nativePosition, footprint)
     : renderCgb(signal, nativePosition, footprint);
-  fragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+  fragColor = vec4(clamp(color, 0.0, 1.0) * uDimFactor, 1.0);
 }
 `;
 
@@ -272,6 +273,8 @@ export class LCDShaderRenderer {
     this.ghostEnabled = true;
     this.ghostStrength = 0.42;
     this.dmgContrast = 1.12;
+    this.dimFactor = 1;
+    this.dimAnimationFrame = null;
     this.resetHistory = true;
     this.hasFrame = false;
     this.historyIndex = 0;
@@ -319,6 +322,7 @@ export class LCDShaderRenderer {
       displayModel: gl.getUniformLocation(this.displayProgram, "uDisplayModel"),
       lcdEnabled: gl.getUniformLocation(this.displayProgram, "uLcdEnabled"),
       dmgContrast: gl.getUniformLocation(this.displayProgram, "uDmgContrast"),
+      dimFactor: gl.getUniformLocation(this.displayProgram, "uDimFactor"),
     };
     this.quad = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
@@ -348,8 +352,17 @@ export class LCDShaderRenderer {
     this.resizeAndRender();
   }
 
-  setOptions({ model, lcdEnabled, ghostEnabled, ghostStrength, dmgContrast = 1.12 }) {
+  setOptions({
+    model,
+    lcdEnabled,
+    ghostEnabled,
+    ghostStrength,
+    dmgContrast = 1.12,
+    dimmed = false,
+  }) {
     const persistenceChanged = this.ghostEnabled !== ghostEnabled;
+    const nextDimFactor = dimmed ? 0.34 : 1;
+    const dimChanged = Math.abs(this.dimFactor - nextDimFactor) > 0.0001;
     this.model = model;
     this.lcdEnabled = lcdEnabled;
     this.ghostEnabled = ghostEnabled;
@@ -359,7 +372,35 @@ export class LCDShaderRenderer {
     this.canvas.dataset.displayModel = model;
     this.canvas.dataset.lcdMode = lcdEnabled ? "lcd" : "sharp";
     this.canvas.dataset.ghosting = ghostEnabled ? "on" : "off";
-    this.render();
+    this.canvas.dataset.dimmed = dimmed ? "on" : "off";
+    if (dimChanged) this.animateDimFactor(nextDimFactor);
+    else this.render();
+  }
+
+  animateDimFactor(target) {
+    if (this.dimAnimationFrame !== null) {
+      window.cancelAnimationFrame(this.dimAnimationFrame);
+      this.dimAnimationFrame = null;
+    }
+    const start = this.dimFactor;
+    const startedAt = window.performance.now();
+    const duration = 260;
+    const tick = (time) => {
+      const progress = Math.min(1, Math.max(0, (time - startedAt) / duration));
+      const eased = 1 - (1 - progress) ** 3;
+      this.dimFactor = start + (target - start) * eased;
+      if (this.gl) this.render();
+      else if (this.lastFrame) this.presentFallback(this.lastFrame);
+      if (progress < 1 && !this.disposed) {
+        this.dimAnimationFrame = window.requestAnimationFrame(tick);
+      } else {
+        this.dimFactor = target;
+        this.dimAnimationFrame = null;
+      }
+    };
+    if (this.gl) this.render();
+    else if (this.lastFrame) this.presentFallback(this.lastFrame);
+    this.dimAnimationFrame = window.requestAnimationFrame(tick);
   }
 
   resetPersistence() {
@@ -505,6 +546,10 @@ export class LCDShaderRenderer {
       this.displayLocations.dmgContrast,
       this.dmgContrast,
     );
+    gl.uniform1f(
+      this.displayLocations.dimFactor,
+      this.dimFactor,
+    );
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
@@ -521,6 +566,12 @@ export class LCDShaderRenderer {
       0,
       0,
     );
+    if (this.dimFactor < 0.9999) {
+      this.fallback.save();
+      this.fallback.fillStyle = `rgba(0, 0, 0, ${1 - this.dimFactor})`;
+      this.fallback.fillRect(0, 0, SOURCE_WIDTH, SOURCE_HEIGHT);
+      this.fallback.restore();
+    }
   }
 
   dispose() {
@@ -529,6 +580,10 @@ export class LCDShaderRenderer {
     if (this.displaySyncFrame !== null) {
       window.cancelAnimationFrame(this.displaySyncFrame);
       this.displaySyncFrame = null;
+    }
+    if (this.dimAnimationFrame !== null) {
+      window.cancelAnimationFrame(this.dimAnimationFrame);
+      this.dimAnimationFrame = null;
     }
     if (!this.gl) return;
     const gl = this.gl;

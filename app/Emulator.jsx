@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import {
   CGB_COMPATIBILITY_PALETTES,
   GAMEBOY_HEIGHT,
@@ -1752,6 +1751,7 @@ export default function Emulator() {
   const canvasRef = useRef(null);
   const transitionCanvasRef = useRef(null);
   const sourceCanvasRef = useRef(null);
+  const screenFrameRef = useRef(null);
   const sourceContextRef = useRef(null);
   const lcdRendererRef = useRef(null);
   const fileRef = useRef(null);
@@ -1819,6 +1819,9 @@ export default function Emulator() {
   const cartridgeAnimationRunRef = useRef(0);
   const transitionFrameTimerRef = useRef(0);
   const viewTransitionTimerRef = useRef(0);
+  const viewTransitionRunRef = useRef(0);
+  const viewTransitionOverlayRef = useRef(null);
+  const viewTransitionAnimationRef = useRef(null);
   const catalogueRunRef = useRef(0);
   const testRomLoadedRef = useRef(false);
   const consoleWrapRef = useRef(null);
@@ -2002,6 +2005,9 @@ export default function Emulator() {
     window.clearTimeout(saveTooltipTimerRef.current);
     window.clearTimeout(cartridgeAnimationTimerRef.current);
     window.clearTimeout(viewTransitionTimerRef.current);
+    viewTransitionRunRef.current += 1;
+    viewTransitionAnimationRef.current?.cancel();
+    viewTransitionOverlayRef.current?.remove();
   }, []);
 
   useEffect(() => {
@@ -3037,48 +3043,113 @@ export default function Emulator() {
     performModelSwitch(nextModel);
   }, [pendingModel, performModelSwitch]);
 
-  const completeViewModeTransition = useCallback(() => {
-    if (!viewTransitionTimerRef.current) return;
+  const completeViewModeTransition = useCallback((run = viewTransitionRunRef.current) => {
+    if (run !== viewTransitionRunRef.current) return;
     window.clearTimeout(viewTransitionTimerRef.current);
     viewTransitionTimerRef.current = 0;
+    viewTransitionAnimationRef.current = null;
+    viewTransitionOverlayRef.current?.remove();
+    viewTransitionOverlayRef.current = null;
     setViewModeTransition("");
-    // The zoom has already resolved the final geometry. Start insertion in the
-    // same frame instead of waiting through the normal preflight/stability pass.
+    // The LCD overlay has reached the real destination canvas. Reveal that
+    // canvas and start insertion in the same frame.
     replayCartridgeInsertion({ waitForGeometry: false });
   }, [replayCartridgeInsertion]);
 
   const switchViewMode = useCallback((nextViewMode) => {
     if (nextViewMode === viewMode) return;
+    const run = viewTransitionRunRef.current + 1;
+    viewTransitionRunRef.current = run;
     window.clearTimeout(viewTransitionTimerRef.current);
     viewTransitionTimerRef.current = 0;
-    const applyViewMode = () => {
-      setViewModeTransition(nextViewMode === "screen" ? "zoom-in" : "zoom-out");
-      setViewMode(nextViewMode);
-    };
-    if (typeof document.startViewTransition === "function") {
-      const transition = document.startViewTransition(() => {
-        // Commit the destination shell and LCD geometry as one captured state.
-        // The named LCD snapshot then morphs continuously between the old and
-        // new rectangles without cross-fading or replacing the display.
-        flushSync(applyViewMode);
+    viewTransitionAnimationRef.current?.cancel();
+    viewTransitionAnimationRef.current = null;
+    viewTransitionOverlayRef.current?.remove();
+    viewTransitionOverlayRef.current = null;
+
+    const source = canvasRef.current;
+    const sourceFrame = screenFrameRef.current;
+    const sourceBounds = sourceFrame?.getBoundingClientRect();
+    let overlay = null;
+    if (source && sourceFrame && sourceBounds?.width > 0 && sourceBounds.height > 0) {
+      // Render immediately before copying so WebGL's presentation buffer is
+      // populated even when preserveDrawingBuffer is disabled.
+      lcdRendererRef.current?.render();
+      overlay = document.createElement("div");
+      overlay.className = "lcd-view-transition-overlay";
+      const snapshot = document.createElement("canvas");
+      snapshot.width = Math.max(1, source.width);
+      snapshot.height = Math.max(1, source.height);
+      const context = snapshot.getContext("2d", { alpha: false });
+      context?.drawImage(source, 0, 0, snapshot.width, snapshot.height);
+      const frameStyle = window.getComputedStyle(sourceFrame);
+      Object.assign(overlay.style, {
+        left: `${sourceBounds.left}px`,
+        top: `${sourceBounds.top}px`,
+        width: `${sourceBounds.width}px`,
+        height: `${sourceBounds.height}px`,
+        border: frameStyle.border,
+        borderRadius: frameStyle.borderRadius,
+        outline: frameStyle.outline,
+        outlineOffset: frameStyle.outlineOffset,
+        background: frameStyle.background,
       });
-      viewTransitionTimerRef.current = window.setTimeout(
-        completeViewModeTransition,
-        900,
-      );
-      transition.finished.then(
-        completeViewModeTransition,
-        completeViewModeTransition,
-      );
-      return;
+      overlay.append(snapshot);
+      document.body.append(overlay);
+      viewTransitionOverlayRef.current = overlay;
     }
-    applyViewMode();
-    // animationend normally completes the fallback sequence. This is only a
-    // safety net for background tabs and engines that suppress animation events.
+
+    setViewModeTransition(nextViewMode === "screen" ? "zoom-in" : "zoom-out");
+    setViewMode(nextViewMode);
     viewTransitionTimerRef.current = window.setTimeout(
-      completeViewModeTransition,
-      520,
+      () => completeViewModeTransition(run),
+      900,
     );
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        if (run !== viewTransitionRunRef.current || !overlay) {
+          completeViewModeTransition(run);
+          return;
+        }
+        const targetBounds = screenFrameRef.current?.getBoundingClientRect();
+        if (!targetBounds?.width || !targetBounds.height) {
+          completeViewModeTransition(run);
+          return;
+        }
+        const translateX = targetBounds.left - sourceBounds.left;
+        const translateY = targetBounds.top - sourceBounds.top;
+        const scaleX = targetBounds.width / sourceBounds.width;
+        const scaleY = targetBounds.height / sourceBounds.height;
+        const animation = overlay.animate(
+          [
+            { transform: "translate3d(0, 0, 0) scale(1, 1)" },
+            {
+              transform: (
+                `translate3d(${translateX}px, ${translateY}px, 0) `
+                + `scale(${scaleX}, ${scaleY})`
+              ),
+            },
+          ],
+          {
+            duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+              ? 1
+              : 420,
+            easing: "cubic-bezier(.22, 1, .36, 1)",
+            fill: "forwards",
+          },
+        );
+        viewTransitionAnimationRef.current = animation;
+        animation.finished.then(
+          () => completeViewModeTransition(run),
+          () => {
+            if (run === viewTransitionRunRef.current) {
+              completeViewModeTransition(run);
+            }
+          },
+        );
+      });
+    });
   }, [completeViewModeTransition, viewMode]);
 
   const reset = useCallback(() => {
@@ -3412,6 +3483,7 @@ export default function Emulator() {
       ghostEnabled: ghostingEnabled,
       ghostStrength: ghostStrength / 100,
       dmgContrast: dmgContrast / 100,
+      dimmed: paused && running,
     });
     const context = source.getContext("2d", { alpha: false });
     drawWaitingScreen(context, model);
@@ -3431,8 +3503,9 @@ export default function Emulator() {
       ghostEnabled: ghostingEnabled,
       ghostStrength: ghostStrength / 100,
       dmgContrast: dmgContrast / 100,
+      dimmed: paused && running,
     });
-  }, [dmgContrast, ghostStrength, ghostingEnabled, lcdMode, model]);
+  }, [dmgContrast, ghostStrength, ghostingEnabled, lcdMode, model, paused, running]);
 
   useEffect(() => {
     const draw = () => {
@@ -4279,7 +4352,7 @@ export default function Emulator() {
       <section className="workspace">
         <div
           ref={consoleWrapRef}
-          className={`console-wrap model-${model} ${integerScaling ? "integer-scale" : "flexible-scale"} ${viewModeTransition ? `view-${viewModeTransition}` : ""} ${viewModeTransition && typeof document.startViewTransition === "function" ? "native-view-transition" : ""} ${dragging ? "is-dragging" : ""} ${cartridgePresent ? "has-cartridge" : ""} ${cartridgeHovered ? "cartridge-hovered" : ""} ${cartridgePreflight ? "cartridge-preflight" : ""} ${cartridgeInserting && cartridgeAnimationEnabled ? "cartridge-inserting" : ""} ${showSaveTooltip || cartridgePreflight ? "tooltip-visible" : ""}`}
+          className={`console-wrap model-${model} ${integerScaling ? "integer-scale" : "flexible-scale"} ${viewModeTransition ? `view-${viewModeTransition}` : ""} ${dragging ? "is-dragging" : ""} ${cartridgePresent ? "has-cartridge" : ""} ${cartridgeHovered ? "cartridge-hovered" : ""} ${cartridgePreflight ? "cartridge-preflight" : ""} ${cartridgeInserting && cartridgeAnimationEnabled ? "cartridge-inserting" : ""} ${showSaveTooltip || cartridgePreflight ? "tooltip-visible" : ""}`}
           onWheel={resizeWithWheel}
           style={{
             "--console-scale": consoleScale,
@@ -4298,18 +4371,7 @@ export default function Emulator() {
             )}px`,
           }}
         >
-          <div
-            className="device-rig"
-            ref={deviceRigRef}
-            onAnimationEnd={(event) => {
-              if (
-                event.target === event.currentTarget
-                && event.animationName.startsWith("view-mode-zoom-")
-              ) {
-                completeViewModeTransition();
-              }
-            }}
-          >
+          <div className="device-rig" ref={deviceRigRef}>
             {cartridgePresent && (
               <CartridgeDock
                 animationKey={cartridgeAnimationKey}
@@ -4339,7 +4401,8 @@ export default function Emulator() {
                 {model === "cgb" ? "POWER" : "BATTERY"}
               </div>
               <div
-                className={`screen-frame ${paused && running ? "is-dimmed" : ""}`}
+                ref={screenFrameRef}
+                className="screen-frame"
                 style={screenGeometry.frameWidth === null
                   ? undefined
                   : { width: `${screenGeometry.frameWidth}px` }}
