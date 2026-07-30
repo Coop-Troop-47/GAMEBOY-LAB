@@ -2018,7 +2018,6 @@ export default function Emulator() {
     viewTransitionPendingRef.current?.pauseAnimation?.cancel();
     viewTransitionPendingRef.current?.bezelAnimation?.cancel();
     viewTransitionPendingRef.current?.shellAnimation?.cancel();
-    viewTransitionPendingRef.current?.shellBezelAnimation?.cancel();
     viewTransitionPendingRef.current?.shellGhost?.remove();
     viewTransitionPendingRef.current = null;
   }, []);
@@ -3073,7 +3072,6 @@ export default function Emulator() {
     pending.pauseAnimation?.cancel();
     pending.bezelAnimation?.cancel();
     pending.shellAnimation?.cancel();
-    pending.shellBezelAnimation?.cancel();
     pending.shellGhost?.remove();
     const frame = screenFrameRef.current;
     if (frame) {
@@ -3107,12 +3105,12 @@ export default function Emulator() {
     viewTransitionPendingRef.current?.pauseAnimation?.cancel();
     viewTransitionPendingRef.current?.bezelAnimation?.cancel();
     viewTransitionPendingRef.current?.shellAnimation?.cancel();
-    viewTransitionPendingRef.current?.shellBezelAnimation?.cancel();
     viewTransitionPendingRef.current?.shellGhost?.remove();
     const computedFrameStyle = window.getComputedStyle(sourceFrame);
     const sourceLayoutWidth = Math.max(1, sourceFrame.offsetWidth);
     const sourceLayoutHeight = Math.max(1, sourceFrame.offsetHeight);
     let shellGhost = null;
+    let shellAnimation = null;
     if (nextViewMode === "screen") {
       const sourceHandheld = sourceFrame.closest(".handheld");
       const shellBounds = sourceHandheld?.getBoundingClientRect();
@@ -3143,6 +3141,19 @@ export default function Emulator() {
         });
         shellGhost.append(shellClone);
         document.body.append(shellGhost);
+        shellAnimation = shellGhost.animate(
+          [
+            { opacity: 1 },
+            { opacity: 0 },
+          ],
+          {
+            duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+              ? 1
+              : 240,
+            easing: "cubic-bezier(.4, 0, 1, 1)",
+            fill: "forwards",
+          },
+        );
       }
     }
     viewTransitionPendingRef.current = {
@@ -3173,8 +3184,7 @@ export default function Emulator() {
       pauseAnimation: null,
       bezelAnimation: null,
       shellGhost,
-      shellAnimation: null,
-      shellBezelAnimation: null,
+      shellAnimation,
     };
 
     setViewModeTransition(nextViewMode === "screen" ? "zoom-in" : "zoom-out");
@@ -4168,35 +4178,6 @@ export default function Emulator() {
         fill: "forwards",
       },
     );
-    if (pending.shellGhost) {
-      pending.shellAnimation = pending.shellGhost.animate(
-        [
-          { opacity: 1 },
-          { opacity: 0 },
-        ],
-        {
-          duration,
-          easing: "cubic-bezier(.45, 0, .55, 1)",
-          fill: "forwards",
-        },
-      );
-    }
-    const displayBezel = frame.closest(".display-bezel");
-    if (pending.direction === "console" && displayBezel) {
-      const targetBezelStyle = window.getComputedStyle(displayBezel);
-      pending.shellBezelAnimation = displayBezel.animate(
-        [
-          { borderRadius: "0px" },
-          { borderRadius: targetBezelStyle.borderRadius },
-        ],
-        {
-          duration,
-          easing: "linear",
-          fill: "forwards",
-        },
-      );
-    }
-
     if (pauseOverlay && pending.sourcePauseWidth > 0 && targetPauseWidth > 0) {
       const pauseCorrection = Math.max(
         0.25,
@@ -4220,7 +4201,6 @@ export default function Emulator() {
       pending.bezelAnimation.finished,
       pending.pauseAnimation?.finished,
       pending.shellAnimation?.finished,
-      pending.shellBezelAnimation?.finished,
     ].filter(Boolean);
     Promise.all(transitionFinishes).then(
       () => completeViewModeTransition(pending.run),

@@ -4488,6 +4488,7 @@ html[data-theme="dark"] body {
 
 .console-wrap.view-zoom-in .device-rig,
 .console-wrap.view-zoom-out .device-rig {
+  z-index: 20;
   transition: none;
 }
 

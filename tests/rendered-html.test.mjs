@@ -158,8 +158,8 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /const animation = frame\.animate\([\s\S]*transform:\s*inverseTransform[\s\S]*transform:\s*"translate3d\(0, 0, 0\) scale\(1, 1\)"/s);
   assert.match(source, /pending\.bezelAnimation = frame\.animate\([\s\S]*borderRadius:\s*targetStyle\.borderRadius[\s\S]*easing:\s*"linear"/s);
   assert.match(source, /shellClone\.querySelector\("\.screen-frame"\)\?\.remove\(\)[\s\S]*console-transition-shell[\s\S]*document\.body\.append\(shellGhost\)/s);
-  assert.match(source, /pending\.shellAnimation = pending\.shellGhost\.animate\([\s\S]*opacity:\s*1[\s\S]*opacity:\s*0/s);
-  assert.match(source, /pending\.direction === "console"[\s\S]*shellBezelAnimation = displayBezel\.animate\([\s\S]*borderRadius:\s*"0px"[\s\S]*targetBezelStyle\.borderRadius/s);
+  assert.match(source, /shellAnimation = shellGhost\.animate\([\s\S]*opacity:\s*1[\s\S]*opacity:\s*0[\s\S]*:\s*240/s);
+  assert.doesNotMatch(source, /shellBezelAnimation|displayBezel\.animate|targetBezelStyle/);
   assert.match(source, /Promise\.all\(transitionFinishes\)[\s\S]*completeViewModeTransition\(pending\.run\)/s);
   assert.match(source, /lcdRendererRef\.current\?\.resizeAndRender\(duration \+ 120\)/);
   assert.match(source, /sourcePauseWidth[\s\S]*pauseCorrection[\s\S]*pauseOverlay\.animate/s);
@@ -176,7 +176,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.console-wrap\.view-zoom-in \.screen-frame\s*\{[^}]*visibility:\s*visible/s);
   assert.match(css, /\.console-wrap\.view-zoom-in \.display-bezel,[\s\S]*\.console-wrap\.view-zoom-out \.display-bezel\s*\{[^}]*z-index:\s*30[^}]*isolation:\s*isolate/s);
   assert.match(css, /\.console-transition-shell\s*\{[^}]*position:\s*fixed[^}]*z-index:\s*10[^}]*will-change:\s*opacity/s);
-  assert.match(css, /\.console-wrap\.view-zoom-in \.device-rig,[\s\S]*\.console-wrap\.view-zoom-out \.device-rig\s*\{[^}]*transition:\s*none/s);
+  assert.match(css, /\.console-wrap\.view-zoom-in \.device-rig,[\s\S]*\.console-wrap\.view-zoom-out \.device-rig\s*\{[^}]*z-index:\s*20[^}]*transition:\s*none/s);
   assert.doesNotMatch(css, /::view-transition|@keyframes view-mode-zoom/);
   assert.match(css, /\.console-wrap\.view-zoom-in \.cartridge-visual-rig,[\s\S]*\.console-wrap\.view-zoom-out \.cartridge-hover-rig\s*\{[^}]*visibility:\s*hidden/s);
   assert.match(source, /prefers-reduced-motion: reduce[\s\S]*\? 1[\s\S]*: 420/);
