@@ -3036,11 +3036,17 @@ html[data-theme="dark"] body {
 }
 
 .library-tools {
+  position: sticky;
+  /* The drawer scrollport adds 24px of top padding; 66px lands the toolbar
+     directly beneath the 90px sticky heading without covering it. */
+  top: 66px;
+  z-index: 1;
   padding: 15px 0;
   display: grid;
   grid-template-columns: minmax(110px, 1fr) auto minmax(132px, auto) auto;
   gap: 10px;
   border-bottom: 1px solid var(--line);
+  background: var(--paper);
 }
 
 .library-tools input {
@@ -4031,6 +4037,7 @@ html[data-theme="dark"] body {
 .console-wrap.cartridge-hovered .cartridge-prompt-hint {
   opacity: 0;
   translate: 0 4px;
+  transition: none;
 }
 
 .cartridge-preflight .game-cartridge {

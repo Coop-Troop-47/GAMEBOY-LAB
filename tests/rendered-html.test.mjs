@@ -367,6 +367,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.screen-only \.console-wrap\s*\{[^}]*--cartridge-width:\s*64%/s);
   assert.match(css, /\.cartridge-prompt-hint\s*\{[^}]*top:\s*-52px[^}]*opacity:\s*0[^}]*opacity 300ms ease-in-out[^}]*translate 300ms ease-in-out/s);
   assert.match(css, /\.cartridge-prompt-hint\.visible\s*\{[^}]*opacity:\s*1/s);
+  assert.match(css, /\.console-wrap\.cartridge-hovered \.cartridge-prompt-hint\s*\{[^}]*transition:\s*none/s);
   assert.match(css, /@media \(max-width: 900px\)[\s\S]*\.cartridge-tooltip-layer\s*\{[^}]*width:\s*148px/s);
   assert.match(css, /@media \(max-width: 900px\)[\s\S]*\.cartridge-info-tooltip::before\s*\{[^}]*display:\s*none/s);
   assert.match(css, /\.library-discovery-hint\.visible\s*\{[^}]*opacity:\s*1/s);
@@ -380,6 +381,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.dpad-glyphs\s*\{[^}]*translate\(var\(--dpad-press-x,[^}]*rotateX\(var\(--dpad-tilt-x/s);
   assert.match(css, /\.cgb \.dpad-glyph-up\s*\{[^}]*clip-path:\s*polygon/s);
   assert.match(css, /\.library-tabletop\s*\{[^}]*overflow:\s*auto/s);
+  assert.match(css, /\.library-tools\s*\{[^}]*position:\s*sticky[^}]*top:\s*66px[^}]*background:\s*var\(--paper\)/s);
   assert.match(css, /\.screen-frame\s*\{[^}]*container-type:\s*inline-size/s);
   assert.match(css, /\.console-wrap\s*\{[^}]*overflow:\s*clip/s);
   assert.match(source, /viewBox="0 0 570 660"/);

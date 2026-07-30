@@ -1,8 +1,10 @@
 {
-  "version": "1.2.1",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.1/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.1",
+  "version": "1.2.2",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.2/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.2",
   "changes": [
-    "Fixed console switching so DMG and GBC screens always refresh with the selected hardware, both empty and with a running cartridge."
+    "Fixed console switching so DMG and GBC screens always refresh with the selected hardware, both empty and with a running cartridge.",
+    "The initial save hint now yields instantly to cartridge hover and fades back only while its original display window remains active.",
+    "The library search, filters, sorting, and layout controls now stay visible while browsing the detail list."
   ]
 }
