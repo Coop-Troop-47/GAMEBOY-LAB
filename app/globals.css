@@ -339,6 +339,15 @@ input:focus-visible {
   transition: opacity 180ms ease-out;
 }
 
+.screen-frame::after {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  content: "";
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px #121719;
+}
+
 .screen-glass {
   position: absolute;
   inset: 0;
@@ -2446,6 +2455,10 @@ html[data-theme="dark"] body {
   box-shadow: inset 0 0 0 1px #0d0f13;
 }
 
+.cgb .screen-frame::after {
+  box-shadow: inset 0 0 0 1px #0d0f13;
+}
+
 .cgb .screen-frame canvas.lcd-output,
 .cgb .screen-frame .screen-glass {
   clip-path: inset(0);
@@ -4464,12 +4477,26 @@ html[data-theme="dark"] body {
   pointer-events: none;
   transform-origin: 0 0;
   will-change: transform;
+  container-type: inline-size;
 }
 
 .lcd-view-transition-overlay canvas {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.lcd-view-transition-overlay::after {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  content: "";
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px var(--lcd-edge, #121719);
+}
+
+.lcd-view-transition-overlay .pause-overlay {
+  clip-path: inset(0);
 }
 
 /* Split drawer navigation and selective visual wayfinding. */

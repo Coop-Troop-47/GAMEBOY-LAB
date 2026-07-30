@@ -152,8 +152,13 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /const completeViewModeTransition = useCallback\([\s\S]*setViewModeTransition\(""\)[\s\S]*replayCartridgeInsertion\(\{ waitForGeometry: false \}\)/);
   assert.match(source, /lcdRendererRef\.current\?\.render\(\)[\s\S]*document\.createElement\("div"\)[\s\S]*lcd-view-transition-overlay[\s\S]*document\.createElement\("canvas"\)[\s\S]*context\?\.drawImage\(source/);
   assert.match(source, /setViewModeTransition\(nextViewMode === "screen" \? "zoom-in" : "zoom-out"\)[\s\S]*setViewMode\(nextViewMode\)[\s\S]*targetBounds[\s\S]*translateX[\s\S]*scaleX[\s\S]*overlay\.animate/);
+  assert.match(source, /const syncLiveLcd = \(\) =>[\s\S]*lcdRendererRef\.current\?\.render\(\)[\s\S]*snapshot\.width !== liveCanvas\.width[\s\S]*drawImage\([\s\S]*requestAnimationFrame\(syncLiveLcd\)/);
+  assert.match(source, /pauseIndicator[\s\S]*cloneNode\(true\)/);
+  assert.match(source, /borderWidth:\s*frameStyle\.borderWidth[\s\S]*borderWidth:\s*targetStyle\.borderWidth/s);
   assert.doesNotMatch(source, /document\.startViewTransition|flushSync/);
   assert.match(css, /\.lcd-view-transition-overlay\s*\{[^}]*position:\s*fixed[^}]*transform-origin:\s*0 0/s);
+  assert.match(css, /\.screen-frame::after\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px #121719/s);
+  assert.match(css, /\.cgb \.screen-frame::after\s*\{[^}]*#0d0f13/s);
   assert.match(css, /\.console-wrap\.view-zoom-in \.screen-frame,[\s\S]*\.console-wrap\.view-zoom-out \.screen-frame\s*\{[^}]*visibility:\s*hidden[^}]*transition:\s*none/s);
   assert.match(css, /\.console-wrap\.view-zoom-in \.device-rig,[\s\S]*\.console-wrap\.view-zoom-out \.device-rig\s*\{[^}]*transition:\s*none/s);
   assert.doesNotMatch(css, /::view-transition|@keyframes view-mode-zoom/);
