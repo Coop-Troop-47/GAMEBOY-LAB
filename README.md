@@ -69,7 +69,7 @@ network requests.
 database, or cloud configuration. Cartridge files, preferences, and battery
 saves remain local to the browser and are never uploaded.
 
-## Private releases
+## Releases
 
 The updater has two separate changelogs:
 
@@ -103,7 +103,7 @@ release:
 8. Read the Gist back and confirm its version, download URL, notes URL, and
    `changes` exactly match the release.
 
-The manifest Gist ID and fetch URL live in `app/version.js`. Only the manifest
-metadata is public. The repository, firmware, cartridge data, and downloadable
-standalone remain private. Update checks fail silently while offline;
-downloading a private release requires the owner to be signed in to GitHub.
+The manifest Gist ID and fetch URL live in `app/version.js`. The manifest
+metadata is public, while the standalone follows the visibility of its GitHub
+repository and release. Update checks fail silently while offline; downloading
+a private release requires the owner to be signed in to GitHub.

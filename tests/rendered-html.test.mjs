@@ -43,7 +43,7 @@ test("builds the complete emulator as the only self-contained public file", asyn
   assert.match(html, /DOWNLOAD \.SAV/i);
   assert.match(html, /Save states/i);
   assert.match(html, /DOWNLOAD ALL SAVES/i);
-  assert.match(html, /Restore all saved games/i);
+  assert.match(html, /RESTORE BACKUP/i);
   assert.match(html, /REPLACE & RESTORE/i);
   assert.match(html, /Manual Game Boy scale/i);
   assert.match(html, /Audio buffering/i);
@@ -62,7 +62,11 @@ test("builds the complete emulator as the only self-contained public file", asyn
   assert.match(html, /Super Mario Land 2: 6 Golden Coins/);
   assert.doesNotMatch(html, />Blend</i);
   assert.match(html, /data:image\/svg\+xml/);
-  assert.match(html, /viewBox=["']0 0 64 64["']/);
+  assert.match(html, /viewBox=["']10 4 44 57["']/);
+  assert.doesNotMatch(
+    await readFile(new URL("../app/Emulator.jsx", import.meta.url), "utf8"),
+    /<rect width="64" height="64" fill="#17191e"/,
+  );
   assert.doesNotMatch(html, /rx=['"]14['"]/);
   assert.doesNotMatch(html, /<script[^>]+\bsrc=/i);
   assert.doesNotMatch(html, /<link[^>]+\brel=["']stylesheet["']/i);
@@ -103,11 +107,21 @@ test("keeps every hardware input and new option accessible", async () => {
   const shader = await readFile(new URL("../app/lib/lcdShader.js", import.meta.url), "utf8");
   const optionsStart = source.indexOf('id="options-drawer"');
   const optionsEnd = source.indexOf("</aside>", optionsStart);
+  const emulationStart = source.indexOf('id="emulation-drawer"');
+  const emulationEnd = source.indexOf("</aside>", emulationStart);
   const saveDrawerStart = source.indexOf('id="save-drawer"');
   assert.ok(optionsStart >= 0 && optionsEnd > optionsStart);
+  assert.ok(emulationStart > optionsEnd && emulationEnd > emulationStart);
   assert.ok(saveDrawerStart > optionsEnd);
   assert.doesNotMatch(source.slice(optionsStart, optionsEnd), /<SaveCenter|Save center/);
   assert.doesNotMatch(source.slice(optionsStart, optionsEnd), /LOAD ROM|fileRef\.current\?\.click/);
+  assert.match(source.slice(optionsStart, optionsEnd), /DOWNLOAD ALL SAVES/);
+  assert.match(source.slice(optionsStart, optionsEnd), /RESTORE BACKUP/);
+  assert.doesNotMatch(source.slice(optionsStart, optionsEnd), /Audio buffering|Frame skipping/);
+  assert.match(source.slice(emulationStart, emulationEnd), /Audio buffering/);
+  assert.match(source.slice(emulationStart, emulationEnd), /Frame skipping/);
+  assert.doesNotMatch(source.slice(emulationStart, emulationEnd), /DOWNLOAD ALL SAVES|RESTORE BACKUP/);
+  assert.doesNotMatch(source, /className="transport"/);
   for (const label of ["Up", "Down", "Left", "Right", "A", "B", "Start", "Select"]) {
     assert.match(html, new RegExp(`(?:sub)?label.{0,5}${label}`, "i"));
   }
@@ -159,7 +173,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.doesNotMatch(css, /\.technical-readout\s*\{[^}]*position:\s*absolute/s);
   assert.match(css, /\.technical-readout\.visible\s*\{[^}]*height:\s*78px/s);
   assert.match(css, /\.technical-readout dd\s*\{[^}]*--metric-value-fit/s);
-  assert.match(css, /\.readout-cartridge dl\s*\{[^}]*repeat\(2,/s);
+  assert.match(css, /\.readout-cartridge dl\s*\{[^}]*repeat\(4,/s);
   const technicalCss = css.slice(
     css.indexOf(".technical-readout {"),
     css.indexOf(".key-hint {"),
@@ -179,7 +193,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /builtIn:\s*true/);
   assert.match(source, /LIBRARY_DISCOVERY_KEY/);
   assert.match(source, /rom\.system === "gbc" \? "GBC" : "DMG"/);
-  assert.match(source, /className="library-title-row"[\s\S]*<h3[\s\S]*library-system-tag system-/);
+  assert.match(source, /className="library-title-row"[\s\S]*<OverflowTitle as="h3"[\s\S]*library-system-tag system-/);
   assert.match(source, /className="tabletop-cartridge-caption"[\s\S]*library-system-tag system-/);
   assert.match(css, /\.library-title-row\s*\{[^}]*display:\s*flex[^}]*align-items:\s*center/s);
   assert.match(css, /\.library-system-tag\s*\{[^}]*font:\s*900 9px\/1/s);
@@ -224,7 +238,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(html, /Color theme/i);
   assert.match(html, /System/i);
   assert.match(html, /Presentation mode/i);
-  assert.match(html, /Opening menu pauses gameplay/i);
+  assert.match(html, /Opening a drawer pauses gameplay/i);
   assert.match(html, /Cartridge insertion animation/i);
   assert.match(html, /Integer display scaling/i);
   assert.match(source, /source pixel to a whole block of physical display pixels/i);
@@ -245,7 +259,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /theme === "system"/);
   assert.match(source, /pauseGame\("menu"\)/);
   assert.match(source, /resumeGame\("menu"\)/);
-  assert.match(source, /const anyDrawerOpen = drawerOpen \|\| saveDrawerOpen \|\| libraryDrawerOpen/);
+  assert.match(source, /const anyDrawerOpen = drawerOpen[\s\S]*emulationDrawerOpen[\s\S]*saveDrawerOpen[\s\S]*libraryDrawerOpen/);
   assert.match(source, /if \(anyDrawerOpen && pauseOnMenu\) pauseGame\("menu"\)/);
   assert.match(source, /setCartridgeInserting\(true\)/);
   assert.match(source, /window\.setTimeout\(resolve, 560\)/);
@@ -272,6 +286,10 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /libraryView === "tabletop"/);
   assert.match(source, /onClick=\{\(\) => onView\("tabletop"\)\}[\s\S]*TABLE/);
   assert.match(source, /className="tabletop-filter-tabs"/);
+  assert.match(source, /sortLibraryRecords\([\s\S]*librarySort,[\s\S]*activeLibraryId/);
+  assert.match(source, /option value="alphabetic">ALPHABETIC/);
+  assert.match(source, /option value="recent">RECENTLY PLAYED/);
+  assert.match(source, /option value="size">GAME SIZE/);
   assert.match(source, /function SaveCenter\(/);
   assert.match(source, /createSaveArchive\(localStorage/);
   assert.match(source, /parseSaveArchive\(await file\.text\(\)\)/);
@@ -283,6 +301,22 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /listLibraryRoms\(\)/);
   assert.match(source, /putLibraryRom\(libraryRecord\)/);
   assert.match(source, /resolveRomArtwork\(/);
+  assert.match(source, /function CataloguingOverlay\(/);
+  assert.match(source, /COULDN’T FIND ARTWORK/);
+  assert.match(source, /THIS STEP FINISHES AUTOMATICALLY/);
+  assert.match(source, /function ConsoleIcon\(/);
+  assert.match(source, /console-icon-shell/);
+  assert.match(source, /onDrop=\{\(event\) => \{[\s\S]*catalogueFile\(event\.dataTransfer\.files\[0\]\)/);
+  assert.match(source, /onChange=\{\(event\) => \{[\s\S]*catalogueFile\(event\.target\.files\?\.\[0\]\)/);
+  const catalogueStart = source.indexOf("const catalogueFile");
+  const catalogueEnd = source.indexOf("const loadLibraryRom", catalogueStart);
+  assert.ok(catalogueStart >= 0 && catalogueEnd > catalogueStart);
+  const catalogueSource = source.slice(catalogueStart, catalogueEnd);
+  assert.match(catalogueSource, /putLibraryRom\(libraryRecord\)/);
+  assert.match(catalogueSource, /ALREADY IN LIBRARY/);
+  assert.match(catalogueSource, /EMBEDDED_LIBRARY_ROMS\.find/);
+  assert.doesNotMatch(catalogueSource, /loadFile\(|setCartridgePresent\(true\)|romRef\.current\s*=/);
+  assert.match(source, /emulator\.setCompatibilityPalette\(id\);\s*if \(romRef\.current\)/);
   assert.match(source, /setCartridgeArtwork\(artworkResult\.artwork\)/);
   assert.match(source, /<image[\s\S]*className="cart-artwork"/);
   assert.doesNotMatch(source, /modelRef\.current\.toUpperCase\(\)/);
@@ -301,7 +335,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.app-shell:has\(\.control-deck\.open:not\(\.library-deck\)\) \.console-wrap\s*\{[^}]*width:\s*calc\(100% - 480px\)[^}]*margin-right:\s*480px/s);
   assert.match(css, /\.app-shell:has\(\.library-deck\.open\) \.console-wrap\s*\{[^}]*width:\s*calc\(100% - 500px\)[^}]*margin-left:\s*500px/s);
   assert.doesNotMatch(css, /\.pause-overlay\s*\{[^}]*backdrop-filter/s);
-  assert.match(css, /\.pause-overlay\s*\{[^}]*contain:\s*paint[^}]*clip-path:\s*inset\(0\)/s);
+  assert.match(css, /\.pause-overlay\s*\{[^}]*inset:\s*-1px[^}]*width:\s*auto[^}]*height:\s*auto[^}]*contain:\s*paint/s);
   assert.match(css, /canvas\.lcd-output\s*\{[^}]*image-rendering:\s*auto/s);
   assert.match(css, /canvas\.frame-source\s*\{[^}]*display:\s*none/s);
   assert.match(css, /\.console-wrap\s*\{[^}]*height:\s*100%[^}]*min-height:\s*0/s);
@@ -314,6 +348,8 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /@keyframes cartridge-shell-knockback/);
   assert.doesNotMatch(css, /--cartridge-duck/);
   assert.match(css, /@keyframes library-card-in/);
+  assert.match(css, /@keyframes library-card-delete/);
+  assert.match(css, /\.library-card\.is-deleting \.library-cartridge-graphic\s*\{[^}]*library-cartridge-delete/s);
   assert.match(css, /\.library-stack-trigger\s*\{[^}]*left:\s*0[^}]*translate\(-76px,\s*-50%\)/s);
   assert.match(css, /\.library-deck\s*\{[^}]*inset:\s*0 auto 0 0[^}]*translateX\(-105%\)/s);
   assert.match(css, /\.console-wrap\.cartridge-hovered \.game-cartridge\s*\{/);
@@ -321,6 +357,8 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.screen-only \.console-wrap\s*\{[^}]*--cartridge-width:\s*64%/s);
   assert.match(css, /\.cartridge-prompt-hint\s*\{[^}]*top:\s*-52px[^}]*opacity:\s*0[^}]*opacity 300ms ease-in-out[^}]*translate 300ms ease-in-out/s);
   assert.match(css, /\.cartridge-prompt-hint\.visible\s*\{[^}]*opacity:\s*1/s);
+  assert.match(css, /@media \(max-width: 900px\)[\s\S]*\.cartridge-tooltip-layer\s*\{[^}]*width:\s*148px/s);
+  assert.match(css, /@media \(max-width: 900px\)[\s\S]*\.cartridge-info-tooltip::before\s*\{[^}]*display:\s*none/s);
   assert.match(css, /\.library-discovery-hint\.visible\s*\{[^}]*opacity:\s*1/s);
   assert.match(css, /\.save-deck\s*\{[^}]*var\(--cyan\)/s);
   assert.match(css, /\.game-cartridge\s*\{[^}]*aspect-ratio:\s*57 \/ 66/s);
@@ -371,4 +409,34 @@ test("renders reference-matched DMG and supplied-purple GBC shells", async () =>
   assert.match(css, /\.dmg \.power-label i,[^}]*\.cgb \.power-label i\s*\{[^}]*background:\s*#391a26/s);
   assert.match(css, /\.action-buttons \.control-button:active,[^}]*\.action-buttons \.control-button\.is-pressed\s*\{[^}]*inset 0 3px 5px/s);
   assert.match(css, /\.cgb \.speaker\s*\{[^}]*grid-template-columns:\s*repeat\(7,\s*5px\)[^}]*grid-template-rows:\s*repeat\(8,\s*5px\)/s);
+});
+
+test("protects cartridge changes and keeps hardware and library labels readable", async () => {
+  const source = await readFile(new URL("../app/Emulator.jsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(source, /const LOAD_HOLD_DURATION = 1000/);
+  assert.match(source, /function HoldToLoadButton\(/);
+  assert.match(source, /data-requires-hold=\{requiresHold \? "true" : "false"\}/);
+  assert.match(source, /ARE YOU SURE\? UNSAVED PROGRESS WILL BE LOST/);
+  assert.match(source, /holdShakeRef\.current = buttonRef\.current\?\.animate\?\./);
+  assert.match(source, /requiresHold=\{cartridgePresent\}/);
+  assert.match(css, /\.hold-to-load\[data-holding="true"\] \.hold-load-safety::before\s*\{[^}]*hold-load-fill 1s linear forwards/s);
+  assert.match(css, /\.hold-to-load\[data-requires-hold="true"\]:not\(\.tabletop-cartridge\):hover \.hold-load-safety/);
+  assert.match(css, /\.action-label-b\s*\{[^}]*left:\s*22px/s);
+  assert.match(css, /\.action-label-a\s*\{[^}]*right:\s*22px/s);
+  assert.match(css, /\.cgb \.action-buttons \.control-button > span\s*\{[^}]*rotate\(22deg\)/s);
+  assert.match(css, /\.dpad-cross::after\s*\{[^}]*linear-gradient\([^}]*135deg[^}]*22%[^}]*78%/s);
+  assert.match(source, /function OverflowTitle\(/);
+  assert.match(source, /const contentWidth = title\.clientWidth[\s\S]*style\.paddingLeft[\s\S]*style\.paddingRight/);
+  assert.match(source, /text\.scrollWidth \+ 24/);
+  assert.match(source, /\{travel > 0 && <span aria-hidden="true">\{children\}<\/span>\}/);
+  assert.match(css, /\.overflow-title-track > span\s*\{[^}]*flex:\s*0 0 auto/s);
+  assert.match(css, /\.overflow-title\.is-overflowing \.overflow-title-track\s*\{[^}]*overflow-title-scroll[^}]*linear infinite/s);
+  assert.match(css, /\.tabletop-cartridge \.overflow-title\.is-overflowing \.overflow-title-track\s*\{[^}]*animation:\s*none[^}]*translateX\(0\)/s);
+  assert.match(css, /\.tabletop-cartridge:hover \.overflow-title\.is-overflowing \.overflow-title-track[\s\S]*overflow-title-scroll var\(--title-scroll-duration\)/s);
+  assert.match(css, /\.library-card\.is-active \.library-title-row\s*\{[^}]*padding-right:\s*92px/s);
+  assert.match(source, /className="key-hint controls-key-hint"/);
+  assert.match(css, /\.controls-key-hint\s*\{[^}]*display:\s*flex[^}]*white-space:\s*nowrap/s);
+  assert.match(css, /\.model-switch button\.active \.console-option-icon\s*\{[^}]*drop-shadow\(3px 3px 0 var\(--cyan\)\)/s);
+  assert.doesNotMatch(css, /\.model-switch button\.active \.console-option-icon\s*\{[^}]*0 0 2px/s);
 });

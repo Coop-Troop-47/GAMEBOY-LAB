@@ -95,6 +95,44 @@ export async function removeLibraryRom(id) {
   await runStore("readwrite", (store) => store.delete(id));
 }
 
+function recordTitle(record) {
+  return String(record?.title || record?.fileName || "");
+}
+
+function recordSize(record) {
+  return Number(record?.romSize || record?.rom?.byteLength || 0);
+}
+
+function recordRecency(record) {
+  return Number(record?.lastPlayedAt || record?.addedAt || 0);
+}
+
+export function sortLibraryRecords(records, mode = "recent", activeId = "") {
+  const compareTitle = (left, right) => recordTitle(left).localeCompare(
+    recordTitle(right),
+    undefined,
+    { numeric: true, sensitivity: "base" },
+  );
+  const compareMode = {
+    alphabetic: compareTitle,
+    size: (left, right) => (
+      recordSize(right) - recordSize(left)
+      || compareTitle(left, right)
+    ),
+    recent: (left, right) => (
+      recordRecency(right) - recordRecency(left)
+      || compareTitle(left, right)
+    ),
+  }[mode] || compareTitle;
+
+  return [...records].sort((left, right) => {
+    const leftActive = Boolean(activeId) && left.id === activeId;
+    const rightActive = Boolean(activeId) && right.id === activeId;
+    if (leftActive !== rightActive) return leftActive ? -1 : 1;
+    return compareMode(left, right) || String(left.id).localeCompare(String(right.id));
+  });
+}
+
 export function readRomTitle(bytes) {
   const colorHeader = (bytes[0x143] & 0x80) !== 0;
   const end = colorHeader ? 0x13f : 0x144;
@@ -107,6 +145,118 @@ export function readRomTitle(bytes) {
 
 function sourceStem(fileName) {
   return (fileName || "Untitled").replace(/\.(gbc?|zip)$/i, "").trim();
+}
+
+function normalizeTitleLookup(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function cleanDumpTitle(value) {
+  return sourceStem(value)
+    .replace(/\[[^\]]*]/g, " ")
+    .replace(
+      /\([^)]*(?:usa|europe|world|japan|australia|france|germany|italy|spain|korea|china|taiwan|\ben\b|\bfr\b|\bde\b|\bes\b|\bit\b|rev(?:ision)?|beta|proto(?:type)?|demo|virtual console|sgb enhanced|gb compatible|game boy compatible|switch online)[^)]*\)/gi,
+      " ",
+    )
+    .replace(/[_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function readableTitle(value) {
+  const title = String(value || "").trim();
+  if (!title) return "Untitled";
+  if (title === title.toUpperCase() || title === title.toLowerCase()) {
+    return title
+      .toLowerCase()
+      .replace(/(^|[\s:–—-])([a-z])/g, (_, lead, letter) => `${lead}${letter.toUpperCase()}`)
+      .replace(/\bIi\b/g, "II")
+      .replace(/\bIii\b/g, "III")
+      .replace(/\bIv\b/g, "IV")
+      .replace(/\bDx\b/g, "DX")
+      .replace(/\bGbc\b/g, "GBC");
+  }
+  return title;
+}
+
+function titleDistance(left, right) {
+  const a = normalizeTitleLookup(left);
+  const b = normalizeTitleLookup(right);
+  if (!a || !b) return 1;
+  if (a === b) return 0;
+  const row = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let aIndex = 1; aIndex <= a.length; aIndex += 1) {
+    let diagonal = row[0];
+    row[0] = aIndex;
+    for (let bIndex = 1; bIndex <= b.length; bIndex += 1) {
+      const previous = row[bIndex];
+      row[bIndex] = Math.min(
+        row[bIndex] + 1,
+        row[bIndex - 1] + 1,
+        diagonal + (a[aIndex - 1] === b[bIndex - 1] ? 0 : 1),
+      );
+      diagonal = previous;
+    }
+  }
+  return row[b.length] / Math.max(a.length, b.length);
+}
+
+export function identifyRomTitle({ bytes, fileName, knownTitles = [] }) {
+  const headerTitle = readRomTitle(bytes);
+  const fileTitle = cleanDumpTitle(fileName);
+  const fileKey = normalizeTitleLookup(fileTitle);
+  const headerKey = normalizeTitleLookup(headerTitle);
+  const fileWords = fileTitle.split(/\s+/).filter(Boolean);
+  const genericFileName = (
+    /^(?:game|rom|untitled|gameboy|gb|gbc)(?:\s+(?:copy|\d+))*$/i.test(fileTitle)
+    || /^[a-f0-9]{12,}$/i.test(fileTitle)
+  );
+  const descriptiveFileName = (
+    !genericFileName
+    && fileKey.length >= 3
+    && (fileWords.length >= 2 || fileKey.length >= 7)
+  );
+  const candidates = [fileTitle, headerTitle]
+    .map((value) => value.trim())
+    .filter((value) => value && normalizeTitleLookup(value) !== "untitled");
+  const catalogueCandidates = descriptiveFileName ? [fileTitle] : candidates;
+  let bestKnown = null;
+  let bestDistance = 1;
+  for (const knownTitle of knownTitles) {
+    for (const candidate of catalogueCandidates) {
+      const distance = titleDistance(candidate, knownTitle);
+      const candidateKey = normalizeTitleLookup(candidate);
+      const knownKey = normalizeTitleLookup(knownTitle);
+      const prefixMatch = (
+        Math.min(candidateKey.length, knownKey.length) >= 7
+        && (candidateKey.startsWith(knownKey) || knownKey.startsWith(candidateKey))
+      );
+      const adjusted = prefixMatch ? Math.min(distance, 0.12) : distance;
+      if (adjusted < bestDistance) {
+        bestDistance = adjusted;
+        bestKnown = knownTitle;
+      }
+    }
+  }
+  if (bestKnown && bestDistance <= 0.2) return bestKnown;
+
+  if (
+    descriptiveFileName
+    && (
+      !headerKey
+      || fileWords.length >= 2
+      || fileKey.includes(headerKey)
+      || headerKey.includes(fileKey)
+      || titleDistance(fileTitle, headerTitle) <= 0.45
+    )
+  ) {
+    return readableTitle(fileTitle);
+  }
+  return readableTitle(headerTitle);
 }
 
 function artworkCandidates(fileName, title) {
@@ -173,36 +323,73 @@ function xmlEscape(value) {
 }
 
 function splitTitle(value) {
-  const words = String(value).replace(/[_-]+/g, " ").trim().split(/\s+/);
-  const lines = ["", ""];
-  for (const word of words) {
-    const target = !lines[0] || (lines[0].length + word.length < 16 && !lines[1]) ? 0 : 1;
-    lines[target] = `${lines[target]} ${word}`.trim();
+  const maxCharacters = 18;
+  const words = String(value)
+    .replace(/[_–—-]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .flatMap((word) => {
+      if (word.length <= maxCharacters) return [word];
+      const chunks = [];
+      for (let index = 0; index < word.length; index += maxCharacters) {
+        chunks.push(word.slice(index, index + maxCharacters));
+      }
+      return chunks;
+    });
+  const lines = [];
+  while (words.length && lines.length < 3) {
+    let line = "";
+    while (words.length) {
+      const candidate = `${line} ${words[0]}`.trim();
+      if (line && candidate.length > maxCharacters) break;
+      line = candidate;
+      words.shift();
+    }
+    lines.push(line);
   }
-  if (!lines[1] && lines[0].length > 15) {
-    lines[1] = lines[0].slice(15);
-    lines[0] = lines[0].slice(0, 15);
+  if (words.length) {
+    const tail = `${lines[2]} ${words.join(" ")}`.trim();
+    lines[2] = `${tail.slice(0, maxCharacters - 1).trimEnd()}…`;
   }
-  return lines.map((line) => xmlEscape(line.slice(0, 22)));
+  return lines.length ? lines : ["UNTITLED"];
 }
 
 export function createFallbackArtwork(title, system, seed = "0") {
-  const [lineOne, lineTwo] = splitTitle(title);
+  const titleLines = splitTitle(title);
   const value = Number.parseInt(String(seed).slice(-6), 16) || 0;
-  const accent = ["#42d6d0", "#f05a88", "#c6f050"][value % 3];
-  const secondary = ["#f05a88", "#c6f050", "#42d6d0"][(value >> 2) % 3];
+  const stripeThemes = [
+    ["#42d6d0", "#f05a88", "#c6f050"],
+    ["#ff8b3d", "#4267d6", "#ffd84a"],
+    ["#7d5ce7", "#65dfbd", "#ff6f7d"],
+    ["#e9484d", "#42d6d0", "#fff1a8"],
+    ["#3557b7", "#e3ad3d", "#4bd8bd"],
+    ["#4eaa5b", "#8b55c9", "#ff884d"],
+    ["#e74691", "#264d8d", "#b9ef47"],
+    ["#3978d5", "#f17467", "#f1cf45"],
+  ];
+  const [accent, secondary, tertiary] = stripeThemes[value % stripeThemes.length];
   const base = system === "gbc" ? "#24252a" : "#e7e4d9";
   const ink = system === "gbc" ? "#f1f0e9" : "#24272e";
+  const longestLine = Math.max(...titleLines.map((line) => line.length));
+  const titleSize = longestLine <= 12 ? 36 : longestLine <= 16 ? 31 : 27;
+  const lineHeight = titleSize + 5;
+  const titleStart = 291 - ((titleLines.length - 1) * lineHeight) / 2;
+  const titleMarkup = titleLines
+    .map((line, index) => (
+      `<tspan x="210" y="${Math.round(titleStart + index * lineHeight)}">${xmlEscape(line)}</tspan>`
+    ))
+    .join("");
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 420">
       <rect width="420" height="420" fill="${base}"/>
-      <path d="M0 0H420V76L0 170Z" fill="${accent}"/>
-      <path d="M0 108L420 18V124L0 214Z" fill="${secondary}" opacity=".88"/>
-      <rect x="28" y="228" width="364" height="136" fill="${ink}"/>
-      <text x="210" y="276" text-anchor="middle" fill="${base}" font-family="Arial Black,Arial,sans-serif" font-size="31" font-style="italic" font-weight="900">${lineOne}</text>
-      <text x="210" y="316" text-anchor="middle" fill="${base}" font-family="Arial Black,Arial,sans-serif" font-size="31" font-style="italic" font-weight="900">${lineTwo}</text>
-      <text x="210" y="347" text-anchor="middle" fill="${accent}" font-family="monospace" font-size="12" font-weight="700" letter-spacing="4">GAMEBOY LAB ARCHIVE</text>
-      <g fill="${ink}" opacity=".22">
+      <path d="M0 0H420V70L0 162Z" fill="${accent}"/>
+      <path d="M0 92L420 8V105L0 198Z" fill="${secondary}"/>
+      <path d="M0 174L420 80V126L0 220Z" fill="${tertiary}"/>
+      <rect x="28" y="224" width="364" height="146" fill="${ink}"/>
+      <text text-anchor="middle" fill="${base}" font-family="Arial Black,Arial,sans-serif" font-size="${titleSize}" font-style="italic" font-weight="900">${titleMarkup}</text>
+      <text x="210" y="354" text-anchor="middle" fill="${accent}" font-family="monospace" font-size="11" font-weight="700" letter-spacing="3.4">GAMEBOY LAB ARCHIVE</text>
+      <g fill="${tertiary}" opacity=".42">
         <rect x="28" y="28" width="12" height="12"/><rect x="48" y="28" width="12" height="12"/>
         <rect x="68" y="28" width="12" height="12"/><rect x="88" y="28" width="12" height="12"/>
       </g>
@@ -227,7 +414,7 @@ export async function resolveRomArtwork({ fileName, title, system, seed }) {
           cache: "force-cache",
         });
         const artwork = await readArtworkResponse(response, system, controller.signal);
-        if (artwork) return artwork;
+        if (artwork) return { ...artwork, matchedName: candidate };
       } catch (error) {
         if (error?.name === "AbortError") break;
       }

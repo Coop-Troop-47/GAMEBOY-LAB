@@ -1,11 +1,13 @@
 {
-  "version": "1.1.1",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.1.1/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.1.1",
+  "version": "1.2.0",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.0/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.0",
   "changes": [
-    "Reference-matched DMG and GBC control placement and shell contours.",
-    "A rounded, staggered GBC speaker grille and corrected control spacing.",
-    "A theme-aware technical readout and cleaner cartridge palette selector.",
-    "Library filters now return both detail and tabletop views to the top."
+    "A rebuilt cartridge library with detail and tabletop layouts, filters, sorting, and active-game pinning.",
+    "Animated artwork cataloguing, duplicate protection, smoother removals, and clearer generated labels.",
+    "Flicker-free cartridge switching plus more consistent cartridge, tooltip, and screen-only scaling.",
+    "Safer game loading, complete save backup and restore, and clearer cartridge-save controls.",
+    "Separate Options and Emulation drawers with a compact keyboard guide and richer technical controls.",
+    "Sharper pause coverage, theme polish, and a larger background-free GAMEBOY LAB icon."
   ]
 }

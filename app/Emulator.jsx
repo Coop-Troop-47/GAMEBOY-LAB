@@ -18,11 +18,13 @@ import { EMBEDDED_LIBRARY_ROMS } from "virtual:gameboy-lab-library";
 import {
   createFallbackArtwork,
   getLibraryRom,
+  identifyRomTitle,
   listLibraryRoms,
   putLibraryRom,
   readRomTitle,
   removeLibraryRom,
   resolveRomArtwork,
+  sortLibraryRecords,
 } from "./lib/romLibrary";
 import { APP_VERSION, findAvailableUpdate } from "./version";
 
@@ -43,6 +45,7 @@ const SCALING_DEFAULTS_VERSION = 1;
 const SCREEN_ONLY_FRAME_BORDER = 8;
 const SCREEN_ONLY_BEZEL_OUTLINE = 8;
 const SCREEN_ONLY_CARTRIDGE_OVERHANG = 20;
+const LOAD_HOLD_DURATION = 1000;
 const SCREEN_ONLY_CARTRIDGE_CENTER_OFFSET = (
   SCREEN_ONLY_CARTRIDGE_OVERHANG - SCREEN_ONLY_BEZEL_OUTLINE
 ) / 2;
@@ -54,23 +57,67 @@ function BrandMark() {
   return (
     <svg
       className="brand-mark"
-      viewBox="0 0 64 64"
+      viewBox="10 4 44 57"
       aria-hidden="true"
       focusable="false"
     >
-      <rect width="64" height="64" fill="#17191e" />
       <path
         d="M12 7H52V53L46 59H18L12 53Z"
         fill="#f1f0e9"
+        stroke="#17191e"
+        strokeWidth="1.5"
+        vectorEffect="non-scaling-stroke"
       />
       <rect x="16" y="12" width="32" height="25" fill="#292c33" />
       <rect x="20" y="26" width="4" height="7" fill="#c6f050" />
       <rect x="26" y="21" width="4" height="12" fill="#42d6d0" />
       <rect x="32" y="17" width="4" height="16" fill="#f05a88" />
       <rect x="38" y="23" width="4" height="10" fill="#f1f0e9" />
-      <path d="M25 41v13M18.5 47.5h13" stroke="#292c33" strokeWidth="5" />
-      <rect x="36" y="46" width="7" height="7" fill="#f05a88" />
-      <rect x="45" y="41" width="7" height="7" fill="#42d6d0" />
+      <g transform="translate(-2.5 0)">
+        <path d="M25 41v13M18.5 47.5h13" stroke="#292c33" strokeWidth="5" />
+        <rect x="36" y="46" width="7" height="7" fill="#f05a88" />
+        <rect x="45" y="41" width="7" height="7" fill="#42d6d0" />
+      </g>
+    </svg>
+  );
+}
+
+function ConsoleIcon({ model }) {
+  const isColor = model === "cgb";
+  return (
+    <svg
+      className={`console-option-icon ${isColor ? "is-gbc" : "is-dmg"}`}
+      viewBox="0 0 48 64"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        className="console-icon-shell"
+        d={isColor
+          ? "M4 2H44V53Q44 62 24 62Q4 62 4 53Z"
+          : "M4 2H44V53Q44 62 35 62H4Z"}
+      />
+      <path className="console-icon-bezel" d="M9 8H39V27Q39 31 35 31H9Z" />
+      <rect className="console-icon-lcd" x="14" y="12" width="20" height="15" />
+      <path className="console-icon-dpad" d="M7.5 40H12.5V35H18.5V40H23.5V46H18.5V51H12.5V46H7.5Z" />
+      <circle className="console-icon-button button-b" cx="29.5" cy="44" r="3.6" />
+      <circle className="console-icon-button button-a" cx="35.5" cy="38" r="3.6" />
+    </svg>
+  );
+}
+
+function SettingIcon({ type }) {
+  const paths = {
+    display: <><rect x="4" y="5" width="24" height="17" /><path d="M12 28H20M16 22V28" /></>,
+    lcd: <><rect x="4" y="4" width="24" height="24" /><path d="M10 4V28M16 4V28M22 4V28M4 10H28M4 16H28M4 22H28" /></>,
+    audio: <><path d="M5 13H11L18 7V25L11 19H5Z" /><path d="M22 11Q27 16 22 21M25 7Q33 16 25 25" /></>,
+    controls: <><path d="M4 13Q4 7 10 7H22Q28 7 28 13V22Q28 26 24 26L19 21H13L8 26Q4 26 4 22Z" /><path d="M9 14H15M12 11V17M21 13H21.1M24 16H24.1" /></>,
+    data: <><path d="M5 7H27V26H5Z" /><path d="M10 7V3H22V7M10 14H22M10 20H18" /></>,
+    chip: <><rect x="8" y="8" width="16" height="16" /><path d="M12 1V8M20 1V8M12 24V31M20 24V31M1 12H8M1 20H8M24 12H31M24 20H31M13 13H19V19H13Z" /></>,
+  };
+  return (
+    <svg className="setting-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      {paths[type]}
     </svg>
   );
 }
@@ -629,6 +676,48 @@ function drawBootScreen(context, model, progress, title) {
   context.putImageData(image, 0, 0);
 }
 
+function framebufferHasVisibleDetail(frame) {
+  if (!frame || frame.length < 16) return false;
+  const red = frame[0];
+  const green = frame[1];
+  const blue = frame[2];
+  let detailedSamples = 0;
+  // A newly reset core commonly exposes one uniform, uninitialized frame.
+  // Sampling a prime pixel stride catches real boot-logo detail without
+  // inspecting or changing any emulated state.
+  for (let index = 37 * 4; index < frame.length; index += 37 * 4) {
+    if (
+      Math.abs(frame[index] - red)
+      + Math.abs(frame[index + 1] - green)
+      + Math.abs(frame[index + 2] - blue)
+      > 12
+    ) {
+      detailedSamples += 1;
+      if (detailedSamples >= 8) return true;
+    }
+  }
+  return false;
+}
+
+async function decodeArtworkForAnimation(source) {
+  if (!source || typeof window === "undefined" || !window.Image) return;
+  const image = new window.Image();
+  image.decoding = "async";
+  image.src = source;
+  try {
+    if (image.decode) {
+      await image.decode();
+    } else {
+      await new Promise((resolve) => {
+        image.onload = resolve;
+        image.onerror = resolve;
+      });
+    }
+  } catch {
+    // A failed decode still falls back to the SVG/image element's normal load.
+  }
+}
+
 function ControlButton({ label, sublabel, button, onPress, pressed = false, className = "" }) {
   const stop = (event) => {
     event.preventDefault();
@@ -656,6 +745,171 @@ function ControlButton({ label, sublabel, button, onPress, pressed = false, clas
     >
       <span>{label}</span>
       {sublabel && <small>{sublabel}</small>}
+    </button>
+  );
+}
+
+function OverflowTitle({
+  as: Component = "span",
+  children,
+  className = "",
+}) {
+  const titleRef = useRef(null);
+  const textRef = useRef(null);
+  const [travel, setTravel] = useState(0);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const title = titleRef.current;
+      const text = textRef.current;
+      if (!title || !text) return;
+      const style = window.getComputedStyle(title);
+      const contentWidth = title.clientWidth
+        - Number.parseFloat(style.paddingLeft || "0")
+        - Number.parseFloat(style.paddingRight || "0");
+      const overflow = Math.ceil(text.scrollWidth - contentWidth);
+      setTravel(overflow > 0 ? Math.ceil(text.scrollWidth + 24) : 0);
+    };
+    measure();
+    const observer = typeof window.ResizeObserver === "undefined"
+      ? null
+      : new window.ResizeObserver(measure);
+    observer?.observe(titleRef.current);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [children]);
+
+  return (
+    <Component
+      ref={titleRef}
+      className={`${className} overflow-title ${travel > 0 ? "is-overflowing" : ""}`}
+      title={String(children)}
+      style={{
+        "--title-travel": `${-travel}px`,
+        "--title-scroll-duration": `${Math.min(9, Math.max(4, 3 + travel / 28))}s`,
+      }}
+    >
+      <span className="overflow-title-track">
+        <span ref={textRef}>{children}</span>
+        {travel > 0 && <span aria-hidden="true">{children}</span>}
+      </span>
+    </Component>
+  );
+}
+
+function HoldToLoadButton({
+  children,
+  className = "",
+  confirmName,
+  onConfirm,
+  requiresHold = false,
+  ...buttonProps
+}) {
+  const buttonRef = useRef(null);
+  const holdShakeRef = useRef(null);
+  const holdTimerRef = useRef(0);
+  const holdingRef = useRef(false);
+  const [holding, setHolding] = useState(false);
+
+  const cancelHold = useCallback(() => {
+    window.clearTimeout(holdTimerRef.current);
+    holdShakeRef.current?.cancel();
+    holdShakeRef.current = null;
+    holdTimerRef.current = 0;
+    holdingRef.current = false;
+    setHolding(false);
+  }, []);
+
+  const beginHold = useCallback(() => {
+    if (!requiresHold || holdingRef.current || buttonProps.disabled) return;
+    holdingRef.current = true;
+    setHolding(true);
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      holdShakeRef.current = buttonRef.current?.animate?.([
+        { translate: "0 0" },
+        { translate: "-2px 0" },
+        { translate: "2px -1px" },
+        { translate: "-1px 1px" },
+        { translate: "2px 0" },
+        { translate: "0 0" },
+      ], {
+        duration: 130,
+        easing: "steps(2, end)",
+        iterations: Infinity,
+      });
+    }
+    holdTimerRef.current = window.setTimeout(() => {
+      holdShakeRef.current?.cancel();
+      holdShakeRef.current = null;
+      holdTimerRef.current = 0;
+      holdingRef.current = false;
+      setHolding(false);
+      onConfirm();
+    }, LOAD_HOLD_DURATION);
+  }, [buttonProps.disabled, onConfirm, requiresHold]);
+
+  useEffect(() => cancelHold, [cancelHold]);
+  useEffect(() => {
+    if (!requiresHold) cancelHold();
+  }, [cancelHold, requiresHold]);
+
+  const safetyLabel = `Hold for 1 second to load ${confirmName}. Unsaved progress will be lost.`;
+
+  return (
+    <button
+      {...buttonProps}
+      ref={buttonRef}
+      className={`${className} hold-to-load ${holding ? "is-holding" : ""}`}
+      type="button"
+      aria-label={requiresHold ? safetyLabel : buttonProps["aria-label"]}
+      data-requires-hold={requiresHold ? "true" : "false"}
+      data-holding={holding ? "true" : "false"}
+      title={requiresHold ? safetyLabel : buttonProps.title}
+      onPointerDown={(event) => {
+        if (!requiresHold || event.button !== 0) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        beginHold();
+      }}
+      onPointerUp={(event) => {
+        if (!requiresHold) return;
+        event.preventDefault();
+        cancelHold();
+      }}
+      onPointerCancel={cancelHold}
+      onPointerLeave={() => {
+        if (requiresHold) cancelHold();
+      }}
+      onKeyDown={(event) => {
+        if (!requiresHold || !["Enter", " "].includes(event.key) || event.repeat) return;
+        event.preventDefault();
+        beginHold();
+      }}
+      onKeyUp={(event) => {
+        if (!requiresHold || !["Enter", " "].includes(event.key)) return;
+        event.preventDefault();
+        cancelHold();
+      }}
+      onClick={(event) => {
+        if (requiresHold) {
+          event.preventDefault();
+          return;
+        }
+        onConfirm();
+      }}
+      onContextMenu={(event) => {
+        if (requiresHold) event.preventDefault();
+      }}
+    >
+      {children}
+      {requiresHold && (
+        <span className="hold-load-safety" aria-hidden="true">
+          <b>{holding ? "ARE YOU SURE? UNSAVED PROGRESS WILL BE LOST" : "HOLD 1S TO LOAD"}</b>
+        </span>
+      )}
     </button>
   );
 }
@@ -701,6 +955,63 @@ function CartridgeGraphic({
       <circle className="cart-screw" cx="280" cy="568" r="18" />
       <path className="cart-screw-slot" d="M271 568H289" />
     </svg>
+  );
+}
+
+function CataloguingOverlay({ cataloguing }) {
+  if (!cataloguing) return null;
+  const { artwork, artworkSource, fileName, phase, system, title } = cataloguing;
+  const phaseCopy = {
+    outline: ["READING CARTRIDGE", "Checking the ROM header and cartridge hardware."],
+    checking: ["MATCHING ARTWORK", "Searching the local catalogue and cover archive."],
+    fallback: ["COULDN’T FIND ARTWORK", "Building a clean GAMEBOY LAB placeholder label instead."],
+    painting: ["PAINTING CARTRIDGE", `${system === "gbc" ? "Black GBC" : "Grey DMG"} shell and label selected.`],
+    shelving: ["ADDED TO LIBRARY", "Filed locally. Choose it from the library whenever you’re ready."],
+    duplicate: ["ALREADY IN LIBRARY", "This exact cartridge is already stored. No duplicate was created."],
+    error: ["COULDN’T ADD CARTRIDGE", cataloguing.error || "The ROM could not be catalogued."],
+  };
+  const [heading, detail] = phaseCopy[phase] || phaseCopy.outline;
+  return (
+    <div className={`catalogue-scrim catalogue-${phase}`} role="presentation">
+      <section
+        className="catalogue-stage"
+        role="dialog"
+        aria-modal="true"
+        aria-busy={!["shelving", "duplicate", "error"].includes(phase)}
+        aria-labelledby="catalogue-title"
+        aria-describedby="catalogue-detail"
+      >
+        <header>
+          <span>LOCAL CARTRIDGE ARCHIVE</span>
+          <b>CATALOGUING</b>
+        </header>
+        <div className="catalogue-visual" aria-hidden="true">
+          <span className="catalogue-scan-line" />
+          <CartridgeGraphic
+            artwork={artwork}
+            cartridgeKind={system === "gbc" ? "gbc" : "gb"}
+            className={`catalogue-cartridge ${artworkSource === "generated" ? "uses-placeholder" : ""}`}
+          />
+          <span className="catalogue-color-chip">
+            {system === "gbc" ? "GBC · BLACK" : "DMG · GREY"}
+          </span>
+        </div>
+        <div className="catalogue-copy">
+          <div className="catalogue-steps" aria-hidden="true">
+            <i className={phase !== "outline" ? "done" : "active"}>1</i>
+            <span />
+            <i className={["painting", "shelving"].includes(phase) ? "done" : phase === "checking" || phase === "fallback" ? "active" : ""}>2</i>
+            <span />
+            <i className={phase === "shelving" ? "done" : phase === "painting" ? "active" : ""}>3</i>
+          </div>
+          <span>{fileName}</span>
+          <h2 id="catalogue-title">{heading}</h2>
+          <strong>{title}</strong>
+          <p id="catalogue-detail">{detail}</p>
+          <small>THIS STEP FINISHES AUTOMATICALLY</small>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -800,10 +1111,13 @@ function LibraryStackButton({ count, onOpen, open, showDiscoveryHint }) {
 
 function RomLibraryDrawer({
   activeLibraryId,
+  cartridgePresent,
+  deletingLibraryId,
   libraryFilter,
   libraryQuery,
   libraryReady,
   libraryRoms,
+  librarySort,
   libraryStatus,
   libraryView,
   loadLibraryRom,
@@ -812,17 +1126,24 @@ function RomLibraryDrawer({
   onFilter,
   onQuery,
   onRemove,
+  onSort,
   onView,
   open,
   removingLibraryId,
 }) {
   const drawerRef = useRef(null);
+  const layoutPositionsRef = useRef(new Map());
   const resultsRef = useRef(null);
   const query = libraryQuery.trim().toLowerCase();
-  const visibleRoms = libraryRoms.filter((rom) => (
-    (libraryFilter === "all" || rom.system === libraryFilter)
-    && (!query || `${rom.title} ${rom.fileName}`.toLowerCase().includes(query))
-  ));
+  const visibleRoms = sortLibraryRecords(
+    libraryRoms.filter((rom) => (
+      (libraryFilter === "all" || rom.system === libraryFilter)
+      && (!query || `${rom.title} ${rom.fileName}`.toLowerCase().includes(query))
+    )),
+    librarySort,
+    activeLibraryId,
+  );
+  const visibleLayoutKey = `${libraryView}:${visibleRoms.map((rom) => rom.id).join("|")}`;
 
   useLayoutEffect(() => {
     if (libraryView === "tabletop") {
@@ -830,7 +1151,53 @@ function RomLibraryDrawer({
     } else {
       drawerRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
     }
-  }, [libraryFilter, libraryView]);
+  }, [libraryFilter, librarySort, libraryView]);
+
+  useLayoutEffect(() => {
+    const nodes = resultsRef.current?.querySelectorAll("[data-library-id]");
+    if (!nodes?.length) {
+      layoutPositionsRef.current = new Map();
+      return;
+    }
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const previous = layoutPositionsRef.current;
+    const next = new Map();
+    for (const node of nodes) {
+      const rect = node.getBoundingClientRect();
+      const id = node.getAttribute("data-library-id");
+      next.set(id, rect);
+      const prior = previous.get(id);
+      const deltaY = prior ? prior.top - rect.top : 0;
+      if (!reduceMotion && Math.abs(deltaY) > 1) {
+        node.animate?.(
+          [
+            { translate: `0 ${deltaY}px` },
+            { translate: "0 0" },
+          ],
+          {
+            duration: 300,
+            easing: "cubic-bezier(.2, .8, .2, 1)",
+          },
+        );
+      }
+    }
+    layoutPositionsRef.current = next;
+  }, [visibleLayoutKey]);
+
+  const sortControl = (
+    <label className="library-sort-control">
+      <span>SORT</span>
+      <select
+        value={librarySort}
+        onChange={(event) => onSort(event.target.value)}
+        aria-label="Sort game library"
+      >
+        <option value="alphabetic">ALPHABETIC</option>
+        <option value="recent">RECENTLY PLAYED</option>
+        <option value="size">GAME SIZE</option>
+      </select>
+    </label>
+  );
 
   return (
     <aside
@@ -887,6 +1254,7 @@ function RomLibraryDrawer({
                 </button>
               ))}
             </div>
+            {sortControl}
             <div className="library-view-switch" aria-label="Game library layout">
               <button
                 className="active"
@@ -926,8 +1294,9 @@ function RomLibraryDrawer({
               >
                 {label}
               </button>
-            ))}
+              ))}
           </div>
+          {sortControl}
           <div className="tabletop-actions">
             <button
               type="button"
@@ -974,12 +1343,14 @@ function RomLibraryDrawer({
         {libraryReady && visibleRoms.length > 0 && libraryView === "tabletop" && (
           <div className="tabletop-surface" aria-label="Cartridges on table">
             {visibleRoms.map((rom, index) => (
-              <button
+              <HoldToLoadButton
                 className={`tabletop-cartridge ${activeLibraryId === rom.id ? "is-active" : ""}`}
+                data-library-id={rom.id}
                 key={`${libraryView}:${libraryFilter}:${rom.id}`}
-                type="button"
                 aria-label={`Play ${rom.title}`}
-                onClick={() => loadLibraryRom(rom)}
+                confirmName={rom.title}
+                onConfirm={() => loadLibraryRom(rom)}
+                requiresHold={cartridgePresent}
                 style={{
                   "--library-index": index,
                   "--cart-tilt": `${[-2.4, 1.7, -0.8, 2.2, -1.5][index % 5]}deg`,
@@ -991,18 +1362,19 @@ function RomLibraryDrawer({
                   className="tabletop-cartridge-graphic"
                 />
                 <span className="tabletop-cartridge-caption">
-                  <b>{rom.title}</b>
+                  <OverflowTitle as="b">{rom.title}</OverflowTitle>
                   <small className={`library-system-tag system-${rom.system === "gbc" ? "gbc" : "dmg"}`}>
                     {rom.system === "gbc" ? "GBC" : "DMG"}
                   </small>
                 </span>
-              </button>
+              </HoldToLoadButton>
             ))}
           </div>
         )}
         {libraryReady && libraryView === "detail" && visibleRoms.map((rom, index) => (
           <article
-            className={`library-card ${activeLibraryId === rom.id ? "is-active" : ""}`}
+            className={`library-card ${activeLibraryId === rom.id ? "is-active" : ""} ${deletingLibraryId === rom.id ? "is-deleting" : ""}`}
+            data-library-id={rom.id}
             key={`${libraryView}:${libraryFilter}:${rom.id}`}
             style={{ "--library-index": index }}
           >
@@ -1013,7 +1385,7 @@ function RomLibraryDrawer({
             />
             <div className="library-card-copy">
               <div className="library-title-row">
-                <h3 title={rom.title}>{rom.title}</h3>
+                <OverflowTitle as="h3">{rom.title}</OverflowTitle>
                 <span className={`library-system-tag system-${rom.system === "gbc" ? "gbc" : "dmg"}`}>
                   {rom.system === "gbc" ? "GBC" : "DMG"}
                 </span>
@@ -1024,18 +1396,28 @@ function RomLibraryDrawer({
                 <div><dt>LAST PLAYED</dt><dd>{formatLibraryDate(rom.lastPlayedAt)}</dd></div>
               </dl>
               <div className="library-card-actions">
-                <button type="button" onClick={() => loadLibraryRom(rom)}>
+                <HoldToLoadButton
+                  confirmName={rom.title}
+                  onConfirm={() => loadLibraryRom(rom)}
+                  requiresHold={cartridgePresent}
+                >
                   {activeLibraryId === rom.id ? "REPLAY" : "PLAY"}
-                </button>
+                </HoldToLoadButton>
                 <button
-                  className={removingLibraryId === rom.id ? "confirming" : ""}
+                  className={
+                    removingLibraryId === rom.id || deletingLibraryId === rom.id
+                      ? "confirming"
+                      : ""
+                  }
                   type="button"
                   onClick={() => onRemove(rom.id)}
-                  disabled={rom.builtIn}
+                  disabled={rom.builtIn || deletingLibraryId === rom.id}
                   title={rom.builtIn ? "Included with this private GAMEBOY LAB build" : undefined}
                 >
                   {rom.builtIn
                     ? "BUILT IN"
+                    : deletingLibraryId === rom.id
+                      ? "REMOVING…"
                     : removingLibraryId === rom.id
                       ? "CONFIRM REMOVE"
                       : "REMOVE"}
@@ -1057,9 +1439,7 @@ function RomLibraryDrawer({
 }
 
 function SaveCenter({
-  backupStatus,
   confirmingSlot,
-  downloadAllSaves,
   downloadCartridgeSave,
   importCartridgeSave,
   info,
@@ -1148,24 +1528,6 @@ function SaveCenter({
             </article>
           ))}
         </div>
-      </div>
-      <div className="save-type-card library-backup-card">
-        <div className="save-type-heading">
-          <div>
-            <span>EVERY SAVED GAME</span>
-            <h3>Complete backup</h3>
-          </div>
-          <b>{backupStatus}</b>
-        </div>
-        <p>
-          Packages every game&apos;s battery-backed cartridge data, RTC data, and
-          GAMEBOY LAB save-state slot into one portable file. ROMs, artwork, and
-          preferences are intentionally excluded.
-        </p>
-        <div className="save-actions one-action">
-          <button onClick={downloadAllSaves}>DOWNLOAD ALL SAVES</button>
-        </div>
-        <small>Restore this file from Advanced options on this or another browser.</small>
       </div>
     </section>
   );
@@ -1371,6 +1733,7 @@ function TechnicalReadout({
 
 export default function Emulator() {
   const canvasRef = useRef(null);
+  const transitionCanvasRef = useRef(null);
   const sourceCanvasRef = useRef(null);
   const sourceContextRef = useRef(null);
   const lcdRendererRef = useRef(null);
@@ -1425,6 +1788,8 @@ export default function Emulator() {
   const modelRef = useRef("dmg");
   const titleRef = useRef(EMPTY_INFO.title);
   const presentFrameRef = useRef(null);
+  const pendingPresentationRef = useRef(false);
+  const pendingPresentationFramesRef = useRef(0);
   const loopGenerationRef = useRef(0);
   const catchUpBudgetRef = useRef("balanced");
   const frameSkipRef = useRef("off");
@@ -1435,6 +1800,8 @@ export default function Emulator() {
   const saveTooltipTimerRef = useRef(0);
   const cartridgeAnimationTimerRef = useRef(0);
   const cartridgeAnimationRunRef = useRef(0);
+  const transitionFrameTimerRef = useRef(0);
+  const catalogueRunRef = useRef(0);
   const testRomLoadedRef = useRef(false);
   const consoleWrapRef = useRef(null);
   const deviceRigRef = useRef(null);
@@ -1502,6 +1869,7 @@ export default function Emulator() {
   });
   const [, setMessage] = useState("Open the game library or drop a legally obtained ROM.");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [emulationDrawerOpen, setEmulationDrawerOpen] = useState(false);
   const [saveDrawerOpen, setSaveDrawerOpen] = useState(false);
   const [libraryDrawerOpen, setLibraryDrawerOpen] = useState(false);
   const [showLibraryDiscovery, setShowLibraryDiscovery] = useState(false);
@@ -1510,8 +1878,10 @@ export default function Emulator() {
   const [libraryStatus, setLibraryStatus] = useState("LOCAL ARCHIVE READY");
   const [libraryQuery, setLibraryQuery] = useState("");
   const [libraryFilter, setLibraryFilter] = useState("all");
+  const [librarySort, setLibrarySort] = useState("recent");
   const [libraryView, setLibraryView] = useState("detail");
   const [removingLibraryId, setRemovingLibraryId] = useState(null);
+  const [deletingLibraryId, setDeletingLibraryId] = useState(null);
   const [activeLibraryId, setActiveLibraryId] = useState("");
   const [cartridgePresent, setCartridgePresent] = useState(false);
   const [cartridgeInserting, setCartridgeInserting] = useState(false);
@@ -1530,27 +1900,39 @@ export default function Emulator() {
   const [confirmingSlot, setConfirmingSlot] = useState(null);
   const [pendingModel, setPendingModel] = useState(null);
   const [pendingRestore, setPendingRestore] = useState(null);
+  const [cataloguing, setCataloguing] = useState(null);
   const resolvedTheme = theme === "system" ? systemTheme : theme;
-  const anyDrawerOpen = drawerOpen || saveDrawerOpen || libraryDrawerOpen;
+  const anyDrawerOpen = drawerOpen
+    || emulationDrawerOpen
+    || saveDrawerOpen
+    || libraryDrawerOpen;
 
   const refreshLibrary = useCallback(async () => {
-    const sortRecords = (records) => records.sort((left, right) => {
-      const recency = (right.lastPlayedAt || right.addedAt || 0)
-        - (left.lastPlayedAt || left.addedAt || 0);
-      return recency || left.title.localeCompare(right.title);
-    });
     try {
       const storedRecords = await listLibraryRoms();
-      const builtInRecords = createBuiltInLibraryRecords(storedRecords);
+      const refreshedStoredRecords = await Promise.all(storedRecords.map(async (record) => {
+        if (record.artworkSource !== "generated") return record;
+        const seed = String(record.id || "").split(":").at(-1) || record.title;
+        const artwork = createFallbackArtwork(record.title, record.system, seed);
+        if (artwork === record.artwork) return record;
+        const refreshed = { ...record, artwork };
+        try {
+          await putLibraryRom(refreshed);
+        } catch {
+          // The refreshed label can still be used for this session.
+        }
+        return refreshed;
+      }));
+      const builtInRecords = createBuiltInLibraryRecords(refreshedStoredRecords);
       const builtInIds = new Set(builtInRecords.map((record) => record.id));
-      const staleStoredBuiltIns = storedRecords.filter((record) => record.builtIn);
+      const staleStoredBuiltIns = refreshedStoredRecords.filter((record) => record.builtIn);
       if (staleStoredBuiltIns.length) {
         await Promise.all(staleStoredBuiltIns.map((record) => removeLibraryRom(record.id)));
       }
-      const records = sortRecords([
-        ...storedRecords.filter((record) => !record.builtIn && !builtInIds.has(record.id)),
+      const records = sortLibraryRecords([
+        ...refreshedStoredRecords.filter((record) => !record.builtIn && !builtInIds.has(record.id)),
         ...builtInRecords,
-      ]);
+      ], "recent");
       setLibraryRoms(records);
       setLibraryStatus(
         `${records.length} CARTRIDGES · ${builtInRecords.length} BUILT IN`,
@@ -1596,6 +1978,7 @@ export default function Emulator() {
 
   useEffect(() => () => {
     cartridgeAnimationRunRef.current += 1;
+    catalogueRunRef.current += 1;
     window.clearTimeout(scaleToastTimerRef.current);
     window.clearTimeout(saveTooltipTimerRef.current);
     window.clearTimeout(cartridgeAnimationTimerRef.current);
@@ -1749,6 +2132,7 @@ export default function Emulator() {
 
   const openOptions = useCallback(() => {
     if (pauseOnMenu) pauseGame("menu");
+    setEmulationDrawerOpen(false);
     setSaveDrawerOpen(false);
     setLibraryDrawerOpen(false);
     setDrawerOpen(true);
@@ -1759,12 +2143,26 @@ export default function Emulator() {
     if (pauseReasonRef.current === "menu") resumeGame("menu");
   }, [resumeGame]);
 
+  const openEmulationSettings = useCallback(() => {
+    if (pauseOnMenu) pauseGame("menu");
+    setDrawerOpen(false);
+    setSaveDrawerOpen(false);
+    setLibraryDrawerOpen(false);
+    setEmulationDrawerOpen(true);
+  }, [pauseGame, pauseOnMenu]);
+
+  const closeEmulationSettings = useCallback(() => {
+    setEmulationDrawerOpen(false);
+    if (pauseReasonRef.current === "menu") resumeGame("menu");
+  }, [resumeGame]);
+
   const openSaveDrawer = useCallback(() => {
     if (!romRef.current) return;
     window.clearTimeout(saveTooltipTimerRef.current);
     setShowSaveTooltip(false);
     if (pauseOnMenu) pauseGame("menu");
     setDrawerOpen(false);
+    setEmulationDrawerOpen(false);
     setLibraryDrawerOpen(false);
     setSaveDrawerOpen(true);
   }, [pauseGame, pauseOnMenu]);
@@ -1778,6 +2176,7 @@ export default function Emulator() {
     dismissLibraryDiscovery();
     if (pauseOnMenu) pauseGame("menu");
     setDrawerOpen(false);
+    setEmulationDrawerOpen(false);
     setSaveDrawerOpen(false);
     setRemovingLibraryId(null);
     setLibraryDrawerOpen(true);
@@ -1791,6 +2190,7 @@ export default function Emulator() {
 
   const closeDrawers = useCallback(() => {
     setDrawerOpen(false);
+    setEmulationDrawerOpen(false);
     setSaveDrawerOpen(false);
     setLibraryDrawerOpen(false);
     setRemovingLibraryId(null);
@@ -1990,7 +2390,7 @@ export default function Emulator() {
     audio.buffered = audio.available >> 1;
   }, []);
 
-  const presentFrame = useCallback(() => {
+  const presentFrame = useCallback(({ resetHistory = false } = {}) => {
     const renderer = lcdRendererRef.current;
     if (!renderer) return;
     const emulator = emulatorRef.current;
@@ -2011,8 +2411,39 @@ export default function Emulator() {
       }
       current = corrected;
     }
-    renderer.uploadFrame(current);
+    renderer.uploadFrame(current, { resetHistory });
   }, [cgbColorCorrection]);
+
+  const captureDisplayTransition = useCallback(() => {
+    const source = canvasRef.current;
+    const transition = transitionCanvasRef.current;
+    if (!source || !transition) return;
+    window.clearTimeout(transitionFrameTimerRef.current);
+    try {
+      lcdRendererRef.current?.render();
+      transition.width = source.width;
+      transition.height = source.height;
+      const context = transition.getContext("2d", { alpha: false });
+      context.drawImage(source, 0, 0, transition.width, transition.height);
+      transition.classList.remove("is-fading");
+      transition.classList.add("is-active");
+    } catch {
+      transition.classList.remove("is-active", "is-fading");
+    }
+  }, []);
+
+  const releaseDisplayTransition = useCallback(() => {
+    const transition = transitionCanvasRef.current;
+    if (!transition?.classList.contains("is-active")) return;
+    window.requestAnimationFrame(() => {
+      transition.classList.add("is-fading");
+      transitionFrameTimerRef.current = window.setTimeout(() => {
+        transition.classList.remove("is-active", "is-fading");
+        const context = transition.getContext("2d");
+        context?.clearRect(0, 0, transition.width, transition.height);
+      }, 190);
+    });
+  }, []);
 
   const loadFile = useCallback(async (file, libraryEntry = null) => {
     if (!file) return;
@@ -2101,11 +2532,13 @@ export default function Emulator() {
         audioRef.current.context?.sampleRate ?? 48000,
       );
       const header = emulator.loadROM(bytes, battery);
+      captureDisplayTransition();
+      pendingPresentationRef.current = true;
+      pendingPresentationFramesRef.current = 0;
       emulatorRef.current = emulator;
       romRef.current = bytes;
       romKeyRef.current = key;
       romNameRef.current = file.name;
-      lcdRendererRef.current?.resetPersistence();
       correctedFrameRef.current = null;
       setInfo({
         ...header,
@@ -2188,6 +2621,7 @@ export default function Emulator() {
     }
   }, [
     cartridgeAnimationEnabled,
+    captureDisplayTransition,
     closeDrawers,
     compatibilityPalette,
     consoleScale,
@@ -2201,6 +2635,206 @@ export default function Emulator() {
     saveBattery,
     startAudio,
     viewMode,
+  ]);
+
+  const catalogueFile = useCallback(async (file) => {
+    if (!file || cataloguing) return;
+    const lower = file.name.toLowerCase();
+    if (!lower.endsWith(".gb") && !lower.endsWith(".gbc")) {
+      setMessage("That is not a .gb or .gbc cartridge image.");
+      return;
+    }
+
+    const run = catalogueRunRef.current + 1;
+    catalogueRunRef.current = run;
+    closeDrawers();
+    if (runningRef.current) pauseGame("catalogue");
+
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const hash = hashBytes(bytes);
+      const key = `${bytes.length}:${hash}`;
+      const librarySystem = (bytes[0x143] & 0x80) !== 0 ? "gbc" : "gb";
+      const existingInView = libraryRoms.find((record) => record.id === key) || null;
+      const embeddedEntry = EMBEDDED_LIBRARY_ROMS.find((record) => record.id === key) || null;
+      let cachedEntry = existingInView || embeddedEntry;
+      if (!cachedEntry) {
+        try {
+          cachedEntry = await getLibraryRom(key);
+        } catch {
+          // The animation can still finish with a newly created library record.
+        }
+      }
+      if (cachedEntry) {
+        const duplicateTitle = cachedEntry.title || readRomTitle(bytes);
+        setCataloguing({
+          artwork: cachedEntry.artwork || createFallbackArtwork(
+            duplicateTitle,
+            librarySystem,
+            hash,
+          ),
+          artworkSource: cachedEntry.artworkSource || "cached",
+          fileName: file.name,
+          phase: "duplicate",
+          system: librarySystem,
+          title: duplicateTitle,
+        });
+        setLibraryStatus(`${duplicateTitle.toUpperCase()} · ALREADY IN LIBRARY`);
+        setMessage("That exact cartridge is already stored. No duplicate was created.");
+        setStatus("Duplicate cartridge blocked");
+        await new Promise((resolve) => window.setTimeout(resolve, 1050));
+        if (catalogueRunRef.current !== run) return;
+        setCataloguing(null);
+        if (pauseReasonRef.current === "catalogue") resumeGame("catalogue");
+        setStatus(runningRef.current
+          ? `${modelLabel(modelRef.current)} · running`
+          : "Awaiting cartridge");
+        openLibraryDrawer();
+        return;
+      }
+      const identifiedTitle = identifyRomTitle({
+        bytes,
+        fileName: file.name,
+        knownTitles: libraryRoms.map((record) => record.title),
+      }) || cachedEntry?.title;
+      const baseState = {
+        artwork: "",
+        artworkSource: "",
+        fileName: file.name,
+        phase: "outline",
+        system: librarySystem,
+        title: identifiedTitle,
+      };
+      setCataloguing(baseState);
+      setStatus("Cataloguing cartridge");
+      setMessage("Reading cartridge identity without launching the game.");
+      await new Promise((resolve) => window.setTimeout(resolve, 420));
+      if (catalogueRunRef.current !== run) return;
+
+      setCataloguing({ ...baseState, phase: "checking" });
+      const artworkStarted = window.performance.now();
+      let artworkResult = cachedEntry?.artwork
+        ? {
+          artwork: cachedEntry.artwork,
+          artworkSource: cachedEntry.artworkSource || "cached",
+        }
+        : await resolveRomArtwork({
+          fileName: file.name,
+          title: identifiedTitle,
+          system: librarySystem,
+          seed: hash,
+        });
+      const artworkWait = Math.max(0, 650 - (window.performance.now() - artworkStarted));
+      if (artworkWait) {
+        await new Promise((resolve) => window.setTimeout(resolve, artworkWait));
+      }
+      if (catalogueRunRef.current !== run) return;
+
+      if (!artworkResult.artwork) {
+        artworkResult = {
+          artwork: createFallbackArtwork(identifiedTitle, librarySystem, hash),
+          artworkSource: "generated",
+        };
+      }
+      await decodeArtworkForAnimation(artworkResult.artwork);
+      if (catalogueRunRef.current !== run) return;
+      if (artworkResult.artworkSource === "generated") {
+        setCataloguing({
+          ...baseState,
+          artwork: artworkResult.artwork,
+          artworkSource: artworkResult.artworkSource,
+          phase: "fallback",
+        });
+        await new Promise((resolve) => window.setTimeout(resolve, 720));
+        if (catalogueRunRef.current !== run) return;
+      }
+
+      const inspector = createEmulator(
+        librarySystem === "gbc" ? "cgb" : "dmg",
+        compatibilityPalette,
+        audioRef.current.context?.sampleRate ?? 48000,
+      );
+      const header = inspector.loadROM(bytes);
+      const now = Date.now();
+      const libraryRecord = {
+        id: key,
+        fileName: file.name,
+        title: identifiedTitle || header.title,
+        system: librarySystem,
+        cgbOnly: Boolean(header.cgbOnly),
+        cartridgeKind: librarySystem,
+        mapper: header.mapper,
+        romSize: header.romSize || bytes.byteLength,
+        rom: bytes,
+        artwork: artworkResult.artwork,
+        artworkSource: artworkResult.artworkSource,
+        addedAt: cachedEntry?.addedAt || now,
+        lastPlayedAt: cachedEntry?.lastPlayedAt || 0,
+        builtIn: Boolean(cachedEntry?.builtIn),
+      };
+      setCataloguing({
+        ...baseState,
+        artwork: artworkResult.artwork,
+        artworkSource: artworkResult.artworkSource,
+        phase: "painting",
+      });
+      await new Promise((resolve) => window.setTimeout(resolve, 920));
+      if (catalogueRunRef.current !== run) return;
+
+      setCataloguing({
+        ...baseState,
+        artwork: artworkResult.artwork,
+        artworkSource: artworkResult.artworkSource,
+        phase: "shelving",
+      });
+      setLibraryStatus(`${identifiedTitle.toUpperCase()} · ADDED TO LIBRARY`);
+      setMessage(`${identifiedTitle} was added to the library without starting it.`);
+      await new Promise((resolve) => window.setTimeout(resolve, 720));
+      if (catalogueRunRef.current !== run) return;
+      setCataloguing(null);
+      if (pauseReasonRef.current === "catalogue") resumeGame("catalogue");
+      setStatus(runningRef.current
+        ? `${modelLabel(modelRef.current)} · running`
+        : "Awaiting cartridge");
+      try {
+        if (!cachedEntry?.builtIn) await putLibraryRom(libraryRecord);
+        await refreshLibrary();
+      } catch (storageError) {
+        setLibraryStatus("CARTRIDGE COULD NOT BE STORED");
+        setMessage(storageError instanceof Error
+          ? storageError.message
+          : "Unable to store this cartridge in the local library.");
+      }
+      openLibraryDrawer();
+    } catch (error) {
+      if (catalogueRunRef.current !== run) return;
+      setCataloguing((current) => ({
+        ...(current || {
+          artwork: "",
+          artworkSource: "",
+          fileName: file.name,
+          system: lower.endsWith(".gbc") ? "gbc" : "gb",
+          title: safeFileStem(file.name).replace(/-/g, " "),
+        }),
+        error: error instanceof Error ? error.message : "Unable to read this cartridge.",
+        phase: "error",
+      }));
+      setMessage(error instanceof Error ? error.message : "Unable to catalogue this cartridge.");
+      setStatus("Catalogue error");
+      await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      if (catalogueRunRef.current !== run) return;
+      setCataloguing(null);
+      if (pauseReasonRef.current === "catalogue") resumeGame("catalogue");
+    }
+  }, [
+    cataloguing,
+    closeDrawers,
+    compatibilityPalette,
+    libraryRoms,
+    openLibraryDrawer,
+    pauseGame,
+    refreshLibrary,
+    resumeGame,
   ]);
 
   const loadLibraryRom = useCallback((entry) => {
@@ -2220,32 +2854,48 @@ export default function Emulator() {
 
   const removeFromLibrary = useCallback(async (id) => {
     if (libraryRoms.find((record) => record.id === id)?.builtIn) return;
+    if (deletingLibraryId) return;
     if (removingLibraryId !== id) {
       setRemovingLibraryId(id);
       return;
     }
+    setRemovingLibraryId(null);
+    setDeletingLibraryId(id);
+    setLibraryStatus("REMOVING CARTRIDGE…");
+    await new Promise((resolve) => window.setTimeout(resolve, 480));
     try {
       await removeLibraryRom(id);
       if (activeLibraryId === id) setActiveLibraryId("");
-      setRemovingLibraryId(null);
-      await refreshLibrary();
+      setLibraryRoms((records) => records.filter((record) => record.id !== id));
+      setLibraryStatus("CARTRIDGE REMOVED · LOCAL SAVES KEPT");
     } catch (error) {
       setLibraryStatus(error instanceof Error ? error.message.toUpperCase() : "UNABLE TO REMOVE CARTRIDGE");
+      await refreshLibrary();
+    } finally {
+      setDeletingLibraryId(null);
     }
-  }, [activeLibraryId, libraryRoms, refreshLibrary, removingLibraryId]);
+  }, [
+    activeLibraryId,
+    deletingLibraryId,
+    libraryRoms,
+    refreshLibrary,
+    removingLibraryId,
+  ]);
 
   useEffect(() => {
     if (!import.meta.env.DEV || testRomLoadedRef.current) return;
     const testParams = new window.URLSearchParams(window.location.search);
+    const testCatalogue = testParams.get("__testCatalogue");
     const testRom = testParams.get("__testRom");
-    if (!testRom) return;
+    const testTarget = testCatalogue || testRom;
+    if (!testTarget) return;
     testRomLoadedRef.current = true;
-    window.fetch(testRom)
+    window.fetch(testTarget)
       .then((response) => {
         if (!response.ok) throw new Error(`Test ROM request failed: ${response.status}`);
         return response.arrayBuffer();
       })
-      .then((buffer) => {
+      .then(async (buffer) => {
         const bytes = new Uint8Array(buffer);
         if (testParams.get("__testGbcOnly") === "1") {
           bytes[0x143] = 0xc0;
@@ -2255,16 +2905,24 @@ export default function Emulator() {
           }
           bytes[0x14d] = checksum;
         }
-        return loadFile(new window.File(
+        const file = new window.File(
           [bytes],
           testParams.get("__testGbcOnly") === "1"
             ? "GBC VISUAL TEST.gbc"
-            : decodeURIComponent(testRom.split("/").pop() || "test.gb"),
+            : decodeURIComponent(testTarget.split("/").pop() || "test.gb"),
           { type: "application/octet-stream" },
-        ));
+        );
+        const catalogueDelay = Number(testParams.get("__testCatalogueDelay") || 0);
+        if (testCatalogue && catalogueDelay > 0) {
+          await new Promise((resolve) => window.setTimeout(
+            resolve,
+            Math.min(10_000, catalogueDelay),
+          ));
+        }
+        return testCatalogue ? catalogueFile(file) : loadFile(file);
       })
       .catch((error) => setMessage(error.message));
-  }, [loadFile]);
+  }, [catalogueFile, loadFile]);
 
   const performModelSwitch = useCallback((nextModel) => {
     if (nextModel === model) return;
@@ -2281,8 +2939,10 @@ export default function Emulator() {
       compatibilityPalette,
       audioRef.current.context?.sampleRate ?? 48000,
     );
+    captureDisplayTransition();
+    pendingPresentationRef.current = Boolean(romRef.current);
+    pendingPresentationFramesRef.current = 0;
     emulatorRef.current = emulator;
-    lcdRendererRef.current?.resetPersistence();
     correctedFrameRef.current = null;
     if (romRef.current) {
       const battery = readStoredBattery(romKeyRef.current);
@@ -2302,6 +2962,7 @@ export default function Emulator() {
     }
   }, [
     anyDrawerOpen,
+    captureDisplayTransition,
     compatibilityPalette,
     model,
     pauseGame,
@@ -2343,8 +3004,10 @@ export default function Emulator() {
   const reset = useCallback(() => {
     if (!romRef.current) return;
     saveBattery();
+    captureDisplayTransition();
     emulatorRef.current.reset();
-    lcdRendererRef.current?.resetPersistence();
+    pendingPresentationRef.current = true;
+    pendingPresentationFramesRef.current = 0;
     correctedFrameRef.current = null;
     nativeBootRef.current = emulatorRef.current.bootEnabled;
     bootRef.current = emulatorRef.current.bootEnabled
@@ -2353,7 +3016,15 @@ export default function Emulator() {
     if (anyDrawerOpen && pauseOnMenu) pauseGame("menu");
     else resumeGame();
     setStatus(`${modelLabel(model)} cold boot`);
-  }, [anyDrawerOpen, model, pauseGame, pauseOnMenu, resumeGame, saveBattery]);
+  }, [
+    anyDrawerOpen,
+    captureDisplayTransition,
+    model,
+    pauseGame,
+    pauseOnMenu,
+    resumeGame,
+    saveBattery,
+  ]);
 
   const saveStateSlot = useCallback((slot) => {
     const snapshot = emulatorRef.current.exportState();
@@ -2401,7 +3072,6 @@ export default function Emulator() {
         });
       }
       if (!emulator.importState(snapshot)) throw new Error("This state is incompatible with the loaded cartridge.");
-      lcdRendererRef.current?.resetPersistence();
       correctedFrameRef.current = null;
       flushAudio();
       nativeBootRef.current = emulator.bootEnabled;
@@ -2410,7 +3080,7 @@ export default function Emulator() {
       setRunning(true);
       if (anyDrawerOpen && pauseOnMenu) pauseGame("menu");
       else resumeGame();
-      if (presentFrameRef.current) presentFrameRef.current();
+      if (presentFrameRef.current) presentFrameRef.current({ resetHistory: true });
       setStatus(`${modelLabel(snapshot.model)} · state ${slot + 1}`);
       setMessage(`Save state ${slot + 1} restored. This also restored its exact cartridge RAM snapshot.`);
     } catch (error) {
@@ -2575,9 +3245,11 @@ export default function Emulator() {
     setCompatibilityPalette(id);
     const emulator = emulatorRef.current;
     emulator.setCompatibilityPalette(id);
-    lcdRendererRef.current?.resetPersistence();
-    correctedFrameRef.current = null;
-    if (presentFrameRef.current) presentFrameRef.current();
+    if (romRef.current) {
+      lcdRendererRef.current?.resetPersistence();
+      correctedFrameRef.current = null;
+      presentFrameRef.current?.();
+    }
     const selected = CGB_COMPATIBILITY_PALETTES.find((palette) => palette.id === id);
     setMessage(
       id === "auto"
@@ -2742,6 +3414,9 @@ export default function Emulator() {
         if (saved.libraryView === "detail" || saved.libraryView === "tabletop") {
           setLibraryView(saved.libraryView);
         }
+        if (["alphabetic", "recent", "size"].includes(saved.librarySort)) {
+          setLibrarySort(saved.librarySort);
+        }
         if (CGB_COMPATIBILITY_PALETTES.some((palette) => palette.id === saved.compatibilityPalette)) {
           setCompatibilityPalette(saved.compatibilityPalette);
           emulatorRef.current.setCompatibilityPalette(saved.compatibilityPalette);
@@ -2807,6 +3482,7 @@ export default function Emulator() {
         themeVersion: 2,
         viewMode,
         libraryView,
+        librarySort,
         compatibilityPalette,
         lcdMode,
         ghostingEnabled,
@@ -2837,6 +3513,7 @@ export default function Emulator() {
     resolvedTheme,
     viewMode,
     libraryView,
+    librarySort,
     compatibilityPalette,
     lcdMode,
     ghostingEnabled,
@@ -3224,7 +3901,12 @@ export default function Emulator() {
       if (bootRef.current.active) {
         const progress = (wallTime - bootRef.current.start) / 1850;
         drawBootScreen(context, modelRef.current, Math.min(1, progress), titleRef.current);
-        uploadSoftwareScreen();
+        if (!pendingPresentationRef.current || progress >= 0.02) {
+          uploadSoftwareScreen(pendingPresentationRef.current);
+          if (pendingPresentationRef.current) releaseDisplayTransition();
+          pendingPresentationRef.current = false;
+          pendingPresentationFramesRef.current = 0;
+        }
         if (progress >= 1) {
           bootRef.current.active = false;
           setStatus(`${modelLabel(modelRef.current)} · running`);
@@ -3276,8 +3958,24 @@ export default function Emulator() {
           shouldPresent = presentationPhaseRef.current >= cadence;
           if (shouldPresent) presentationPhaseRef.current %= cadence;
         }
+        if (pendingPresentationRef.current) {
+          pendingPresentationFramesRef.current += frames;
+          const presentationReady = (
+            framebufferHasVisibleDetail(emulator.framebuffer)
+            || pendingPresentationFramesRef.current >= 90
+          );
+          if (shouldPresent && presentationReady) {
+            pendingPresentationRef.current = false;
+            pendingPresentationFramesRef.current = 0;
+            presentFrameRef.current?.({ resetHistory: true });
+            releaseDisplayTransition();
+          } else {
+            shouldPresent = false;
+          }
+        } else if (shouldPresent && presentFrameRef.current) {
+          presentFrameRef.current();
+        }
         if (shouldPresent) {
-          if (presentFrameRef.current) presentFrameRef.current();
           lastPresentRef.current = hostTime;
         }
         fpsRef.current.presented += shouldPresent ? 1 : 0;
@@ -3334,7 +4032,7 @@ export default function Emulator() {
       if (window.__gbcLabLoopToken === pageLoopToken) window.__gbcLabLoopToken = null;
       cancelAnimationFrame(ownAnimation);
     };
-  }, [enqueueAudio, uploadSoftwareScreen]);
+  }, [enqueueAudio, releaseDisplayTransition, uploadSoftwareScreen]);
 
   useEffect(() => {
     const save = () => saveBattery();
@@ -3432,7 +4130,7 @@ export default function Emulator() {
       onDrop={(event) => {
         event.preventDefault();
         setDragging(false);
-        loadFile(event.dataTransfer.files[0]);
+        catalogueFile(event.dataTransfer.files[0]);
       }}
     >
       <div className="ambient-grid" aria-hidden="true" />
@@ -3447,14 +4145,24 @@ export default function Emulator() {
         <div className="system-status">
           <span className={`status-light ${running && !paused ? "live" : ""}`} />
           <span>{paused ? "PAUSED" : status.toUpperCase()}</span>
-          <button
-            className="options-trigger"
-            onClick={openOptions}
-            aria-expanded={drawerOpen}
-            aria-controls="options-drawer"
-          >
-            OPTIONS
-          </button>
+          <div className="topbar-drawer-triggers">
+            <button
+              className="options-trigger"
+              onClick={openOptions}
+              aria-expanded={drawerOpen}
+              aria-controls="options-drawer"
+            >
+              OPTIONS
+            </button>
+            <button
+              className="options-trigger emulation-trigger"
+              onClick={openEmulationSettings}
+              aria-expanded={emulationDrawerOpen}
+              aria-controls="emulation-drawer"
+            >
+              EMULATION
+            </button>
+          </div>
         </div>
       </header>
 
@@ -3476,7 +4184,7 @@ export default function Emulator() {
         type="file"
         accept=".gb,.gbc,application/octet-stream"
         onChange={(event) => {
-          loadFile(event.target.files?.[0]);
+          catalogueFile(event.target.files?.[0]);
           event.target.value = "";
         }}
         aria-label="Choose a Game Boy ROM"
@@ -3558,6 +4266,13 @@ export default function Emulator() {
                   width={GAMEBOY_WIDTH}
                   height={GAMEBOY_HEIGHT}
                   aria-label={`${modelLabel(model)} emulation display`}
+                />
+                <canvas
+                  ref={transitionCanvasRef}
+                  className="frame-transition"
+                  width={GAMEBOY_WIDTH}
+                  height={GAMEBOY_HEIGHT}
+                  aria-hidden="true"
                 />
                 <span className="screen-glass" aria-hidden="true" />
                 {paused && running && (
@@ -3661,10 +4376,13 @@ export default function Emulator() {
 
         <RomLibraryDrawer
           activeLibraryId={activeLibraryId}
+          cartridgePresent={cartridgePresent}
+          deletingLibraryId={deletingLibraryId}
           libraryFilter={libraryFilter}
           libraryQuery={libraryQuery}
           libraryReady={libraryReady}
           libraryRoms={libraryRoms}
+          librarySort={librarySort}
           libraryStatus={libraryStatus}
           libraryView={libraryView}
           loadLibraryRom={loadLibraryRom}
@@ -3676,6 +4394,7 @@ export default function Emulator() {
           onFilter={setLibraryFilter}
           onQuery={setLibraryQuery}
           onRemove={removeFromLibrary}
+          onSort={setLibrarySort}
           onView={setLibraryView}
           open={libraryDrawerOpen}
           removingLibraryId={removingLibraryId}
@@ -3705,10 +4424,12 @@ export default function Emulator() {
             </div>
             <div className="segmented model-switch" aria-label="Console model">
               <button className={model === "dmg" ? "active" : ""} onClick={() => switchModel("dmg")} aria-pressed={model === "dmg"}>
-                <b>DMG</b><small>1989</small>
+                <ConsoleIcon model="dmg" />
+                <span><b>DMG</b><small>1989</small></span>
               </button>
               <button className={model === "cgb" ? "active" : ""} onClick={() => switchModel("cgb")} aria-pressed={model === "cgb"}>
-                <b>GBC</b><small>1998</small>
+                <ConsoleIcon model="cgb" />
+                <span><b>GBC</b><small>1998</small></span>
               </button>
             </div>
             {model === "cgb" && (
@@ -3737,24 +4458,12 @@ export default function Emulator() {
                 )}
               </label>
             )}
-            <div className="transport">
-              <button
-                onClick={() => {
-                  if (paused) resumeGame();
-                  else pauseGame("manual");
-                }}
-                disabled={!running}
-                data-testid="pause-toggle"
-              >
-                {paused ? "▶ RESUME" : "Ⅱ PAUSE"}
-              </button>
-              <button onClick={reset} disabled={!running}>↻ RESET</button>
-            </div>
           </section>
 
           <section className="deck-section">
             <div className="section-heading">
               <span>01</span>
+              <SettingIcon type="display" />
               <div>
                 <h2>Presentation</h2>
                 <p>Console shell, screen focus, and theme</p>
@@ -3782,6 +4491,7 @@ export default function Emulator() {
           <section className="deck-section">
             <div className="section-heading">
               <span>02</span>
+              <SettingIcon type="lcd" />
               <div>
                 <h2>LCD response</h2>
                 <p>Pixel grid and independent persistence</p>
@@ -3816,7 +4526,7 @@ export default function Emulator() {
               <span>Ghosting</span>
               <b>{ghostingEnabled ? "ON" : "OFF"}</b>
             </button>
-            <label className="range-control">
+            <label className="range-control ghost-strength-control">
               <span><b>Ghosting strength</b><output>{ghostStrength}%</output></span>
               <input
                 type="range"
@@ -3843,11 +4553,31 @@ export default function Emulator() {
                 <small>Darker production-LCD tone · 112% default</small>
               </label>
             )}
+            <button
+              className={`preference-toggle ${cgbColorCorrection ? "active" : ""}`}
+              onClick={() => {
+                setCgbColorCorrection((value) => !value);
+                correctedFrameRef.current = null;
+                lcdRendererRef.current?.resetPersistence();
+              }}
+              aria-pressed={cgbColorCorrection}
+            >
+              <span>GBC LCD color correction</span>
+              <b>{cgbColorCorrection ? "ON" : "RAW"}</b>
+            </button>
+            <details className="setting-info compact-setting-info">
+              <summary>About GBC color correction</summary>
+              <p>
+                Models the dimmer, cross-coupled color response of the original reflective
+                GBC panel. Raw keeps decoded cartridge colors untouched for clean captures.
+              </p>
+            </details>
           </section>
 
           <section className="deck-section">
             <div className="section-heading">
               <span>03</span>
+              <SettingIcon type="audio" />
               <div>
                 <h2>Audio</h2>
                 <p>Browser output · {audioState}</p>
@@ -3878,14 +4608,29 @@ export default function Emulator() {
             </label>
           </section>
 
-          <section className="deck-section">
+          <section className="deck-section controls-section">
             <div className="section-heading">
               <span>04</span>
+              <SettingIcon type="controls" />
               <div>
                 <h2>Controls</h2>
                 <p>Click a key, then press its replacement</p>
               </div>
             </div>
+            <p className="key-hint controls-key-hint">
+              <span>KEYS</span>
+              {BINDING_ORDER.map((button) => (
+                <span key={button}>
+                  <kbd>{keyLabel(keyBindings[button])}</kbd>
+                  <b className={["up", "down", "left", "right"].includes(button)
+                    ? "direction-name"
+                    : undefined}
+                  >
+                    {button.toUpperCase()}
+                  </b>
+                </span>
+              ))}
+            </p>
             <button
               className={`preference-toggle ${keyboardMotion ? "active" : ""}`}
               onClick={() => setKeyboardMotion((value) => !value)}
@@ -3919,52 +4664,122 @@ export default function Emulator() {
             </button>
           </section>
 
-          <section className="deck-section advanced-section">
+          <section className="deck-section">
             <div className="section-heading">
               <span>05</span>
               <div>
-                <h2>Advanced</h2>
-                <p>Timing, scaling, audio, and video</p>
+                <h2>App behavior</h2>
+                <p>Menus and physical presentation</p>
+              </div>
+            </div>
+            <button
+              className={`preference-toggle ${pauseOnMenu ? "active" : ""}`}
+              onClick={togglePauseOnMenu}
+              aria-pressed={pauseOnMenu}
+            >
+              <span>Opening a drawer pauses gameplay</span>
+              <b>{pauseOnMenu ? "ON" : "OFF"}</b>
+            </button>
+            <details className="setting-info">
+              <summary>Pause behavior</summary>
+              <p>
+                Pauses the entire emulated machine before a drawer moves, then resumes from
+                the same machine cycle when it closes. Turn this off only if you want a game
+                to keep running while changing settings.
+              </p>
+            </details>
+            <button
+              className={`preference-toggle ${cartridgeAnimationEnabled ? "active" : ""}`}
+              onClick={() => setCartridgeAnimationEnabled((value) => !value)}
+              aria-pressed={cartridgeAnimationEnabled}
+            >
+              <span>Cartridge insertion animation</span>
+              <b>{cartridgeAnimationEnabled ? "ON" : "OFF"}</b>
+            </button>
+            <details className="setting-info">
+              <summary>Insertion presentation</summary>
+              <p>
+                Controls the cartridge slide and console knockback when a library game is
+                launched. The separate library-cataloguing sequence always completes so a
+                newly added ROM cannot be left half-written.
+              </p>
+            </details>
+          </section>
+
+          <section className="deck-section app-data-section">
+            <div className="section-heading">
+              <span>06</span>
+              <SettingIcon type="data" />
+              <div>
+                <h2>App data</h2>
+                <p>Complete save backup and restore</p>
+              </div>
+            </div>
+            <div className="app-data-summary">
+              <span>ALL SAVED GAMES</span>
+              <b>{backupStatus}</b>
+              <p>
+                One portable file containing every battery save, RTC record, and emulator
+                save state. ROMs, artwork, and preferences stay separate.
+              </p>
+            </div>
+            <div className="backup-restore-actions app-data-actions">
+              <button type="button" onClick={downloadAllSaves}>
+                DOWNLOAD ALL SAVES
+              </button>
+              <button type="button" onClick={() => backupFileRef.current?.click()}>
+                RESTORE BACKUP
+              </button>
+            </div>
+            <input
+              ref={backupFileRef}
+              className="visually-hidden"
+              type="file"
+              accept=".json,application/json"
+              aria-label="Restore all GAMEBOY LAB saves from backup"
+              onChange={(event) => {
+                prepareSaveRestore(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+            <details className="setting-info">
+              <summary>Restore safety</summary>
+              <p>
+                The complete backup is validated before storage changes. Restore replaces
+                all locally cached save records only after a second confirmation showing the
+                exact game and record counts.
+              </p>
+            </details>
+          </section>
+
+        </aside>
+
+        <aside
+          id="emulation-drawer"
+          className={`control-deck emulation-deck ${emulationDrawerOpen ? "open" : ""}`}
+          aria-hidden={!emulationDrawerOpen}
+          inert={!emulationDrawerOpen}
+        >
+          <div className="drawer-heading emulation-drawer-heading">
+            <div>
+              <span>GAMEBOY LAB · CORE CONTROL</span>
+              <h2>Emulation settings</h2>
+            </div>
+            <button onClick={closeEmulationSettings} aria-label="Close emulation settings">
+              CLOSE ×
+            </button>
+          </div>
+
+          <section className="deck-section advanced-section">
+            <div className="section-heading">
+              <span>00</span>
+              <SettingIcon type="chip" />
+              <div>
+                <h2>Core controls</h2>
+                <p>Timing, scaling, diagnostics, and audio path</p>
               </div>
             </div>
             <div className="advanced-settings">
-              <article className="advanced-setting advanced-choice backup-restore-setting">
-                <div className="advanced-choice-heading">
-                  <span>Restore all saved games</span>
-                  <b>{backupStatus}</b>
-                </div>
-                <div className="backup-restore-actions">
-                  <button type="button" onClick={() => backupFileRef.current?.click()}>
-                    CHOOSE BACKUP FILE
-                  </button>
-                </div>
-                <input
-                  ref={backupFileRef}
-                  className="visually-hidden"
-                  type="file"
-                  accept=".json,application/json"
-                  aria-label="Restore all GAMEBOY LAB saves from backup"
-                  onChange={(event) => {
-                    prepareSaveRestore(event.target.files?.[0]);
-                    event.target.value = "";
-                  }}
-                />
-                <details className="setting-info">
-                  <summary>Backup restore safety</summary>
-                  <p>
-                    Loads one GAMEBOY LAB backup containing battery-backed cartridge RAM,
-                    real-time clock data, and emulator save-state slots for every game.
-                    The complete file is checked before any browser storage is changed.
-                  </p>
-                  <p>
-                    Restore replaces all save records currently cached by this app. It does
-                    not replace ROMs, cover art, key bindings, display settings, or other
-                    preferences. A final warning shows the exact record counts before restore.
-                  </p>
-                  <p><b>Recommended:</b> Download a fresh complete backup from Save options first.</p>
-                </details>
-              </article>
-
               <article className="advanced-setting">
                 <button
                   className={`preference-toggle ${showTechnicalReadout ? "active" : ""}`}
@@ -3998,58 +4813,6 @@ export default function Emulator() {
                     visual updates without changing emulation timing.
                   </p>
                   <p><b>Recommended:</b> Off while playing; on when tuning performance or audio.</p>
-                </details>
-              </article>
-
-              <article className="advanced-setting">
-                <button
-                  className={`preference-toggle ${pauseOnMenu ? "active" : ""}`}
-                  onClick={togglePauseOnMenu}
-                  aria-pressed={pauseOnMenu}
-                >
-                  <span>Opening menu pauses gameplay</span>
-                  <b>{pauseOnMenu ? "ON" : "OFF"}</b>
-                </button>
-                <details className="setting-info">
-                  <summary>What this changes</summary>
-                  <p>
-                    Stops the emulated CPU, PPU, APU, timers, DMA, cartridge clock, and joypad
-                    state before the drawer begins moving. The audio queue is suspended rather
-                    than allowed to drain into silence, so closing the drawer resumes from the
-                    same machine cycle without a timing jump.
-                  </p>
-                  <p>
-                    This is a true emulator pause, not just a dark overlay. Turn it off only
-                    when you deliberately want a game to keep running while changing display
-                    or audio settings.
-                  </p>
-                  <p><b>Recommended:</b> On for predictable gameplay and safe menu use.</p>
-                </details>
-              </article>
-
-              <article className="advanced-setting">
-                <button
-                  className={`preference-toggle ${cartridgeAnimationEnabled ? "active" : ""}`}
-                  onClick={() => setCartridgeAnimationEnabled((value) => !value)}
-                  aria-pressed={cartridgeAnimationEnabled}
-                >
-                  <span>Cartridge insertion animation</span>
-                  <b>{cartridgeAnimationEnabled ? "ON" : "OFF"}</b>
-                </button>
-                <details className="setting-info">
-                  <summary>What this changes</summary>
-                  <p>
-                    Plays the quick cartridge slide and hardware knockback before a newly
-                    selected ROM begins its BIOS boot. It is presentation-only and never
-                    changes ROM bytes, cartridge RAM, save states, BIOS execution, or the
-                    timing seen by the emulated hardware.
-                  </p>
-                  <p>
-                    Switching console model or presentation mode replays the motion so the
-                    cartridge remains visually attached to the new shell. Disable it to skip
-                    that presentation delay; compatibility and accuracy are identical.
-                  </p>
-                  <p><b>Recommended:</b> On. Off is useful for rapid ROM testing.</p>
                 </details>
               </article>
 
@@ -4262,36 +5025,6 @@ export default function Emulator() {
 
               <article className="advanced-setting">
                 <button
-                  className={`preference-toggle ${cgbColorCorrection ? "active" : ""}`}
-                  onClick={() => {
-                    setCgbColorCorrection((value) => !value);
-                    correctedFrameRef.current = null;
-                    lcdRendererRef.current?.resetPersistence();
-                  }}
-                  aria-pressed={cgbColorCorrection}
-                >
-                  <span>GBC LCD color correction</span>
-                  <b>{cgbColorCorrection ? "ON" : "RAW"}</b>
-                </button>
-                <details className="setting-info">
-                  <summary>What this changes</summary>
-                  <p>
-                    Converts the GBC&apos;s 15-bit BGR output through a cross-channel color matrix
-                    before the LCD shader. Real reflective GBC panels were dimmer and their color
-                    channels influenced one another, so an uncorrected modern display looks more
-                    saturated and higher-contrast than the handheld.
-                  </p>
-                  <p>
-                    Raw preserves the cartridge&apos;s decoded 5-bit channel values for clean
-                    pixel-art capture. This option does not alter palette RAM, blending rules,
-                    sprite priority, or DMG compatibility palettes; DMG rendering is unaffected.
-                  </p>
-                  <p><b>Recommended:</b> On for hardware-like color; Raw for source-color capture.</p>
-                </details>
-              </article>
-
-              <article className="advanced-setting">
-                <button
                   className={`preference-toggle ${audioFilter ? "active" : ""}`}
                   onClick={() => setAudioFilter((value) => !value)}
                   aria-pressed={audioFilter}
@@ -4318,15 +5051,6 @@ export default function Emulator() {
             </div>
           </section>
 
-          <p className="key-hint">
-            <span>KEYS</span>
-            {BINDING_ORDER.map((button, index) => (
-              <span key={button}>
-                {index > 0 ? " · " : ""}
-                <kbd>{keyLabel(keyBindings[button])}</kbd> {button.toUpperCase()}
-              </span>
-            ))}
-          </p>
         </aside>
 
         <aside
@@ -4365,9 +5089,7 @@ export default function Emulator() {
           </section>
 
           <SaveCenter
-            backupStatus={backupStatus}
             confirmingSlot={confirmingSlot}
-            downloadAllSaves={downloadAllSaves}
             downloadCartridgeSave={downloadCartridgeSave}
             importCartridgeSave={importCartridgeSave}
             info={info}
@@ -4388,11 +5110,14 @@ export default function Emulator() {
               ? "Close game library"
               : saveDrawerOpen
                 ? "Close save options"
-                : "Close options"}
+                : emulationDrawerOpen
+                  ? "Close emulation settings"
+                  : "Close options"}
             onClick={closeDrawers}
           />
         )}
       </section>
+      <CataloguingOverlay cataloguing={cataloguing} />
       {pendingModel && (
         <SafetyPrompt
           eyebrow="RUNNING GAME"
