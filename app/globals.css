@@ -4632,7 +4632,6 @@ html[data-theme="dark"] body {
 
 .catalogue-visual {
   --catalogue-cart-width: min(430px, 72vw, calc((100dvh - 160px) * .8636));
-  --catalogue-cart-height: calc(var(--catalogue-cart-width) * 1.1579);
   position: relative;
   grid-area: 1 / 1;
   min-height: min(610px, calc(100dvh - 24px));
@@ -4643,14 +4642,33 @@ html[data-theme="dark"] body {
   background: transparent;
 }
 
-.catalogue-cartridge {
+.catalogue-machine {
+  position: relative;
   width: var(--catalogue-cart-width);
-  max-height: none;
-  height: auto;
+  aspect-ratio: 57 / 66;
+  overflow: visible;
+  translate: 0 44px;
+  isolation: isolate;
+  will-change: transform, opacity;
+}
+
+.catalogue-cartridge {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
   overflow: visible;
   filter: drop-shadow(12px 16px 0 rgba(23, 25, 30, .24));
-  translate: 0 44px;
-  will-change: transform, opacity;
+}
+
+.catalogue-cartridge-outline {
+  opacity: 0;
+  filter: none;
+}
+
+.catalogue-cartridge-painted {
+  opacity: 1;
 }
 
 .catalogue-color-chip {
@@ -4664,15 +4682,27 @@ html[data-theme="dark"] body {
   display: none;
 }
 
-.catalogue-outline .catalogue-cartridge > :not(.cart-shell),
-.catalogue-checking .catalogue-cartridge > :not(.cart-shell),
-.catalogue-fallback .catalogue-cartridge > :not(.cart-shell) {
+.catalogue-outline .catalogue-cartridge-outline,
+.catalogue-checking .catalogue-cartridge-outline,
+.catalogue-fallback .catalogue-cartridge-outline {
+  opacity: 1;
+}
+
+.catalogue-outline .catalogue-cartridge-painted,
+.catalogue-checking .catalogue-cartridge-painted,
+.catalogue-fallback .catalogue-cartridge-painted {
   opacity: 0;
 }
 
-.catalogue-outline .catalogue-cartridge .cart-shell,
-.catalogue-checking .catalogue-cartridge .cart-shell,
-.catalogue-fallback .catalogue-cartridge .cart-shell {
+.catalogue-outline .catalogue-cartridge-outline > :not(.cart-shell),
+.catalogue-checking .catalogue-cartridge-outline > :not(.cart-shell),
+.catalogue-fallback .catalogue-cartridge-outline > :not(.cart-shell) {
+  opacity: 0;
+}
+
+.catalogue-outline .catalogue-cartridge-outline .cart-shell,
+.catalogue-checking .catalogue-cartridge-outline .cart-shell,
+.catalogue-fallback .catalogue-cartridge-outline .cart-shell {
   fill: transparent;
   stroke: var(--ink);
   stroke-dasharray: 2600;
@@ -4682,57 +4712,107 @@ html[data-theme="dark"] body {
 
 .catalogue-scan-line {
   position: absolute;
-  left: calc(50% - var(--catalogue-cart-width) / 2);
-  top: 50%;
+  left: 0;
+  top: 0;
   z-index: 3;
-  width: 3px;
-  height: var(--catalogue-cart-height);
-  background: var(--acid);
-  box-shadow: 0 0 12px var(--acid);
+  width: 5px;
+  height: 100%;
   opacity: 0;
-  translate: 0 calc(-50% + 44px);
   transform: translateX(0);
+  pointer-events: none;
   will-change: transform, opacity;
 }
 
+.catalogue-scan-line::before {
+  position: absolute;
+  content: "";
+  inset: 0;
+  border: 1px solid var(--ink);
+  background: var(--acid);
+  box-shadow:
+    3px 0 0 color-mix(in srgb, var(--acid) 38%, transparent),
+    0 0 10px color-mix(in srgb, var(--acid) 75%, transparent);
+}
+
+.catalogue-scan-line::after {
+  position: absolute;
+  content: "";
+  left: 50%;
+  top: -13px;
+  width: 23px;
+  height: 11px;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  box-shadow: 3px 3px 0 var(--magenta);
+  transform: translateX(-50%);
+}
+
 .catalogue-checking .catalogue-scan-line,
-.catalogue-fallback .catalogue-scan-line,
-.catalogue-painting .catalogue-scan-line {
+.catalogue-fallback .catalogue-scan-line {
   opacity: .82;
-  animation: catalogue-scan 760ms ease-in-out infinite;
+  animation: catalogue-scan 820ms cubic-bezier(.45, 0, .55, 1) infinite;
 }
 
 .catalogue-painting .catalogue-scan-line {
-  width: 5px;
-  background: var(--cyan);
-  box-shadow: 0 0 16px var(--cyan);
+  width: 13px;
+  opacity: 1;
+  animation: catalogue-paint-wipe 1120ms cubic-bezier(.42, 0, .2, 1) both;
 }
 
-.catalogue-painting .catalogue-cartridge .cart-shell {
-  animation: catalogue-shell-paint 420ms cubic-bezier(.16, .9, .24, 1) both;
+.catalogue-painting .catalogue-scan-line::before {
+  border-width: 2px;
+  background:
+    linear-gradient(
+      90deg,
+      var(--cyan) 0 38%,
+      var(--paper) 38% 54%,
+      var(--magenta) 54% 100%
+    );
+  box-shadow:
+    5px 0 0 color-mix(in srgb, var(--cyan) 36%, transparent),
+    0 0 14px color-mix(in srgb, var(--cyan) 68%, transparent);
 }
 
-.catalogue-painting .catalogue-cartridge .cart-shadow,
-.catalogue-painting .catalogue-cartridge .cart-highlight,
-.catalogue-painting .catalogue-cartridge .cart-grip-bed,
-.catalogue-painting .catalogue-cartridge .cart-grip-lines,
-.catalogue-painting .catalogue-cartridge .cart-label-shadow,
-.catalogue-painting .catalogue-cartridge .cart-label-border,
-.catalogue-painting .catalogue-cartridge .cart-label-paper,
-.catalogue-painting .catalogue-cartridge .cart-label-outline,
-.catalogue-painting .catalogue-cartridge .cart-screw-ring,
-.catalogue-painting .catalogue-cartridge .cart-screw,
-.catalogue-painting .catalogue-cartridge .cart-screw-slot,
-.catalogue-painting .catalogue-cartridge .cart-shell-outline {
-  animation: catalogue-detail-paint 340ms 180ms both;
+.catalogue-painting .catalogue-scan-line::after {
+  top: -17px;
+  width: 31px;
+  height: 14px;
+  background: var(--acid);
+  box-shadow: 4px 4px 0 var(--cyan);
 }
 
-.catalogue-painting .catalogue-cartridge .cart-artwork {
+.catalogue-painting .catalogue-cartridge-outline {
+  opacity: 1;
+}
+
+.catalogue-painting .catalogue-cartridge-outline > :not(.cart-shell) {
+  opacity: 0;
+}
+
+.catalogue-painting .catalogue-cartridge-outline .cart-shell {
+  fill: transparent;
+  stroke: var(--ink);
+  stroke-dasharray: none;
+  stroke-dashoffset: 0;
+  animation: none;
+}
+
+.catalogue-painting .catalogue-cartridge-painted {
+  opacity: 1;
   clip-path: inset(0 100% 0 0);
-  animation: catalogue-label-paint 520ms 310ms cubic-bezier(.16, .9, .24, 1) forwards;
+  animation: catalogue-surface-wipe 1120ms cubic-bezier(.42, 0, .2, 1) forwards;
 }
 
-.catalogue-shelving .catalogue-cartridge {
+.catalogue-shelving .catalogue-cartridge-outline {
+  opacity: 0;
+}
+
+.catalogue-shelving .catalogue-cartridge-painted {
+  opacity: 1;
+  clip-path: inset(0);
+}
+
+.catalogue-shelving .catalogue-machine {
   animation: catalogue-shelve 720ms cubic-bezier(.58, -.2, .72, .3) both;
   transform-origin: left center;
 }
@@ -4764,6 +4844,7 @@ html[data-theme="dark"] body {
   line-height: .9;
   letter-spacing: -.035em;
   text-transform: uppercase;
+  animation: catalogue-title-change 240ms cubic-bezier(.16, .9, .24, 1) both;
 }
 
 .catalogue-fallback .catalogue-copy h2 {
@@ -4851,31 +4932,29 @@ html[data-theme="dark"] body {
 }
 
 @keyframes catalogue-scan {
-  0% { transform: translateX(0); }
-  50%, 100% {
-    transform: translateX(calc(var(--catalogue-cart-width) - 5px));
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(calc(var(--catalogue-cart-width) - 100%)); }
+}
+
+@keyframes catalogue-paint-wipe {
+  0% {
+    opacity: 0;
+    transform: translateX(0);
   }
-}
-
-@keyframes catalogue-shell-paint {
-  from { opacity: .25; }
-  to { opacity: 1; }
-}
-
-@keyframes catalogue-detail-paint {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes catalogue-label-paint {
-  from {
-    clip-path: inset(0 100% 0 0);
-    opacity: .35;
-  }
-  to {
-    clip-path: inset(0 0 0 0);
+  4% { opacity: 1; }
+  94% {
     opacity: 1;
+    transform: translateX(calc(var(--catalogue-cart-width) - 100%));
   }
+  100% {
+    opacity: 0;
+    transform: translateX(calc(var(--catalogue-cart-width) - 100%));
+  }
+}
+
+@keyframes catalogue-surface-wipe {
+  0% { clip-path: inset(0 100% 0 0); }
+  94%, 100% { clip-path: inset(0); }
 }
 
 @keyframes catalogue-shelve {
@@ -4888,6 +4967,17 @@ html[data-theme="dark"] body {
   0%, 100% { translate: 0 0; }
   30% { translate: -3px 0; }
   60% { translate: 3px 0; }
+}
+
+@keyframes catalogue-title-change {
+  from {
+    opacity: 0;
+    translate: 0 -8px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
 }
 
 @media (max-width: 700px) {
@@ -4912,9 +5002,8 @@ html[data-theme="dark"] body {
     border: 0;
   }
 
-  .catalogue-cartridge {
+  .catalogue-machine {
     width: var(--catalogue-cart-width);
-    max-height: none;
   }
 
   .catalogue-copy {
@@ -4936,7 +5025,8 @@ html[data-theme="dark"] body {
   .catalogue-stage,
   .catalogue-cartridge *,
   .catalogue-scan-line,
-  .catalogue-cartridge {
+  .catalogue-cartridge,
+  .catalogue-machine {
     animation-duration: 1ms !important;
   }
 }

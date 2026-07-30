@@ -986,12 +986,19 @@ function CataloguingOverlay({ cataloguing }) {
           <b>CATALOGUING</b>
         </header>
         <div className="catalogue-visual" aria-hidden="true">
-          <span className="catalogue-scan-line" />
-          <CartridgeGraphic
-            artwork={artwork}
-            cartridgeKind={system === "gbc" ? "gbc" : "gb"}
-            className={`catalogue-cartridge ${artworkSource === "generated" ? "uses-placeholder" : ""}`}
-          />
+          <div className="catalogue-machine">
+            <CartridgeGraphic
+              artwork=""
+              cartridgeKind={system === "gbc" ? "gbc" : "gb"}
+              className="catalogue-cartridge catalogue-cartridge-outline"
+            />
+            <CartridgeGraphic
+              artwork={artwork}
+              cartridgeKind={system === "gbc" ? "gbc" : "gb"}
+              className={`catalogue-cartridge catalogue-cartridge-painted ${artworkSource === "generated" ? "uses-placeholder" : ""}`}
+            />
+            <span className="catalogue-scan-line" />
+          </div>
           <span className="catalogue-color-chip">
             {system === "gbc" ? "GBC · BLACK" : "DMG · GREY"}
           </span>
@@ -1005,7 +1012,7 @@ function CataloguingOverlay({ cataloguing }) {
             <i className={phase === "shelving" ? "done" : phase === "painting" ? "active" : ""}>3</i>
           </div>
           <span>{fileName}</span>
-          <h2 id="catalogue-title">{heading}</h2>
+          <h2 id="catalogue-title" key={phase}>{heading}</h2>
           <strong>{title}</strong>
           <p id="catalogue-detail">{detail}</p>
           <small>THIS STEP FINISHES AUTOMATICALLY</small>
@@ -2778,7 +2785,7 @@ export default function Emulator() {
         artworkSource: artworkResult.artworkSource,
         phase: "painting",
       });
-      await new Promise((resolve) => window.setTimeout(resolve, 920));
+      await new Promise((resolve) => window.setTimeout(resolve, 1240));
       if (catalogueRunRef.current !== run) return;
 
       setCataloguing({

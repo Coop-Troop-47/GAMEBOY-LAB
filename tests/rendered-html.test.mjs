@@ -314,6 +314,15 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /function CataloguingOverlay\(/);
   assert.match(source, /COULDN’T FIND ARTWORK/);
   assert.match(source, /THIS STEP FINISHES AUTOMATICALLY/);
+  assert.match(source, /className="catalogue-machine"[\s\S]*catalogue-cartridge-outline[\s\S]*catalogue-cartridge-painted[\s\S]*className="catalogue-scan-line"/);
+  assert.match(css, /\.catalogue-machine\s*\{[^}]*position:\s*relative[^}]*aspect-ratio:\s*57\s*\/\s*66/s);
+  assert.match(css, /\.catalogue-cartridge\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0[^}]*width:\s*100%[^}]*height:\s*100%/s);
+  assert.match(css, /\.catalogue-painting \.catalogue-scan-line\s*\{[^}]*catalogue-paint-wipe/s);
+  assert.match(css, /\.catalogue-painting \.catalogue-cartridge-outline \.cart-shell\s*\{[^}]*fill:\s*transparent[^}]*stroke:\s*var\(--ink\)[^}]*animation:\s*none/s);
+  assert.match(css, /\.catalogue-painting \.catalogue-cartridge-painted\s*\{[^}]*catalogue-surface-wipe\s+1120ms/s);
+  assert.match(css, /@keyframes catalogue-paint-wipe[\s\S]*translateX\(calc\(var\(--catalogue-cart-width\) - 100%\)\)/);
+  assert.match(css, /@keyframes catalogue-surface-wipe[\s\S]*clip-path:\s*inset\(0 100% 0 0\)[\s\S]*clip-path:\s*inset\(0\)/);
+  assert.match(css, /\.catalogue-shelving \.catalogue-machine\s*\{[^}]*catalogue-shelve/s);
   assert.match(source, /function ConsoleIcon\(/);
   assert.match(source, /console-icon-shell/);
   assert.match(source, /onDrop=\{\(event\) => \{[\s\S]*catalogueFile\(event\.dataTransfer\.files\[0\]\)/);
