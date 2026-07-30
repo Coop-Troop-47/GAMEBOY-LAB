@@ -1,10 +1,11 @@
 {
-  "version": "1.1.0",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.1.0/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.1.0",
+  "version": "1.1.1",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.1.1/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.1.1",
   "changes": [
-    "Faster bit-identical DMG and GBC pixel delivery.",
-    "Less WebGL driver work in the LCD shader pipeline.",
-    "Release changes are now shown before you download."
+    "Reference-matched DMG and GBC control placement and shell contours.",
+    "A rounded, staggered GBC speaker grille and corrected control spacing.",
+    "A theme-aware technical readout and cleaner cartridge palette selector.",
+    "Library filters now return both detail and tabletop views to the top."
   ]
 }

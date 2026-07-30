@@ -816,14 +816,25 @@ function RomLibraryDrawer({
   open,
   removingLibraryId,
 }) {
+  const drawerRef = useRef(null);
+  const resultsRef = useRef(null);
   const query = libraryQuery.trim().toLowerCase();
   const visibleRoms = libraryRoms.filter((rom) => (
     (libraryFilter === "all" || rom.system === libraryFilter)
     && (!query || `${rom.title} ${rom.fileName}`.toLowerCase().includes(query))
   ));
 
+  useLayoutEffect(() => {
+    if (libraryView === "tabletop") {
+      resultsRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    } else {
+      drawerRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    }
+  }, [libraryFilter, libraryView]);
+
   return (
     <aside
+      ref={drawerRef}
       id="library-drawer"
       className={`control-deck library-deck ${libraryView === "tabletop" ? "tabletop-mode" : ""} ${open ? "open" : ""}`}
       aria-hidden={!open}
@@ -931,7 +942,11 @@ function RomLibraryDrawer({
         </div>
       )}
 
-      <div className={`library-results library-${libraryView}`} aria-live="polite">
+      <div
+        ref={resultsRef}
+        className={`library-results library-${libraryView}`}
+        aria-live="polite"
+      >
         {!libraryReady && (
           <div className="library-empty library-loading">
             <span className="library-loader" aria-hidden="true" />
@@ -3634,7 +3649,7 @@ export default function Emulator() {
                 <ControlButton label="" sublabel="Start" button="start" onPress={pressButton} pressed={pressedButtons.has("start")} />
               </div>
               <div className="speaker" aria-hidden="true">
-                {Array.from({ length: model === "cgb" ? 20 : 6 }, (_, index) => (
+                {Array.from({ length: model === "cgb" ? 56 : 6 }, (_, index) => (
                   <i key={index} />
                 ))}
               </div>

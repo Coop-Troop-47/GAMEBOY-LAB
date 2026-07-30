@@ -877,9 +877,9 @@ kbd {
     minmax(0, 1.45fr)
     minmax(0, .9fr);
   flex: 0 0 auto;
-  color: #f2f1e9;
+  color: var(--ink);
   border-bottom: 0 solid var(--ink);
-  background: #171a20;
+  background: var(--paper);
   transition: height 200ms cubic-bezier(.16, .9, .24, 1);
   scrollbar-color: var(--cyan) #24272e;
   scrollbar-width: none;
@@ -940,7 +940,7 @@ kbd {
   min-width: 0;
   overflow: hidden;
   padding: 8px 10px 7px;
-  border-left: 1px solid rgba(242, 241, 233, .25);
+  border-left: 1px solid var(--line);
 }
 
 .technical-readout h3 {
@@ -960,7 +960,7 @@ kbd {
 .technical-readout h3 span {
   min-width: 0;
   overflow: hidden;
-  color: #a7abb2;
+  color: var(--muted);
   flex: 1 1 auto;
   font-size: clamp(5.5px, var(--readout-title-fit, var(--tech-label-max)), 8px);
   letter-spacing: .04em;
@@ -982,7 +982,7 @@ kbd {
 .technical-readout dt {
   margin: 0 0 4px;
   overflow: hidden;
-  color: #a7abb2;
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: clamp(4.75px, var(--metric-label-fit, var(--tech-label-max)), var(--tech-label-max));
   font-weight: 800;
@@ -994,7 +994,7 @@ kbd {
 .technical-readout dd {
   margin: 0;
   overflow: hidden;
-  color: #f2f1e9;
+  color: var(--ink);
   font-family: var(--font-mono);
   font-size: clamp(6.5px, var(--metric-value-fit, var(--tech-value-max)), var(--tech-value-max));
   font-weight: 900;
@@ -1326,6 +1326,7 @@ html[data-theme="dark"] body {
 }
 
 .handheld.dmg {
+  border-radius: 16px 16px 86px 7px / 16px 16px 102px 7px;
   border-color: #aaa9a2;
   background: #d8d7d0;
   box-shadow:
@@ -1413,7 +1414,7 @@ html[data-theme="dark"] body {
 .dmg-brand {
   position: absolute;
   top: 350px;
-  left: 49px;
+  left: 31px;
   display: flex;
   align-items: baseline;
   gap: 5px;
@@ -1437,9 +1438,9 @@ html[data-theme="dark"] body {
 }
 
 .dmg .dpad {
-  left: 31px;
-  width: 100px;
-  height: 100px;
+  left: 6px;
+  width: 96px;
+  height: 96px;
 }
 
 .dmg .dpad .control-button {
@@ -1448,10 +1449,12 @@ html[data-theme="dark"] body {
 }
 
 .dmg .action-buttons {
-  right: 18px;
+  right: 2px;
+  top: 60px;
   width: 126px;
   background: transparent;
   box-shadow: none;
+  transform: rotate(-22deg);
 }
 
 .dmg .action-buttons .control-button {
@@ -1466,7 +1469,7 @@ html[data-theme="dark"] body {
   position: absolute;
   top: 70px;
   color: #262879;
-  font: 800 10px/1 Arial, sans-serif;
+  font: 800 12px/1 Arial, sans-serif;
 }
 
 .action-label-b {
@@ -1480,7 +1483,7 @@ html[data-theme="dark"] body {
 .dmg .meta-buttons .control-button::after {
   color: #262879;
   font-family: Arial, sans-serif;
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .meta-buttons {
@@ -1488,10 +1491,24 @@ html[data-theme="dark"] body {
 }
 
 .dmg .meta-buttons {
-  left: 100px;
+  left: 91px;
+  top: 183px;
+  transform: none;
+}
+
+.dmg .meta-buttons .control-button {
+  transform: rotate(-22deg);
+}
+
+.dmg .speaker {
+  right: 13px;
+  bottom: -18px;
+  gap: 10px;
+  transform: rotate(-28deg);
 }
 
 .dmg .speaker i {
+  height: 64px;
   border: 1px solid #aaa9a2;
   background: #bbb9b1;
   box-shadow: inset 3px 0 #46474d;
@@ -2259,16 +2276,15 @@ html[data-theme="dark"] body {
 
 .palette-picker {
   position: relative;
-  margin-top: 12px;
-  padding: 10px;
+  margin-top: 14px;
+  padding: 13px;
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 7px 10px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
   border: 1px solid var(--line);
 }
 
 .palette-picker > span:first-child {
-  align-self: center;
   color: var(--muted);
   font: 800 9px/1 monospace;
   letter-spacing: .08em;
@@ -2276,9 +2292,10 @@ html[data-theme="dark"] body {
 }
 
 .palette-picker select {
-  min-width: 220px;
-  height: 34px;
-  padding: 0 28px 0 9px;
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 0 34px 0 11px;
   color: var(--ink);
   border: 1px solid var(--ink);
   border-radius: 0;
@@ -2289,7 +2306,6 @@ html[data-theme="dark"] body {
 }
 
 .palette-picker small {
-  grid-column: 1 / -1;
   color: var(--muted);
   font: 650 9px/1.4 monospace;
   letter-spacing: .04em;
@@ -2316,7 +2332,7 @@ html[data-theme="dark"] body {
   height: 612px;
   padding: 12px;
   border-color: #392e86;
-  border-radius: 14px 14px 42px 42px / 14px 14px 40px 40px;
+  border-radius: 14px 14px 50% 50% / 14px 14px 46px 46px;
   background: #5543bd;
   box-shadow:
     inset 3px 0 rgba(255, 255, 255, .16),
@@ -2411,7 +2427,7 @@ html[data-theme="dark"] body {
 
 .cgb .dpad {
   left: 20px;
-  top: 75px;
+  top: 59px;
   width: 86px;
   height: 86px;
   border: 0;
@@ -2451,13 +2467,14 @@ html[data-theme="dark"] body {
 .cgb .dpad-glyph-right { clip-path: polygon(0 0, 100% 50%, 0 100%); }
 
 .cgb .action-buttons {
-  right: 19px;
-  top: 96px;
-  width: 113px;
+  right: 4px;
+  top: 80px;
+  width: 120px;
   height: 57px;
-  gap: 16px;
+  gap: 24px;
   background: transparent;
   box-shadow: none;
+  transform: rotate(-22deg);
 }
 
 .cgb .action-buttons .control-button {
@@ -2471,8 +2488,8 @@ html[data-theme="dark"] body {
 }
 
 .cgb .meta-buttons {
-  left: 50%;
-  top: 184px;
+  left: 51.5%;
+  top: 196px;
   gap: 13px;
   transform: translateX(-50%);
 }
@@ -2533,6 +2550,11 @@ html[data-theme="dark"] body {
     0 1px 0 rgba(42, 42, 46, .25);
 }
 
+.dmg .meta-buttons .control-button:active,
+.dmg .meta-buttons .control-button.is-pressed {
+  transform: translateY(2px) rotate(-22deg);
+}
+
 .dmg .power-label i,
 .cgb .power-label i {
   background: #391a26;
@@ -2546,13 +2568,14 @@ html[data-theme="dark"] body {
 
 .cgb .speaker {
   right: 7px;
-  bottom: 10px;
-  width: 72px;
-  height: 72px;
+  bottom: 18px;
+  width: 80px;
+  height: 88px;
   display: grid;
-  grid-template-columns: repeat(5, 5px);
+  grid-template-columns: repeat(7, 5px);
+  grid-template-rows: repeat(8, 5px);
   place-content: center;
-  gap: 5px;
+  gap: 6px;
   border-radius: 50%;
   background: transparent;
   transform: none;
@@ -2566,17 +2589,32 @@ html[data-theme="dark"] body {
   box-shadow: inset 1px 1px rgba(10, 8, 34, .35);
 }
 
+.cgb .speaker i:nth-child(1),
+.cgb .speaker i:nth-child(2),
+.cgb .speaker i:nth-child(6),
+.cgb .speaker i:nth-child(7),
+.cgb .speaker i:nth-child(8),
+.cgb .speaker i:nth-child(14),
+.cgb .speaker i:nth-child(43),
+.cgb .speaker i:nth-child(49),
+.cgb .speaker i:nth-child(50),
+.cgb .speaker i:nth-child(51),
+.cgb .speaker i:nth-child(55),
+.cgb .speaker i:nth-child(56) {
+  visibility: hidden;
+}
+
 .cgb-nintendo {
   position: absolute;
   left: 50%;
-  top: 15px;
+  top: 32px;
   color: rgba(48, 37, 132, .82);
   transform: translateX(-50%);
   text-shadow: 0 1px rgba(255, 255, 255, .16);
   border: 1px solid currentColor;
   border-radius: 12px;
-  padding: 2px 10px;
-  font: 800 14px/1 Arial, sans-serif;
+  padding: 2px 12px;
+  font: 800 15px/1 Arial, sans-serif;
   letter-spacing: -.04em;
 }
 
