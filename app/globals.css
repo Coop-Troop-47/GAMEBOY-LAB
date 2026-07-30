@@ -4473,6 +4473,19 @@ html[data-theme="dark"] body {
   visibility: visible;
 }
 
+.console-transition-shell {
+  position: fixed;
+  z-index: 10;
+  overflow: visible;
+  pointer-events: none;
+  contain: layout style;
+  will-change: opacity;
+}
+
+.console-transition-shell .transition-shell-clone {
+  transition: none;
+}
+
 .console-wrap.view-zoom-in .device-rig,
 .console-wrap.view-zoom-out .device-rig {
   transition: none;

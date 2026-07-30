@@ -2017,6 +2017,9 @@ export default function Emulator() {
     viewTransitionAnimationRef.current?.cancel();
     viewTransitionPendingRef.current?.pauseAnimation?.cancel();
     viewTransitionPendingRef.current?.bezelAnimation?.cancel();
+    viewTransitionPendingRef.current?.shellAnimation?.cancel();
+    viewTransitionPendingRef.current?.shellBezelAnimation?.cancel();
+    viewTransitionPendingRef.current?.shellGhost?.remove();
     viewTransitionPendingRef.current = null;
   }, []);
 
@@ -3069,6 +3072,9 @@ export default function Emulator() {
     animation?.cancel();
     pending.pauseAnimation?.cancel();
     pending.bezelAnimation?.cancel();
+    pending.shellAnimation?.cancel();
+    pending.shellBezelAnimation?.cancel();
+    pending.shellGhost?.remove();
     const frame = screenFrameRef.current;
     if (frame) {
       frame.style.removeProperty("transform");
@@ -3100,12 +3106,49 @@ export default function Emulator() {
     viewTransitionAnimationRef.current = null;
     viewTransitionPendingRef.current?.pauseAnimation?.cancel();
     viewTransitionPendingRef.current?.bezelAnimation?.cancel();
+    viewTransitionPendingRef.current?.shellAnimation?.cancel();
+    viewTransitionPendingRef.current?.shellBezelAnimation?.cancel();
+    viewTransitionPendingRef.current?.shellGhost?.remove();
     const computedFrameStyle = window.getComputedStyle(sourceFrame);
     const sourceLayoutWidth = Math.max(1, sourceFrame.offsetWidth);
     const sourceLayoutHeight = Math.max(1, sourceFrame.offsetHeight);
+    let shellGhost = null;
+    if (nextViewMode === "screen") {
+      const sourceHandheld = sourceFrame.closest(".handheld");
+      const shellBounds = sourceHandheld?.getBoundingClientRect();
+      if (sourceHandheld && shellBounds?.width > 0 && shellBounds.height > 0) {
+        const shellClone = sourceHandheld.cloneNode(true);
+        shellClone.querySelector(".screen-frame")?.remove();
+        shellClone.classList.add("transition-shell-clone");
+        shellGhost = document.createElement("div");
+        shellGhost.className = "console-transition-shell";
+        shellGhost.setAttribute("aria-hidden", "true");
+        shellGhost.inert = true;
+        Object.assign(shellGhost.style, {
+          left: `${shellBounds.left}px`,
+          top: `${shellBounds.top}px`,
+          width: `${shellBounds.width}px`,
+          height: `${shellBounds.height}px`,
+        });
+        Object.assign(shellClone.style, {
+          position: "absolute",
+          left: "0",
+          top: "0",
+          margin: "0",
+          transformOrigin: "0 0",
+          transform: (
+            `scale(${shellBounds.width / Math.max(1, sourceHandheld.offsetWidth)}, `
+            + `${shellBounds.height / Math.max(1, sourceHandheld.offsetHeight)})`
+          ),
+        });
+        shellGhost.append(shellClone);
+        document.body.append(shellGhost);
+      }
+    }
     viewTransitionPendingRef.current = {
       run,
       completed: false,
+      direction: nextViewMode,
       sourceBounds: {
         left: sourceBounds.left,
         top: sourceBounds.top,
@@ -3129,6 +3172,9 @@ export default function Emulator() {
         ?.getBoundingClientRect().width ?? 0,
       pauseAnimation: null,
       bezelAnimation: null,
+      shellGhost,
+      shellAnimation: null,
+      shellBezelAnimation: null,
     };
 
     setViewModeTransition(nextViewMode === "screen" ? "zoom-in" : "zoom-out");
@@ -4122,6 +4168,34 @@ export default function Emulator() {
         fill: "forwards",
       },
     );
+    if (pending.shellGhost) {
+      pending.shellAnimation = pending.shellGhost.animate(
+        [
+          { opacity: 1 },
+          { opacity: 0 },
+        ],
+        {
+          duration,
+          easing: "cubic-bezier(.45, 0, .55, 1)",
+          fill: "forwards",
+        },
+      );
+    }
+    const displayBezel = frame.closest(".display-bezel");
+    if (pending.direction === "console" && displayBezel) {
+      const targetBezelStyle = window.getComputedStyle(displayBezel);
+      pending.shellBezelAnimation = displayBezel.animate(
+        [
+          { borderRadius: "0px" },
+          { borderRadius: targetBezelStyle.borderRadius },
+        ],
+        {
+          duration,
+          easing: "linear",
+          fill: "forwards",
+        },
+      );
+    }
 
     if (pauseOverlay && pending.sourcePauseWidth > 0 && targetPauseWidth > 0) {
       const pauseCorrection = Math.max(
@@ -4141,7 +4215,14 @@ export default function Emulator() {
       );
     }
 
-    animation.finished.then(
+    const transitionFinishes = [
+      animation.finished,
+      pending.bezelAnimation.finished,
+      pending.pauseAnimation?.finished,
+      pending.shellAnimation?.finished,
+      pending.shellBezelAnimation?.finished,
+    ].filter(Boolean);
+    Promise.all(transitionFinishes).then(
       () => completeViewModeTransition(pending.run),
       () => {
         if (pending.run === viewTransitionRunRef.current && !pending.completed) {
