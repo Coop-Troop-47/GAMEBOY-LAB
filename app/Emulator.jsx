@@ -1808,6 +1808,7 @@ export default function Emulator() {
   const cartridgeAnimationTimerRef = useRef(0);
   const cartridgeAnimationRunRef = useRef(0);
   const transitionFrameTimerRef = useRef(0);
+  const viewTransitionTimerRef = useRef(0);
   const catalogueRunRef = useRef(0);
   const testRomLoadedRef = useRef(false);
   const consoleWrapRef = useRef(null);
@@ -1830,6 +1831,7 @@ export default function Emulator() {
   const [theme, setTheme] = useState("system");
   const [systemTheme, setSystemTheme] = useState("light");
   const [viewMode, setViewMode] = useState("console");
+  const [viewModeTransition, setViewModeTransition] = useState("");
   const [compatibilityPalette, setCompatibilityPalette] = useState("auto");
   const [consoleScale, setConsoleScale] = useState(1);
   const [screenGeometry, setScreenGeometry] = useState({
@@ -1989,6 +1991,7 @@ export default function Emulator() {
     window.clearTimeout(scaleToastTimerRef.current);
     window.clearTimeout(saveTooltipTimerRef.current);
     window.clearTimeout(cartridgeAnimationTimerRef.current);
+    window.clearTimeout(viewTransitionTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -2934,6 +2937,7 @@ export default function Emulator() {
   const performModelSwitch = useCallback((nextModel) => {
     if (nextModel === model) return;
     const hasCartridge = Boolean(romRef.current);
+    const preservePause = pausedRef.current;
     replayCartridgeInsertion();
     saveBattery();
     setModelState(nextModel);
@@ -2966,8 +2970,24 @@ export default function Emulator() {
         : `${modelLabel(nextModel)} fallback startup`);
       runningRef.current = true;
       setRunning(true);
-      if (anyDrawerOpen && pauseOnMenu) pauseGame("menu");
-      else resumeGame();
+      if (preservePause) {
+        const context = sourceCanvasRef.current?.getContext("2d", { alpha: false });
+        if (context) {
+          // A paused native-BIOS core cannot produce its first frame yet.
+          // Present the selected hardware's cold-boot surface immediately
+          // without advancing a single emulated cycle.
+          drawBootScreen(context, nextModel, 0.34, titleRef.current);
+          lcdRendererRef.current?.uploadFrame(
+            context.getImageData(0, 0, GAMEBOY_WIDTH, GAMEBOY_HEIGHT).data,
+            { resetHistory: true },
+          );
+          releaseDisplayTransition();
+        }
+      }
+      if (!preservePause) {
+        if (anyDrawerOpen && pauseOnMenu) pauseGame("menu");
+        else resumeGame();
+      }
     }
   }, [
     anyDrawerOpen,
@@ -3007,8 +3027,16 @@ export default function Emulator() {
 
   const switchViewMode = useCallback((nextViewMode) => {
     if (nextViewMode === viewMode) return;
+    window.clearTimeout(viewTransitionTimerRef.current);
+    setViewModeTransition(nextViewMode === "screen" ? "zoom-in" : "zoom-out");
     setViewMode(nextViewMode);
-    replayCartridgeInsertion();
+    viewTransitionTimerRef.current = window.setTimeout(
+      () => {
+        setViewModeTransition("");
+        replayCartridgeInsertion();
+      },
+      360,
+    );
   }, [replayCartridgeInsertion, viewMode]);
 
   const reset = useCallback(() => {
@@ -4209,7 +4237,7 @@ export default function Emulator() {
       <section className="workspace">
         <div
           ref={consoleWrapRef}
-          className={`console-wrap model-${model} ${integerScaling ? "integer-scale" : "flexible-scale"} ${dragging ? "is-dragging" : ""} ${cartridgePresent ? "has-cartridge" : ""} ${cartridgeHovered ? "cartridge-hovered" : ""} ${cartridgePreflight ? "cartridge-preflight" : ""} ${cartridgeInserting && cartridgeAnimationEnabled ? "cartridge-inserting" : ""} ${showSaveTooltip || cartridgePreflight ? "tooltip-visible" : ""}`}
+          className={`console-wrap model-${model} ${integerScaling ? "integer-scale" : "flexible-scale"} ${viewModeTransition ? `view-${viewModeTransition}` : ""} ${dragging ? "is-dragging" : ""} ${cartridgePresent ? "has-cartridge" : ""} ${cartridgeHovered ? "cartridge-hovered" : ""} ${cartridgePreflight ? "cartridge-preflight" : ""} ${cartridgeInserting && cartridgeAnimationEnabled ? "cartridge-inserting" : ""} ${showSaveTooltip || cartridgePreflight ? "tooltip-visible" : ""}`}
           onWheel={resizeWithWheel}
           style={{
             "--console-scale": consoleScale,

@@ -147,6 +147,10 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.has-cartridge \.cartridge-collision-anchor\s*\{[^}]*top:\s*-20px/s);
   assert.doesNotMatch(css, /\.cartridge-inserting \.cartridge-collision-anchor/);
   assert.match(source, /const contentWidth = contentLimit/);
+  assert.match(source, /const preservePause = pausedRef\.current[\s\S]*if \(preservePause\)[\s\S]*drawBootScreen\(context, nextModel, 0\.34, titleRef\.current\)[\s\S]*lcdRendererRef\.current\?\.uploadFrame\([\s\S]*resetHistory:\s*true[\s\S]*releaseDisplayTransition\(\)/);
+  assert.match(source, /setViewModeTransition\(nextViewMode === "screen" \? "zoom-in" : "zoom-out"\)[\s\S]*setViewMode\(nextViewMode\)[\s\S]*setViewModeTransition\(""\)[\s\S]*replayCartridgeInsertion\(\)[\s\S]*360/);
+  assert.match(css, /\.console-wrap\.view-zoom-in \.device-rig\s*\{[^}]*view-mode-zoom-in 340ms/s);
+  assert.match(css, /\.console-wrap\.view-zoom-out \.device-rig\s*\{[^}]*view-mode-zoom-out 340ms/s);
   assert.match(source, /--screen-only-scale/);
   assert.match(source, /availableHeight[\s\S]*- insertedTipHeight[\s\S]*- verticalOutline[\s\S]*- SCREEN_ONLY_EDGE_GUARD/);
   assert.match(source, /SCREEN_ONLY_CARTRIDGE_OVERHANG = 20/);
@@ -201,6 +205,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.library-system-tag\.system-gbc\s*\{[^}]*var\(--cyan\)/s);
   assert.match(css, /\.library-results\s*\{[^}]*grid-auto-rows:\s*max-content[^}]*align-content:\s*start/s);
   assert.match(css, /\.library-cartridge-graphic\s*\{[^}]*align-self:\s*start/s);
+  assert.match(css, /\.library-tools\s*\{[^}]*position:\s*sticky[^}]*top:\s*65px[^}]*margin-inline:\s*-28px[^}]*padding:\s*15px 28px[^}]*box-shadow:\s*0 -2px 0 var\(--paper\)/s);
   assert.match(source, /new LCDShaderRenderer\(canvas\)/);
   assert.match(source, /ghostStrength: ghostStrength \/ 100/);
   assert.match(source, /dmgContrast: dmgContrast \/ 100/);
@@ -319,6 +324,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.catalogue-cartridge\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0[^}]*width:\s*100%[^}]*height:\s*100%/s);
   assert.match(css, /\.catalogue-painting \.catalogue-scan-line\s*\{[^}]*catalogue-paint-wipe/s);
   assert.match(css, /\.catalogue-painting \.catalogue-cartridge-outline \.cart-shell\s*\{[^}]*fill:\s*transparent[^}]*stroke:\s*var\(--ink\)[^}]*animation:\s*none/s);
+  assert.match(css, /\.catalogue-painting \.catalogue-cartridge-outline\s*\{[^}]*catalogue-outline-recede\s+1120ms/s);
   assert.match(css, /\.catalogue-painting \.catalogue-cartridge-painted\s*\{[^}]*catalogue-surface-wipe\s+1120ms/s);
   assert.match(css, /@keyframes catalogue-paint-wipe[\s\S]*translateX\(calc\(var\(--catalogue-cart-width\) - 100%\)\)/);
   assert.match(css, /@keyframes catalogue-surface-wipe[\s\S]*clip-path:\s*inset\(0 100% 0 0\)[\s\S]*clip-path:\s*inset\(0\)/);
@@ -390,7 +396,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.dpad-glyphs\s*\{[^}]*translate\(var\(--dpad-press-x,[^}]*rotateX\(var\(--dpad-tilt-x/s);
   assert.match(css, /\.cgb \.dpad-glyph-up\s*\{[^}]*clip-path:\s*polygon/s);
   assert.match(css, /\.library-tabletop\s*\{[^}]*overflow:\s*auto/s);
-  assert.match(css, /\.library-tools\s*\{[^}]*position:\s*sticky[^}]*top:\s*66px[^}]*background:\s*var\(--paper\)/s);
+  assert.match(css, /\.library-tools\s*\{[^}]*position:\s*sticky[^}]*top:\s*65px[^}]*background:\s*var\(--paper\)/s);
   assert.match(css, /\.screen-frame\s*\{[^}]*container-type:\s*inline-size/s);
   assert.match(css, /\.console-wrap\s*\{[^}]*overflow:\s*clip/s);
   assert.match(source, /viewBox="0 0 570 660"/);

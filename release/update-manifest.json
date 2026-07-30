@@ -1,10 +1,11 @@
 {
-  "version": "1.2.3",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.3/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.3",
+  "version": "1.2.4",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.4/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.4",
   "changes": [
-    "Cartridge cataloguing now paints the complete shell, model details, label, and artwork in one slower left-to-right pass.",
-    "The unfinished side remains a clean transparent cartridge outline while the finished side reveals the correctly coloured DMG or GBC cartridge.",
-    "The wiping arm is locked to the cartridge bounds and painted edge at every supported scale."
+    "The detail-library toolbar now fully covers scrolling cards at its sticky header boundary, including the side gutters.",
+    "Switching between DMG and GBC while paused immediately redraws the selected hardware without advancing or resuming emulation.",
+    "Console and screen-only views now transition with a quick zoom before replaying the cartridge insertion animation.",
+    "The cataloguing wireframe now recedes with the paint line so stray outline pixels cannot protrude above the finished cartridge."
   ]
 }

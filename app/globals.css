@@ -3037,16 +3037,18 @@ html[data-theme="dark"] body {
 
 .library-tools {
   position: sticky;
-  /* The drawer scrollport adds 24px of top padding; 66px lands the toolbar
-     directly beneath the 90px sticky heading without covering it. */
-  top: 66px;
+  /* Overlap the higher-stacked heading by one pixel so fractional layout
+     coordinates cannot expose scrolling cards between the sticky surfaces. */
+  top: 65px;
   z-index: 1;
-  padding: 15px 0;
+  margin-inline: -28px;
+  padding: 15px 28px;
   display: grid;
   grid-template-columns: minmax(110px, 1fr) auto minmax(132px, auto) auto;
   gap: 10px;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
+  box-shadow: 0 -2px 0 var(--paper);
 }
 
 .library-tools input {
@@ -3853,6 +3855,8 @@ html[data-theme="dark"] body {
   }
 
   .library-tools {
+    margin-inline: -18px;
+    padding-inline: 18px;
     grid-template-columns: 1fr;
   }
 
@@ -4424,6 +4428,44 @@ html[data-theme="dark"] body {
   transform: none !important;
 }
 
+.console-wrap.view-zoom-in .device-rig {
+  animation: view-mode-zoom-in 340ms cubic-bezier(.16, .9, .24, 1) both;
+}
+
+.console-wrap.view-zoom-out .device-rig {
+  animation: view-mode-zoom-out 340ms cubic-bezier(.16, .9, .24, 1) both;
+}
+
+@keyframes view-mode-zoom-in {
+  from {
+    opacity: .38;
+    scale: .78;
+  }
+  62% {
+    opacity: 1;
+    scale: 1.025;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@keyframes view-mode-zoom-out {
+  from {
+    opacity: .48;
+    scale: 1.14;
+  }
+  68% {
+    opacity: 1;
+    scale: .985;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
 /* Split drawer navigation and selective visual wayfinding. */
 .topbar-drawer-triggers {
   margin-left: 10px;
@@ -4783,6 +4825,8 @@ html[data-theme="dark"] body {
 
 .catalogue-painting .catalogue-cartridge-outline {
   opacity: 1;
+  clip-path: inset(0);
+  animation: catalogue-outline-recede 1120ms cubic-bezier(.42, 0, .2, 1) forwards;
 }
 
 .catalogue-painting .catalogue-cartridge-outline > :not(.cart-shell) {
@@ -4957,6 +5001,11 @@ html[data-theme="dark"] body {
   94%, 100% { clip-path: inset(0); }
 }
 
+@keyframes catalogue-outline-recede {
+  0% { clip-path: inset(0); }
+  94%, 100% { clip-path: inset(0 0 0 100%); }
+}
+
 @keyframes catalogue-shelve {
   0% { opacity: 1; transform: translate(0, 0) rotate(0) scale(1); }
   35% { transform: translate(12px, -10px) rotate(4deg) scale(1.04); }
@@ -5015,6 +5064,7 @@ html[data-theme="dark"] body {
     margin: 0;
     font-size: 23px;
   }
+
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -5027,6 +5077,11 @@ html[data-theme="dark"] body {
   .catalogue-scan-line,
   .catalogue-cartridge,
   .catalogue-machine {
+    animation-duration: 1ms !important;
+  }
+
+  .console-wrap.view-zoom-in .device-rig,
+  .console-wrap.view-zoom-out .device-rig {
     animation-duration: 1ms !important;
   }
 }
