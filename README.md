@@ -71,16 +71,39 @@ saves remain local to the browser and are never uploaded.
 
 ## Private releases
 
-The app version lives in `app/version.js` and `package.json`. The matching
-update record is `release/update-manifest.json`. For a new release:
+The updater has two separate changelogs:
 
-1. Increment all three version values.
-2. Build and test the one-file app.
-3. Publish `public/gbc-lab.html` as the `gbc-lab.html` asset on the matching
-   private GitHub release.
-4. Update the public manifest Gist with `release/update-manifest.json`.
+- **In-app update changelog:** the `changes` array in
+  `release/update-manifest.json`. This file is the repository copy of the
+  public `update-manifest.json` Gist fetched by `app/version.js`. These are the
+  concise changes shown inside GAMEBOY LAB before the user downloads an
+  update. The app displays at most six non-empty entries.
+- **GitHub release changelog:** the GitHub release body created with
+  `gh release create` or edited on GitHub. This is the longer release page for
+  people viewing the repository. GAMEBOY LAB does not read this text, so
+  changing it does not update the in-app changelog.
 
-Only the version number and private release link are public. The repository,
-firmware, cartridge data, and downloadable standalone remain private. Update
-checks fail silently while offline; downloading a private release requires the
-owner to be signed in to GitHub.
+Keep both descriptions accurate, but maintain them independently. For every
+release:
+
+1. Increment the version in `app/version.js`, `package.json`, and the two
+   top-level package version fields in `package-lock.json`.
+2. Update `release/update-manifest.json` with the same version, matching
+   release/download URLs, and up to six short user-facing `changes`.
+3. Run `npm test`, `npm run lint`, and `git diff --check`. `npm test` rebuilds
+   the distributable at `public/gbc-lab.html`.
+4. Commit the exact tested state, create the matching annotated version tag,
+   and push the branch and tag.
+5. Create the GitHub release, write its separate detailed release body, and
+   upload `public/gbc-lab.html` as the `gbc-lab.html` asset.
+6. Verify that the uploaded asset is available and matches the local SHA-256.
+7. **Last**, copy `release/update-manifest.json` to the public manifest Gist.
+   Publishing the Gist earlier can advertise an update before its download is
+   ready.
+8. Read the Gist back and confirm its version, download URL, notes URL, and
+   `changes` exactly match the release.
+
+The manifest Gist ID and fetch URL live in `app/version.js`. Only the manifest
+metadata is public. The repository, firmware, cartridge data, and downloadable
+standalone remain private. Update checks fail silently while offline;
+downloading a private release requires the owner to be signed in to GitHub.
