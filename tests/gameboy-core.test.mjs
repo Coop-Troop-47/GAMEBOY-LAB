@@ -304,6 +304,29 @@ test("renders a complete 160×144 frame and raises VBlank", () => {
   assert.ok(gb.frameNumber >= 1);
 });
 
+test("packs framebuffer pixels without changing their RGBA bytes", () => {
+  const gb = new GameBoy("dmg");
+  assert.equal(gb.framebuffer32.buffer, gb.framebuffer.buffer);
+
+  const dmgColor = gb.dmgColor(0xe4, 2, gb.dmgBgPalette);
+  gb.setPackedPixel(7, 9, gb.dmgPackedColor(0xe4, 2, gb.dmgBgPalettePacked));
+  let offset = (9 * 160 + 7) * 4;
+  assert.deepEqual(
+    Array.from(gb.framebuffer.subarray(offset, offset + 4)),
+    [...dmgColor, 255],
+  );
+
+  gb.bgPalette[0] = 0x1f;
+  gb.bgPalette[1] = 0x00;
+  const cgbColor = Array.from(gb.cgbColor(gb.bgPalette, 0, 0));
+  gb.setPackedPixel(8, 9, gb.cgbPackedColor(gb.bgPalette, 0, 0));
+  offset = (9 * 160 + 8) * 4;
+  assert.deepEqual(
+    Array.from(gb.framebuffer.subarray(offset, offset + 4)),
+    [...cgbColor, 255],
+  );
+});
+
 test("distinguishes native GBC mode and the GBC compatibility palette", () => {
   const native = new GameBoy("cgb");
   native.loadROM(makeRom([], { cgb: 0x80 }));

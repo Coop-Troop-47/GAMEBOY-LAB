@@ -40,11 +40,24 @@ const DMG_GREEN_PALETTE = [
   [20, 46, 42],
 ];
 
+const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x01020304]).buffer)[0] === 0x04;
+
+function packRGBA(red, green, blue) {
+  return LITTLE_ENDIAN
+    ? ((0xff000000 | (blue << 16) | (green << 8) | red) >>> 0)
+    : (((red << 24) | (green << 16) | (blue << 8) | 0xff) >>> 0);
+}
+
+function packPalette(palette) {
+  return new Uint32Array(palette.map((color) => packRGBA(color[0], color[1], color[2])));
+}
+
 // Color conversion used to be recomputed with six Math.pow calls for almost
 // every CGB pixel. Hardware only exposes 32,768 RGB555 colors, so a compact
 // lookup table makes the exact same transform allocation-free in the hot PPU
 // path.
 const CGB_COLOR_LUT = new Uint8Array(0x8000 * 3);
+const CGB_COLOR_LUT_PACKED = new Uint32Array(0x8000);
 for (let value = 0; value < 0x8000; value += 1) {
   const r = value & 31;
   const g = (value >> 5) & 31;
@@ -56,6 +69,11 @@ for (let value = 0; value < 0x8000; value += 1) {
   CGB_COLOR_LUT[offset] = Math.min(255, Math.round(245 * (rr * 0.82 + gg * 0.12 + bb * 0.02)));
   CGB_COLOR_LUT[offset + 1] = Math.min(255, Math.round(245 * (gg * 0.78 + rr * 0.10 + bb * 0.08)));
   CGB_COLOR_LUT[offset + 2] = Math.min(255, Math.round(245 * (bb * 0.74 + gg * 0.18 + rr * 0.04)));
+  CGB_COLOR_LUT_PACKED[value] = packRGBA(
+    CGB_COLOR_LUT[offset],
+    CGB_COLOR_LUT[offset + 1],
+    CGB_COLOR_LUT[offset + 2],
+  );
 }
 
 const STATE_SCALARS = [
@@ -195,6 +213,7 @@ export class GameBoy {
     this.bgPalette = new Uint8Array(0x40);
     this.objPalette = new Uint8Array(0x40);
     this.framebuffer = new Uint8ClampedArray(SCREEN_WIDTH * SCREEN_HEIGHT * 4);
+    this.framebuffer32 = new Uint32Array(this.framebuffer.buffer);
     this.lineBgColors = new Uint8Array(SCREEN_WIDTH);
     this.lineBgPriority = new Uint8Array(SCREEN_WIDTH);
     this.lineSprites = [];
@@ -209,6 +228,7 @@ export class GameBoy {
     this.dmgObj0Palette = DMG_GREEN_PALETTE.map((color) => [...color]);
     this.dmgObj1Palette = DMG_GREEN_PALETTE.map((color) => [...color]);
     this.dmgPalette = this.dmgBgPalette;
+    this.refreshPackedDmgPalettes();
     this.onFrame = null;
     this.onBatterySave = null;
     this.hasROM = false;
@@ -331,6 +351,7 @@ export class GameBoy {
     this.dmgObj0Palette = DMG_GREEN_PALETTE.map((color) => [...color]);
     this.dmgObj1Palette = DMG_GREEN_PALETTE.map((color) => [...color]);
     this.dmgPalette = this.dmgBgPalette;
+    this.refreshPackedDmgPalettes();
     this.doubleSpeed = false;
     this.speedSwitchArmed = false;
     this.speedSubcycle = 0;
@@ -482,6 +503,14 @@ export class GameBoy {
     this.dmgObj0Palette = convert(this.objPalette, 0);
     this.dmgObj1Palette = convert(this.objPalette, 1);
     this.dmgPalette = this.dmgBgPalette;
+    this.refreshPackedDmgPalettes();
+  }
+
+  refreshPackedDmgPalettes() {
+    this.dmgBgPalettePacked = packPalette(this.dmgBgPalette);
+    this.dmgObj0PalettePacked = packPalette(this.dmgObj0Palette);
+    this.dmgObj1PalettePacked = packPalette(this.dmgObj1Palette);
+    this.dmgPalettePacked = this.dmgBgPalettePacked;
   }
 
   applyCompatibilityPalette() {
@@ -1161,12 +1190,12 @@ export class GameBoy {
       }
       bgColors[x] = colorIndex;
       bgPriority[x] = priority;
-      const rgb = cgbRendering
-        ? this.cgbColor(this.bgPalette, palette, colorIndex)
+      const packedColor = cgbRendering
+        ? this.cgbPackedColor(this.bgPalette, palette, colorIndex)
         : cgbCompatibility
-          ? this.cgbCompatibilityColor(this.bgPalette, 0, this.io[0x47], colorIndex)
-          : this.dmgColor(this.io[0x47], colorIndex, this.dmgBgPalette);
-      this.setPixel(x, line, rgb);
+          ? this.cgbCompatibilityPackedColor(this.bgPalette, 0, this.io[0x47], colorIndex)
+          : this.dmgPackedColor(this.io[0x47], colorIndex, this.dmgBgPalettePacked);
+      this.setPackedPixel(x, line, packedColor);
     }
 
     if (windowEnabled && Math.max(0, windowX) < 160) this.windowLine += 1;
@@ -1208,16 +1237,21 @@ export class GameBoy {
         if (!hiddenByBg) {
           const objectPalette = (sprite.attr & 0x10) ? 1 : 0;
           const objectRegister = this.io[objectPalette ? 0x49 : 0x48];
-          const rgb = cgbRendering
-            ? this.cgbColor(this.objPalette, sprite.attr & 7, colorIndex)
+          const packedColor = cgbRendering
+            ? this.cgbPackedColor(this.objPalette, sprite.attr & 7, colorIndex)
             : cgbCompatibility
-              ? this.cgbCompatibilityColor(this.objPalette, objectPalette, objectRegister, colorIndex)
-              : this.dmgColor(
+              ? this.cgbCompatibilityPackedColor(
+                  this.objPalette,
+                  objectPalette,
                   objectRegister,
                   colorIndex,
-                  objectPalette ? this.dmgObj1Palette : this.dmgObj0Palette,
+                )
+              : this.dmgPackedColor(
+                  objectRegister,
+                  colorIndex,
+                  objectPalette ? this.dmgObj1PalettePacked : this.dmgObj0PalettePacked,
                 );
-          this.setPixel(x, line, rgb);
+          this.setPackedPixel(x, line, packedColor);
         }
         break;
       }
@@ -1228,9 +1262,18 @@ export class GameBoy {
     return palette[(register >> (colorIndex * 2)) & 3];
   }
 
+  dmgPackedColor(register, colorIndex, palette = this.dmgPalettePacked) {
+    return palette[(register >> (colorIndex * 2)) & 3];
+  }
+
   cgbCompatibilityColor(memory, palette, register, colorIndex) {
     const mappedColor = (register >> (colorIndex * 2)) & 3;
     return this.cgbColor(memory, palette, mappedColor);
+  }
+
+  cgbCompatibilityPackedColor(memory, palette, register, colorIndex) {
+    const mappedColor = (register >> (colorIndex * 2)) & 3;
+    return this.cgbPackedColor(memory, palette, mappedColor);
   }
 
   cgbColor(memory, palette, colorIndex) {
@@ -1243,12 +1286,23 @@ export class GameBoy {
     return this.colorScratch;
   }
 
+  cgbPackedColor(memory, palette, colorIndex) {
+    const offset = palette * 8 + colorIndex * 2;
+    return CGB_COLOR_LUT_PACKED[
+      (memory[offset] | (memory[offset + 1] << 8)) & 0x7fff
+    ];
+  }
+
   setPixel(x, y, rgb) {
     const offset = (y * 160 + x) * 4;
     this.framebuffer[offset] = rgb[0];
     this.framebuffer[offset + 1] = rgb[1];
     this.framebuffer[offset + 2] = rgb[2];
     this.framebuffer[offset + 3] = 255;
+  }
+
+  setPackedPixel(x, y, color) {
+    this.framebuffer32[y * SCREEN_WIDTH + x] = color;
   }
 
   writeHDMA(register, value) {

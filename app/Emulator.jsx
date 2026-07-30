@@ -1190,6 +1190,7 @@ function SafetyPrompt({
 }
 
 function UpdatePrompt({ update, onDismiss }) {
+  const changes = update.changes ?? [];
   return (
     <section className="update-prompt" role="dialog" aria-labelledby="update-prompt-title">
       <div className="update-prompt-copy">
@@ -1199,6 +1200,14 @@ function UpdatePrompt({ update, onDismiss }) {
           A newer one-file build is ready. Your games and browser saves stay
           where they are; replace this HTML only when you are ready.
         </p>
+        {changes.length > 0 && (
+          <div className="update-changelog">
+            <span>WHAT CHANGED</span>
+            <ul>
+              {changes.map((change) => <li key={change}>{change}</li>)}
+            </ul>
+          </div>
+        )}
       </div>
       <div className="update-prompt-actions">
         <button type="button" onClick={onDismiss}>LATER</button>
@@ -1589,6 +1598,11 @@ export default function Emulator() {
           version: testVersion,
           downloadUrl: "#standalone-update",
           notesUrl: "#standalone-update",
+          changes: [
+            "Faster bit-identical DMG and GBC pixel delivery.",
+            "Less WebGL driver work in the LCD shader pipeline.",
+            "Release changes are now shown before you download.",
+          ],
         });
         return;
       }

@@ -2114,6 +2114,40 @@ html[data-theme="dark"] body {
   font: 700 11px/1.45 var(--font-mono);
 }
 
+.update-changelog {
+  margin-top: 15px;
+  padding-top: 13px;
+  border-top: 1px solid rgba(23, 25, 30, .45);
+}
+
+.update-changelog > span {
+  display: block;
+  margin-bottom: 8px;
+  font: 900 9px/1 var(--font-mono);
+  letter-spacing: .12em;
+}
+
+.update-changelog ul {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  list-style: none;
+}
+
+.update-changelog li {
+  position: relative;
+  padding-left: 16px;
+  color: #17191e;
+  font: 800 10px/1.35 var(--font-mono);
+}
+
+.update-changelog li::before {
+  position: absolute;
+  left: 0;
+  content: "→";
+}
+
 .update-prompt-actions {
   margin-top: 17px;
   display: grid;

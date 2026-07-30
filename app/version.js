@@ -1,4 +1,4 @@
-export const APP_VERSION = "1.0.1";
+export const APP_VERSION = "1.1.0";
 export const UPDATE_REPOSITORY = "Coop-Troop-47/GAMEBOY-LAB";
 export const UPDATE_ASSET_NAME = "gbc-lab.html";
 export const UPDATE_MANIFEST_URL = (
@@ -42,5 +42,10 @@ export async function findAvailableUpdate(fetchImplementation = globalThis.fetch
     version,
     downloadUrl: manifest.downloadUrl,
     notesUrl: manifest.notesUrl || manifest.downloadUrl,
+    changes: Array.isArray(manifest.changes)
+      ? manifest.changes
+          .filter((change) => typeof change === "string" && change.trim())
+          .slice(0, 6)
+      : [],
   };
 }

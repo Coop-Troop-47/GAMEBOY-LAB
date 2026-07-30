@@ -258,9 +258,8 @@ function createTexture(gl, data = null) {
   return texture;
 }
 
-function bindQuad(gl, program, buffer) {
+function bindQuad(gl, buffer, location) {
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  const location = gl.getAttribLocation(program, "aPosition");
   gl.enableVertexAttribArray(location);
   gl.vertexAttribPointer(location, 2, gl.FLOAT, false, 0, 0);
 }
@@ -302,6 +301,25 @@ export class LCDShaderRenderer {
       PERSISTENCE_FRAGMENT_SHADER,
     );
     this.displayProgram = createProgram(gl, DISPLAY_VERTEX_SHADER, LCD_FRAGMENT_SHADER);
+    // Shader reflection is static. Resolve locations once instead of asking
+    // the driver to look them up again for every emulated frame.
+    this.persistenceLocations = {
+      position: gl.getAttribLocation(this.persistenceProgram, "aPosition"),
+      currentFrame: gl.getUniformLocation(this.persistenceProgram, "uCurrentFrame"),
+      previousFrame: gl.getUniformLocation(this.persistenceProgram, "uPreviousFrame"),
+      ghostStrength: gl.getUniformLocation(this.persistenceProgram, "uGhostStrength"),
+      ghostEnabled: gl.getUniformLocation(this.persistenceProgram, "uGhostEnabled"),
+      resetHistory: gl.getUniformLocation(this.persistenceProgram, "uResetHistory"),
+    };
+    this.displayLocations = {
+      position: gl.getAttribLocation(this.displayProgram, "aPosition"),
+      frame: gl.getUniformLocation(this.displayProgram, "uFrame"),
+      sourceSize: gl.getUniformLocation(this.displayProgram, "uSourceSize"),
+      outputSize: gl.getUniformLocation(this.displayProgram, "uOutputSize"),
+      displayModel: gl.getUniformLocation(this.displayProgram, "uDisplayModel"),
+      lcdEnabled: gl.getUniformLocation(this.displayProgram, "uLcdEnabled"),
+      dmgContrast: gl.getUniformLocation(this.displayProgram, "uDmgContrast"),
+    };
     this.quad = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
     gl.bufferData(
@@ -389,24 +407,24 @@ export class LCDShaderRenderer {
     );
     gl.viewport(0, 0, SOURCE_WIDTH, SOURCE_HEIGHT);
     gl.useProgram(this.persistenceProgram);
-    bindQuad(gl, this.persistenceProgram, this.quad);
+    bindQuad(gl, this.quad, this.persistenceLocations.position);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.currentTexture);
-    gl.uniform1i(gl.getUniformLocation(this.persistenceProgram, "uCurrentFrame"), 0);
+    gl.uniform1i(this.persistenceLocations.currentFrame, 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.historyTextures[this.historyIndex]);
-    gl.uniform1i(gl.getUniformLocation(this.persistenceProgram, "uPreviousFrame"), 1);
+    gl.uniform1i(this.persistenceLocations.previousFrame, 1);
     gl.uniform1f(
-      gl.getUniformLocation(this.persistenceProgram, "uGhostStrength"),
+      this.persistenceLocations.ghostStrength,
       this.ghostStrength,
     );
     gl.uniform1i(
-      gl.getUniformLocation(this.persistenceProgram, "uGhostEnabled"),
+      this.persistenceLocations.ghostEnabled,
       this.ghostEnabled ? 1 : 0,
     );
     gl.uniform1i(
-      gl.getUniformLocation(this.persistenceProgram, "uResetHistory"),
+      this.persistenceLocations.resetHistory,
       this.resetHistory ? 1 : 0,
     );
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -461,30 +479,30 @@ export class LCDShaderRenderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.useProgram(this.displayProgram);
-    bindQuad(gl, this.displayProgram, this.quad);
+    bindQuad(gl, this.quad, this.displayLocations.position);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.historyTextures[this.historyIndex]);
-    gl.uniform1i(gl.getUniformLocation(this.displayProgram, "uFrame"), 0);
+    gl.uniform1i(this.displayLocations.frame, 0);
     gl.uniform2f(
-      gl.getUniformLocation(this.displayProgram, "uSourceSize"),
+      this.displayLocations.sourceSize,
       SOURCE_WIDTH,
       SOURCE_HEIGHT,
     );
     gl.uniform2f(
-      gl.getUniformLocation(this.displayProgram, "uOutputSize"),
+      this.displayLocations.outputSize,
       this.canvas.width,
       this.canvas.height,
     );
     gl.uniform1i(
-      gl.getUniformLocation(this.displayProgram, "uDisplayModel"),
+      this.displayLocations.displayModel,
       this.model === "cgb" ? 1 : 0,
     );
     gl.uniform1i(
-      gl.getUniformLocation(this.displayProgram, "uLcdEnabled"),
+      this.displayLocations.lcdEnabled,
       this.lcdEnabled ? 1 : 0,
     );
     gl.uniform1f(
-      gl.getUniformLocation(this.displayProgram, "uDmgContrast"),
+      this.displayLocations.dmgContrast,
       this.dmgContrast,
     );
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
