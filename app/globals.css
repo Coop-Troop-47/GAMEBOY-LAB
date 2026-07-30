@@ -245,6 +245,9 @@ input:focus-visible {
   position: relative;
   height: 333px;
   padding: 35px 42px 43px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 2px solid #1b1c22;
   border-radius: 11px 11px 42px 11px;
   background:
@@ -285,8 +288,9 @@ input:focus-visible {
   isolation: isolate;
   left: auto;
   width: 274px;
+  flex: 0 0 auto;
   aspect-ratio: auto;
-  margin: 0 auto;
+  margin: 0;
   overflow: clip;
   border: 8px solid #121719;
   background: #cadc9f;
@@ -1372,13 +1376,6 @@ html[data-theme="dark"] body {
     inset -3px -4px rgba(24, 25, 31, .2);
 }
 
-.dmg .screen-frame {
-  /* The former 5px outline extended left/up without affecting layout. The
-     single 8px border now owns that same visible footprint, so restore its
-     original outer origin rather than letting the LCD drift into the shell. */
-  translate: -5px -5px;
-}
-
 .dmg .power-label {
   z-index: 2;
   left: 0;
@@ -2457,9 +2454,6 @@ html[data-theme="dark"] body {
   border-radius: 2px;
   background: #0d0f13;
   box-shadow: none;
-  /* The old outlined frame was centred inside a 240px bezel opening: 2px of
-     margin minus 5px of outward outline placed its edge at -3px. */
-  translate: -3px -5px;
 }
 
 .cgb .screen-frame canvas.lcd-output,
@@ -4351,7 +4345,6 @@ html[data-theme="dark"] body {
   border-width: 12px;
   border-radius: 3px;
   box-shadow: none;
-  translate: 0 0;
   transition:
     width 180ms cubic-bezier(.2, .8, .2, 1);
 }
