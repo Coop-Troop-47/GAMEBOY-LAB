@@ -2038,7 +2038,7 @@ export default function Emulator() {
     };
   }, [preferencesReady]);
 
-  const replayCartridgeInsertion = useCallback(async () => {
+  const replayCartridgeInsertion = useCallback(async ({ waitForGeometry = true } = {}) => {
     if (!romRef.current || !cartridgeAnimationEnabled) return;
     const run = cartridgeAnimationRunRef.current + 1;
     cartridgeAnimationRunRef.current = run;
@@ -2049,14 +2049,16 @@ export default function Emulator() {
     // View/model switches are batched with this call. Preflight waits until the
     // new geometry has painted, reserves the prompt clearance, and lets the
     // shared rig finish any required duck before the cartridge starts moving.
-    setCartridgePreflight(true);
-    await afterNextPaint();
-    if (cartridgeAnimationRunRef.current !== run) return;
-    // Resizing, drawer movement, model changes, and presentation switches all
-    // converge here. Start the cartridge only after the single shared rig has
-    // actually stopped changing, rather than guessing which transition is active.
-    await waitForVisualStability(deviceRigRef.current);
-    if (cartridgeAnimationRunRef.current !== run) return;
+    setCartridgePreflight(waitForGeometry);
+    if (waitForGeometry) {
+      await afterNextPaint();
+      if (cartridgeAnimationRunRef.current !== run) return;
+      // Resizing, drawer movement, model changes, and presentation switches all
+      // converge here. Start the cartridge only after the single shared rig has
+      // actually stopped changing, rather than guessing which transition is active.
+      await waitForVisualStability(deviceRigRef.current);
+      if (cartridgeAnimationRunRef.current !== run) return;
+    }
 
     setCartridgeAnimationKey((value) => value + 1);
     setCartridgePreflight(false);
@@ -3034,19 +3036,29 @@ export default function Emulator() {
     performModelSwitch(nextModel);
   }, [pendingModel, performModelSwitch]);
 
+  const completeViewModeTransition = useCallback(() => {
+    if (!viewTransitionTimerRef.current) return;
+    window.clearTimeout(viewTransitionTimerRef.current);
+    viewTransitionTimerRef.current = 0;
+    setViewModeTransition("");
+    // The zoom has already resolved the final geometry. Start insertion in the
+    // same frame instead of waiting through the normal preflight/stability pass.
+    replayCartridgeInsertion({ waitForGeometry: false });
+  }, [replayCartridgeInsertion]);
+
   const switchViewMode = useCallback((nextViewMode) => {
     if (nextViewMode === viewMode) return;
     window.clearTimeout(viewTransitionTimerRef.current);
+    viewTransitionTimerRef.current = 0;
     setViewModeTransition(nextViewMode === "screen" ? "zoom-in" : "zoom-out");
     setViewMode(nextViewMode);
+    // animationend normally completes the sequence. This is only a safety net
+    // for background tabs and engines that suppress animation events.
     viewTransitionTimerRef.current = window.setTimeout(
-      () => {
-        setViewModeTransition("");
-        replayCartridgeInsertion();
-      },
-      360,
+      completeViewModeTransition,
+      520,
     );
-  }, [replayCartridgeInsertion, viewMode]);
+  }, [completeViewModeTransition, viewMode]);
 
   const reset = useCallback(() => {
     if (!romRef.current) return;
@@ -3787,7 +3799,7 @@ export default function Emulator() {
     viewMode,
   ]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const snapScreenToDevicePixels = () => {
       const density = window.devicePixelRatio || 1;
       let outerWidth;
@@ -4265,7 +4277,18 @@ export default function Emulator() {
             )}px`,
           }}
         >
-          <div className="device-rig" ref={deviceRigRef}>
+          <div
+            className="device-rig"
+            ref={deviceRigRef}
+            onAnimationEnd={(event) => {
+              if (
+                event.target === event.currentTarget
+                && event.animationName.startsWith("view-mode-zoom-")
+              ) {
+                completeViewModeTransition();
+              }
+            }}
+          >
             {cartridgePresent && (
               <CartridgeDock
                 animationKey={cartridgeAnimationKey}

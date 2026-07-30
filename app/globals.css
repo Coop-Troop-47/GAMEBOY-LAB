@@ -4424,7 +4424,7 @@ html[data-theme="dark"] body {
   transition:
     transform 180ms cubic-bezier(.2, .8, .2, 1),
     translate 250ms cubic-bezier(.16, .9, .24, 1);
-  will-change: transform, translate;
+  will-change: transform, translate, scale;
 }
 
 .screen-only .device-rig .handheld {
@@ -4436,12 +4436,17 @@ html[data-theme="dark"] body {
 }
 
 .console-wrap.view-zoom-in .device-rig {
-  animation: view-mode-zoom-in 340ms cubic-bezier(.16, .9, .24, 1) both;
+  animation: view-mode-zoom-in 360ms cubic-bezier(.22, 1, .36, 1) both;
   transition: none;
 }
 
 .console-wrap.view-zoom-out .device-rig {
-  animation: view-mode-zoom-out 340ms cubic-bezier(.16, .9, .24, 1) both;
+  animation: view-mode-zoom-out 360ms cubic-bezier(.22, 1, .36, 1) both;
+  transition: none;
+}
+
+.console-wrap.view-zoom-in .screen-frame,
+.console-wrap.view-zoom-out .screen-frame {
   transition: none;
 }
 
@@ -4463,7 +4468,7 @@ html[data-theme="dark"] body {
 
 @keyframes view-mode-zoom-out {
   from {
-    scale: 1.14;
+    scale: 1.2;
   }
   to {
     scale: 1;

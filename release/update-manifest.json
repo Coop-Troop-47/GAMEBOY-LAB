@@ -1,10 +1,10 @@
 {
-  "version": "1.2.6",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.6/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.6",
+  "version": "1.2.7",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.7/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.7",
   "changes": [
-    "DMG and GBC LCD, transition, glass, and pause layers now share a hard bezel clip at fractional and Retina scales.",
-    "The bezel ring now paints above composited shader surfaces, preventing LCD pixels and pause darkening from bleeding outside the thin black edge.",
-    "Console and screen-only changes now use a centered scale-only zoom; the cartridge disappears before the zoom and returns through the insertion animation."
+    "Console and screen-only changes now use one centered compositor zoom instead of stacking a second LCD resize animation.",
+    "Both grow and shrink directions now resolve their final geometry before paint for a smooth, stationary transition.",
+    "Cartridge insertion now begins on the zoom animation’s completion frame with no extra stability-wait delay."
   ]
 }
