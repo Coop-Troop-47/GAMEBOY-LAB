@@ -172,6 +172,8 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.doesNotMatch(css, /\.lcd-view-transition-overlay/);
   assert.match(css, /\.screen-frame\s*\{[^}]*border:\s*8px solid #121719/s);
   assert.doesNotMatch(css, /\.screen-frame\s*\{[^}]*outline:/s);
+  assert.match(css, /\.dmg \.screen-frame\s*\{[^}]*translate:\s*-5px -5px/s);
+  assert.match(css, /\.cgb \.screen-frame\s*\{[^}]*translate:\s*-3px -5px/s);
   assert.match(css, /\.screen-frame::after\s*\{[^}]*content:\s*none/s);
   assert.match(css, /\.cgb \.screen-frame\s*\{[^}]*border-color:\s*#0d0f13[^}]*box-shadow:\s*none/s);
   assert.doesNotMatch(css, /\.cgb \.screen-frame::after/);
@@ -449,7 +451,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.library-tools\s*\{[^}]*position:\s*sticky[^}]*top:\s*65px[^}]*background:\s*var\(--paper\)/s);
   assert.match(css, /\.screen-frame\s*\{[^}]*container-type:\s*inline-size[^}]*isolation:\s*isolate[^}]*overflow:\s*clip[^}]*border:\s*8px solid #121719/s);
   assert.match(css, /\.screen-frame canvas\.lcd-output,[\s\S]*\.screen-frame \.pause-overlay\s*\{[^}]*clip-path:\s*inset\(0\)/s);
-  assert.match(css, /\.screen-only \.screen-frame\s*\{[^}]*border-width:\s*12px[^}]*box-shadow:\s*none/s);
+  assert.match(css, /\.screen-only \.screen-frame\s*\{[^}]*border-width:\s*12px[^}]*box-shadow:\s*none[^}]*translate:\s*0 0/s);
   assert.match(source, /dimmed:\s*paused && running/);
   assert.match(shader, /uniform float uDimFactor/);
   assert.match(shader, /averageAbsoluteSine\(nativePosition\.x, footprint\.x\)/);
