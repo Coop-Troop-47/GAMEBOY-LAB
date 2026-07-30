@@ -56,6 +56,9 @@ const SCREEN_ONLY_EDGE_GUARD = 1;
 const SAVE_TOOLTIP_DURATION = 1500;
 const SAVE_TOOLTIP_FADE_DURATION = 300;
 const TECHNICAL_READOUT_MEDIA = "(min-width: 1180px)";
+const DMG_LCD_CONTRAST_BASE = 150;
+const DMG_SHARP_CONTRAST_BASE = 112;
+const DMG_CONTRAST_ADJUSTMENT_LIMIT = 30;
 function BrandMark() {
   return (
     <svg
@@ -1845,7 +1848,7 @@ export default function Emulator() {
   const [lcdMode, setLcdMode] = useState("response");
   const [ghostingEnabled, setGhostingEnabled] = useState(true);
   const [ghostStrength, setGhostStrength] = useState(42);
-  const [dmgContrast, setDmgContrast] = useState(112);
+  const [dmgContrastAdjustment, setDmgContrastAdjustment] = useState(0);
   const [volume, setVolume] = useState(70);
   const [muted, setMuted] = useState(false);
   const [audioState, setAudioState] = useState("LOCKED");
@@ -1878,6 +1881,10 @@ export default function Emulator() {
   const [keyBindings, setKeyBindings] = useState(DEFAULT_BINDINGS);
   const [bindingTarget, setBindingTarget] = useState(null);
   const [pressedButtons, setPressedButtons] = useState(() => new Set());
+  const dmgContrastBase = lcdMode === "response"
+    ? DMG_LCD_CONTRAST_BASE
+    : DMG_SHARP_CONTRAST_BASE;
+  const effectiveDmgContrast = dmgContrastBase + dmgContrastAdjustment;
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [availableUpdate, setAvailableUpdate] = useState(null);
   const [diagnostics, setDiagnostics] = useState({
@@ -3576,7 +3583,7 @@ export default function Emulator() {
       lcdEnabled: lcdMode === "response",
       ghostEnabled: ghostingEnabled,
       ghostStrength: ghostStrength / 100,
-      dmgContrast: dmgContrast / 100,
+      dmgContrast: effectiveDmgContrast / 100,
       dimmed: paused && running,
     });
     const context = source.getContext("2d", { alpha: false });
@@ -3596,10 +3603,18 @@ export default function Emulator() {
       lcdEnabled: lcdMode === "response",
       ghostEnabled: ghostingEnabled,
       ghostStrength: ghostStrength / 100,
-      dmgContrast: dmgContrast / 100,
+      dmgContrast: effectiveDmgContrast / 100,
       dimmed: paused && running,
     });
-  }, [dmgContrast, ghostStrength, ghostingEnabled, lcdMode, model, paused, running]);
+  }, [
+    effectiveDmgContrast,
+    ghostStrength,
+    ghostingEnabled,
+    lcdMode,
+    model,
+    paused,
+    running,
+  ]);
 
   useEffect(() => {
     const draw = () => {
@@ -3675,8 +3690,11 @@ export default function Emulator() {
         if (Number.isFinite(saved.ghostStrength)) {
           setGhostStrength(Math.max(8, Math.min(72, saved.ghostStrength)));
         }
-        if (Number.isFinite(saved.dmgContrast)) {
-          setDmgContrast(Math.max(70, Math.min(150, saved.dmgContrast)));
+        if (Number.isFinite(saved.dmgContrastAdjustment)) {
+          setDmgContrastAdjustment(Math.max(
+            -DMG_CONTRAST_ADJUSTMENT_LIMIT,
+            Math.min(DMG_CONTRAST_ADJUSTMENT_LIMIT, saved.dmgContrastAdjustment),
+          ));
         }
         if (typeof saved.muted === "boolean") setMuted(saved.muted);
         if (Number.isFinite(saved.volume)) setVolume(Math.max(0, Math.min(100, saved.volume)));
@@ -3734,7 +3752,7 @@ export default function Emulator() {
         lcdMode,
         ghostingEnabled,
         ghostStrength,
-        dmgContrast,
+        dmgContrastAdjustment,
         keyboardMotion,
         muted,
         volume,
@@ -3765,7 +3783,7 @@ export default function Emulator() {
     lcdMode,
     ghostingEnabled,
     ghostStrength,
-    dmgContrast,
+    dmgContrastAdjustment,
     keyboardMotion,
     muted,
     volume,
@@ -4923,17 +4941,26 @@ export default function Emulator() {
             </label>
             {model === "dmg" && (
               <label className="range-control dmg-contrast-control">
-                <span><b>Game Boy contrast</b><output>{dmgContrast}%</output></span>
+                <span>
+                  <b>Game Boy contrast</b>
+                  <output>
+                    {dmgContrastAdjustment >= 0 ? "+" : ""}
+                    {dmgContrastAdjustment}
+                  </output>
+                </span>
                 <input
                   type="range"
-                  min="70"
-                  max="150"
+                  min={-DMG_CONTRAST_ADJUSTMENT_LIMIT}
+                  max={DMG_CONTRAST_ADJUSTMENT_LIMIT}
                   step="1"
-                  value={dmgContrast}
-                  onChange={(event) => setDmgContrast(Number(event.target.value))}
-                  aria-label="Game Boy display contrast"
+                  value={dmgContrastAdjustment}
+                  onChange={(event) => setDmgContrastAdjustment(Number(event.target.value))}
+                  aria-label="Game Boy contrast adjustment"
                 />
-                <small>Darker production-LCD tone · 112% default</small>
+                <small>
+                  Relative adjustment · {lcdMode === "response" ? "LCD" : "SHARP"} baseline{" "}
+                  {dmgContrastBase}% · active {effectiveDmgContrast}%
+                </small>
               </label>
             )}
             <button

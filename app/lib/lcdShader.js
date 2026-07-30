@@ -274,7 +274,7 @@ export class LCDShaderRenderer {
     this.lcdEnabled = true;
     this.ghostEnabled = true;
     this.ghostStrength = 0.42;
-    this.dmgContrast = 1.12;
+    this.dmgContrast = 1.5;
     this.dimFactor = 1;
     this.dimAnimationFrame = null;
     this.resetHistory = true;
@@ -359,7 +359,7 @@ export class LCDShaderRenderer {
     lcdEnabled,
     ghostEnabled,
     ghostStrength,
-    dmgContrast = 1.12,
+    dmgContrast = 1.5,
     dimmed = false,
   }) {
     const persistenceChanged = this.ghostEnabled !== ghostEnabled;
@@ -369,7 +369,7 @@ export class LCDShaderRenderer {
     this.lcdEnabled = lcdEnabled;
     this.ghostEnabled = ghostEnabled;
     this.ghostStrength = Math.max(0, Math.min(0.92, ghostStrength));
-    this.dmgContrast = Math.max(0.7, Math.min(1.6, dmgContrast));
+    this.dmgContrast = Math.max(0.7, Math.min(2.0, dmgContrast));
     if (persistenceChanged) this.resetHistory = true;
     this.canvas.dataset.displayModel = model;
     this.canvas.dataset.lcdMode = lcdEnabled ? "lcd" : "sharp";

@@ -292,9 +292,9 @@ input:focus-visible {
   aspect-ratio: auto;
   margin: 0;
   overflow: clip;
-  border: calc(var(--lcd-bezel-width, 8px) * 2 / 3) solid #383b43;
-  border-radius: 3px;
-  background: #cadc9f;
+  border: calc(var(--lcd-bezel-width, 8px) * 2 / 3) solid #292c32;
+  border-radius: calc(var(--lcd-bezel-width, 8px) * .4);
+  background: #121719;
   transform: none;
   box-shadow: none;
 }
@@ -309,6 +309,7 @@ input:focus-visible {
 .dmg .screen-inner {
   border: calc(var(--lcd-bezel-width, 8px) / 3) solid #121719;
   border-radius: 0;
+  background: #121719;
 }
 
 .screen-frame canvas.lcd-output {
@@ -2470,7 +2471,7 @@ html[data-theme="dark"] body {
   bottom: 48px;
   border-width: var(--lcd-bezel-width, 8px);
   border-color: #0d0f13;
-  border-radius: calc(var(--lcd-bezel-width, 8px) * 1.25);
+  border-radius: calc(var(--lcd-bezel-width, 8px) * 1.1);
   background: #0d0f13;
   box-shadow: none;
   translate: -50% 0;
@@ -2478,7 +2479,8 @@ html[data-theme="dark"] body {
 
 .cgb .screen-inner {
   border: 0;
-  border-radius: calc(var(--lcd-bezel-width, 8px) * .25);
+  border-radius: calc(var(--lcd-bezel-width, 8px) * .1);
+  background: #0d0f13;
 }
 
 .cgb .screen-frame canvas.lcd-output,
@@ -2839,6 +2841,10 @@ html[data-theme="dark"] body {
 }
 
 .game-cartridge {
+  --cart-insert-start: -58%;
+  --cart-insert-impact: -4%;
+  --cart-insert-overshoot: 2.7%;
+  --cart-insert-rebound: -1.35%;
   position: absolute;
   left: 50%;
   top: -20px;
@@ -2849,6 +2855,17 @@ html[data-theme="dark"] body {
   transform: translate(-50%, 0) rotate(0deg);
   transform-origin: 50% 22%;
   transition: transform 250ms cubic-bezier(.16, .9, .24, 1);
+}
+
+/* The GBC cartridge is 262px wide versus DMG's 252px and therefore taller at
+   the shared 57:66 aspect ratio. Scale its percentage keyframes by 252/262 so
+   both models cover the same physical insertion distance and trigger the same
+   preflight duck. */
+.console-wrap.model-cgb .game-cartridge {
+  --cart-insert-start: -55.8%;
+  --cart-insert-impact: -3.85%;
+  --cart-insert-overshoot: 2.6%;
+  --cart-insert-rebound: -1.3%;
 }
 
 .cart-shadow { fill: var(--cyan); }
@@ -4089,7 +4106,7 @@ html[data-theme="dark"] body {
 }
 
 .cartridge-preflight .game-cartridge {
-  transform: translate(-50%, -58%) rotate(-3deg);
+  transform: translate(-50%, var(--cart-insert-start)) rotate(-3deg);
   transition: none;
 }
 
@@ -4103,16 +4120,16 @@ html[data-theme="dark"] body {
 
 @keyframes cartridge-slide-in {
   0% {
-    transform: translate(-50%, -58%) rotate(-3deg);
+    transform: translate(-50%, var(--cart-insert-start)) rotate(-3deg);
   }
   48% {
-    transform: translate(-50%, -4%) rotate(1.5deg);
+    transform: translate(-50%, var(--cart-insert-impact)) rotate(1.5deg);
   }
   62% {
-    transform: translate(-50%, 2.7%) rotate(-.7deg);
+    transform: translate(-50%, var(--cart-insert-overshoot)) rotate(-.7deg);
   }
   76% {
-    transform: translate(-50%, -1.35%) rotate(.3deg);
+    transform: translate(-50%, var(--cart-insert-rebound)) rotate(.3deg);
   }
   100% {
     transform: translate(-50%, 0) rotate(0deg);
@@ -4373,7 +4390,7 @@ html[data-theme="dark"] body {
   left: auto;
   bottom: auto;
   width: var(--screen-frame-width);
-  border-radius: 3px;
+  border-radius: calc(var(--lcd-bezel-width, 8px) * .4);
   box-shadow: none;
   translate: 0 0;
   transition:
@@ -4381,7 +4398,7 @@ html[data-theme="dark"] body {
 }
 
 .screen-only .cgb .screen-frame {
-  border-radius: calc(var(--lcd-bezel-width, 8px) * 1.25);
+  border-radius: calc(var(--lcd-bezel-width, 8px) * 1.1);
 }
 
 @media (max-width: 620px) {
