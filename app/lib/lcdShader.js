@@ -71,19 +71,21 @@ vec3 fetchNative(ivec2 coordinate) {
 
 const float PI = 3.14159265358979323846;
 
-// Exact box-filtered coverage of a periodic sin² aperture. Unlike smoothstep
-// evaluated at a fragment center, this integrates the full area represented by
-// the output pixel, so a boundary never becomes darker merely because it
-// straddles two device pixels.
-float sineSquaredIntegral(float position) {
-  return position * 0.5 - sin(2.0 * PI * position) / (4.0 * PI);
+// The original sin² aperture left a relatively broad pale cross between DMG
+// cells. The integral of |sin(πx)| preserves the rounded dot profile but opens
+// twice as quickly at each cell edge, making that light grid roughly half as
+// wide without reintroducing uneven fragment-centre sampling.
+float absoluteSineIntegral(float position) {
+  float cycle = floor(position);
+  float withinCycle = position - cycle;
+  return cycle * (2.0 / PI) + (1.0 - cos(PI * withinCycle)) / PI;
 }
 
-float averageSineSquared(float center, float footprint) {
+float averageAbsoluteSine(float center, float footprint) {
   float width = max(footprint, 0.00001);
   return (
-    sineSquaredIntegral(center + width * 0.5)
-    - sineSquaredIntegral(center - width * 0.5)
+    absoluteSineIntegral(center + width * 0.5)
+    - absoluteSineIntegral(center - width * 0.5)
   ) / width;
 }
 
@@ -111,11 +113,11 @@ float averagePeriodicBand(
 
 vec3 renderDmg(vec3 signal, vec2 nativePosition, vec2 footprint) {
   // DMG-01 is a reflective dot matrix, not a modern square-pixel panel.
-  // Two separable sin² transmission curves form a soft, rounded pixel dot.
+  // Two separable |sin| transmission curves form a soft, rounded pixel dot.
   // Their box-filtered product has identical area at every fractional scale.
   vec2 dotAxis = vec2(
-    averageSineSquared(nativePosition.x, footprint.x),
-    averageSineSquared(nativePosition.y, footprint.y)
+    averageAbsoluteSine(nativePosition.x, footprint.x),
+    averageAbsoluteSine(nativePosition.y, footprint.y)
   );
   float aperture = 0.14 + 0.86 * dotAxis.x * dotAxis.y;
   vec3 substrate = vec3(0.650, 0.720, 0.455);

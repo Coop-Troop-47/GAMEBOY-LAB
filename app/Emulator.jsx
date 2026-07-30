@@ -42,12 +42,12 @@ const DEFAULT_BINDINGS = {
 const BINDING_ORDER = ["up", "down", "left", "right", "a", "b", "select", "start"];
 const LIBRARY_DISCOVERY_KEY = "gameboy-lab-library-discovery-v1";
 const SCALING_DEFAULTS_VERSION = 1;
-const SCREEN_ONLY_FRAME_BORDER = 8;
-const SCREEN_ONLY_BEZEL_OUTLINE = 8;
+const CONSOLE_FRAME_BORDER = 16;
+const SCREEN_ONLY_FRAME_BORDER = 24;
 const SCREEN_ONLY_CARTRIDGE_OVERHANG = 20;
 const LOAD_HOLD_DURATION = 1000;
 const SCREEN_ONLY_CARTRIDGE_CENTER_OFFSET = (
-  SCREEN_ONLY_CARTRIDGE_OVERHANG - SCREEN_ONLY_BEZEL_OUTLINE
+  SCREEN_ONLY_CARTRIDGE_OVERHANG
 ) / 2;
 const SCREEN_ONLY_EDGE_GUARD = 1;
 const SAVE_TOOLTIP_DURATION = 1500;
@@ -57,9 +57,6 @@ const SCREEN_FRAME_ANIMATED_STYLES = [
   ["borderWidth", "border-width"],
   ["borderColor", "border-color"],
   ["borderRadius", "border-radius"],
-  ["outlineWidth", "outline-width"],
-  ["outlineColor", "outline-color"],
-  ["outlineOffset", "outline-offset"],
   ["backgroundColor", "background-color"],
   ["boxShadow", "box-shadow"],
 ];
@@ -1831,6 +1828,7 @@ export default function Emulator() {
   const cartridgeAnimationRunRef = useRef(0);
   const transitionFrameTimerRef = useRef(0);
   const viewTransitionTimerRef = useRef(0);
+  const viewTransitionCleanupFrameRef = useRef(0);
   const viewTransitionRunRef = useRef(0);
   const viewTransitionPendingRef = useRef(null);
   const viewTransitionAnimationRef = useRef(null);
@@ -2030,6 +2028,7 @@ export default function Emulator() {
     window.clearTimeout(saveTooltipFadeTimerRef.current);
     window.clearTimeout(cartridgeAnimationTimerRef.current);
     window.clearTimeout(viewTransitionTimerRef.current);
+    window.cancelAnimationFrame(viewTransitionCleanupFrameRef.current);
     viewTransitionRunRef.current += 1;
     viewTransitionAnimationRef.current?.cancel();
     viewTransitionPendingRef.current?.pauseAnimation?.cancel();
@@ -3107,23 +3106,46 @@ export default function Emulator() {
     viewTransitionTimerRef.current = 0;
     const animation = viewTransitionAnimationRef.current;
     viewTransitionAnimationRef.current = null;
+    const frame = screenFrameRef.current;
+    // Pin the exact destination before cancelling the fill-forwards animations.
+    // React removes the transition class asynchronously; retaining these final
+    // values through that commit prevents the border width and radius from
+    // flashing back to either endpoint on the last animation frame.
+    if (frame && pending.targetStyle) {
+      frame.style.transform = "translate3d(0, 0, 0) scale(1, 1)";
+      for (const [key, property] of SCREEN_FRAME_ANIMATED_STYLES) {
+        frame.style.setProperty(property, pending.targetStyle[key]);
+      }
+      const pauseOverlay = frame.querySelector(".pause-overlay");
+      if (pauseOverlay) pauseOverlay.style.transform = "scale(1)";
+    }
     animation?.cancel();
     pending.pauseAnimation?.cancel();
     pending.bezelAnimation?.cancel();
     pending.shellAnimation?.cancel();
     pending.shellGhost?.remove();
-    const frame = screenFrameRef.current;
     if (frame) {
+      frame.style.removeProperty("will-change");
+    }
+    viewTransitionPendingRef.current = null;
+    setViewModeTransition("");
+    window.cancelAnimationFrame(viewTransitionCleanupFrameRef.current);
+    viewTransitionCleanupFrameRef.current = window.requestAnimationFrame(() => {
+      if (
+        run !== viewTransitionRunRef.current
+        || viewTransitionPendingRef.current
+        || !frame
+      ) return;
       frame.style.removeProperty("transform");
       frame.style.removeProperty("transform-origin");
-      frame.style.removeProperty("will-change");
       for (const [, property] of SCREEN_FRAME_ANIMATED_STYLES) {
         frame.style.removeProperty(property);
       }
-    }
-    viewTransitionPendingRef.current = null;
-    lcdRendererRef.current?.resizeAndRender();
-    setViewModeTransition("");
+      frame.querySelector(".pause-overlay")?.style.removeProperty("transform");
+      pending.sourceHandheld?.style.removeProperty("visibility");
+      frame.style.removeProperty("visibility");
+      lcdRendererRef.current?.resizeAndRender();
+    });
     // The real LCD has reached its destination. Reinsert the cartridge in the
     // same frame so there is no dead beat between the two motions.
     replayCartridgeInsertion({ waitForGeometry: false });
@@ -3141,6 +3163,7 @@ export default function Emulator() {
     const run = viewTransitionRunRef.current + 1;
     viewTransitionRunRef.current = run;
     window.clearTimeout(viewTransitionTimerRef.current);
+    window.cancelAnimationFrame(viewTransitionCleanupFrameRef.current);
     viewTransitionTimerRef.current = 0;
     viewTransitionAnimationRef.current?.cancel();
     viewTransitionAnimationRef.current = null;
@@ -3192,6 +3215,11 @@ export default function Emulator() {
         });
         shellGhost.append(shellClone);
         document.body.append(shellGhost);
+        // Hide the original shell synchronously, before React applies its
+        // transition class. The live LCD explicitly remains visible above the
+        // lower shell clone for the entire fade.
+        sourceHandheld.style.visibility = "hidden";
+        sourceFrame.style.visibility = "visible";
         shellAnimation = shellGhost.animate(
           [
             { opacity: 1 },
@@ -3218,6 +3246,10 @@ export default function Emulator() {
         height: sourceBounds.height,
       },
       sourceStyle,
+      targetStyle: null,
+      sourceHandheld: nextViewMode === "screen"
+        ? sourceFrame.closest(".handheld")
+        : null,
       sourceAncestorScaleX: sourceBounds.width / sourceLayoutWidth,
       sourceAncestorScaleY: sourceBounds.height / sourceLayoutHeight,
       sourcePauseWidth: sourceFrame
@@ -4006,24 +4038,16 @@ export default function Emulator() {
         const insertedTipHeight = cartridgePresent
           ? SCREEN_ONLY_CARTRIDGE_OVERHANG
           : 0;
-        // Fit the full visible silhouette. The screen-frame box ends at its
-        // border, while the screen-only bezel is an 8 px outer outline. Reserve
-        // that ring explicitly so 100% ends at the bezel's
-        // bottom edge rather than clipping it at the LCD or border edge.
-        const verticalOutline = cartridgePresent
-          ? SCREEN_ONLY_BEZEL_OUTLINE
-          : SCREEN_ONLY_BEZEL_OUTLINE * 2;
+        // Fit the full visible silhouette to the single physical black bezel.
+        // Its complete thickness is part of the frame border box, so no second
+        // outline or separate edge allowance participates in scaling.
         const maximumOuterHeight = Math.max(
           SCREEN_ONLY_FRAME_BORDER + 1,
           availableHeight
             - insertedTipHeight
-            - verticalOutline
             - SCREEN_ONLY_EDGE_GUARD,
         );
-        const horizontalChrome = (
-          SCREEN_ONLY_FRAME_BORDER
-          + SCREEN_ONLY_BEZEL_OUTLINE * 2
-        );
+        const horizontalChrome = SCREEN_ONLY_FRAME_BORDER;
         const contentLimit = Math.max(
           1,
           Math.min(
@@ -4053,7 +4077,6 @@ export default function Emulator() {
           );
           outerWidth = Math.min(
             availableWidth
-              - SCREEN_ONLY_BEZEL_OUTLINE * 2
               - SCREEN_ONLY_EDGE_GUARD,
             contentWidth + SCREEN_ONLY_FRAME_BORDER,
           );
@@ -4069,7 +4092,7 @@ export default function Emulator() {
         );
         // The LCD is a fixed part of the shell in console mode. Integer scaling
         // snaps the whole console transform, never the screen independently.
-        outerWidth = baseContentWidth + 6;
+        outerWidth = baseContentWidth + CONSOLE_FRAME_BORDER;
       }
       targetScreenWidthRef.current = outerWidth;
       setScreenGeometry((current) => (
@@ -4134,6 +4157,9 @@ export default function Emulator() {
       frame.style.removeProperty(property);
     }
     const targetStyle = window.getComputedStyle(frame);
+    pending.targetStyle = Object.fromEntries(
+      SCREEN_FRAME_ANIMATED_STYLES.map(([key]) => [key, targetStyle[key]]),
+    );
     const pauseOverlay = frame.querySelector(".pause-overlay");
     const targetPauseWidth = frame
       .querySelector(".pause-symbol")
@@ -4168,8 +4194,6 @@ export default function Emulator() {
       ...pending.sourceStyle,
       borderWidth: compensateLength(pending.sourceStyle.borderWidth),
       borderRadius: compensateLength(pending.sourceStyle.borderRadius),
-      outlineWidth: compensateLength(pending.sourceStyle.outlineWidth),
-      outlineOffset: compensateLength(pending.sourceStyle.outlineOffset),
     };
     const inverseTransform = (
       `translate3d(${localDeltaX}px, ${localDeltaY}px, 0) `
@@ -4207,14 +4231,7 @@ export default function Emulator() {
       [
         sourceVisualStyle,
         {
-          borderWidth: targetStyle.borderWidth,
-          borderColor: targetStyle.borderColor,
-          borderRadius: targetStyle.borderRadius,
-          outlineWidth: targetStyle.outlineWidth,
-          outlineColor: targetStyle.outlineColor,
-          outlineOffset: targetStyle.outlineOffset,
-          backgroundColor: targetStyle.backgroundColor,
-          boxShadow: targetStyle.boxShadow,
+          ...pending.targetStyle,
         },
       ],
       {
@@ -4630,11 +4647,15 @@ export default function Emulator() {
             "--console-offset-local": `${consoleOffsetY / Math.max(consoleScale, 0.001)}px`,
             "--shell-base-height": `${model === "cgb" ? 612 : 652}px`,
             "--shell-base-width": `${model === "cgb" ? 358 : 397}px`,
-            "--screen-frame-width": `${screenGeometry.frameWidth ?? (model === "cgb" ? 236 : 264)}px`,
+            "--screen-frame-width": `${screenGeometry.frameWidth ?? (model === "cgb" ? 246 : 274)}px`,
             "--screen-frame-height": `${(
-              Math.max(0, (screenGeometry.frameWidth ?? (model === "cgb" ? 236 : 264)) - 8)
+              Math.max(
+                0,
+                (screenGeometry.frameWidth ?? (model === "cgb" ? 246 : 274))
+                  - (viewMode === "screen" ? SCREEN_ONLY_FRAME_BORDER : CONSOLE_FRAME_BORDER),
+              )
               * GAMEBOY_HEIGHT / GAMEBOY_WIDTH
-              + 8
+              + (viewMode === "screen" ? SCREEN_ONLY_FRAME_BORDER : CONSOLE_FRAME_BORDER)
             )}px`,
           }}
         >
