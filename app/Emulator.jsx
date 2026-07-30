@@ -53,6 +53,16 @@ const SCREEN_ONLY_EDGE_GUARD = 1;
 const SAVE_TOOLTIP_DURATION = 1500;
 const SAVE_TOOLTIP_FADE_DURATION = 300;
 const TECHNICAL_READOUT_MEDIA = "(min-width: 1180px)";
+const SCREEN_FRAME_ANIMATED_STYLES = [
+  ["borderWidth", "border-width"],
+  ["borderColor", "border-color"],
+  ["borderRadius", "border-radius"],
+  ["outlineWidth", "outline-width"],
+  ["outlineColor", "outline-color"],
+  ["outlineOffset", "outline-offset"],
+  ["backgroundColor", "background-color"],
+  ["boxShadow", "box-shadow"],
+];
 
 function BrandMark() {
   return (
@@ -2991,6 +3001,7 @@ export default function Emulator() {
     if (nextModel === model) return;
     const hasCartridge = Boolean(romRef.current);
     const preservePause = pausedRef.current;
+    const resumeAfterSwitch = pauseReasonRef.current === "safety";
     replayCartridgeInsertion();
     saveBattery();
     setModelState(nextModel);
@@ -3037,7 +3048,12 @@ export default function Emulator() {
           releaseDisplayTransition();
         }
       }
-      if (!preservePause) {
+      if (resumeAfterSwitch) {
+        // The confirmation prompt paused an otherwise running game solely to
+        // protect the live machine state. Once the replacement core and its
+        // blank LCD are ready, release that temporary pause automatically.
+        resumeGame("safety");
+      } else if (!preservePause) {
         if (anyDrawerOpen && pauseOnMenu) pauseGame("menu");
         else resumeGame();
       }
@@ -3101,6 +3117,9 @@ export default function Emulator() {
       frame.style.removeProperty("transform");
       frame.style.removeProperty("transform-origin");
       frame.style.removeProperty("will-change");
+      for (const [, property] of SCREEN_FRAME_ANIMATED_STYLES) {
+        frame.style.removeProperty(property);
+      }
     }
     viewTransitionPendingRef.current = null;
     lcdRendererRef.current?.resizeAndRender();
@@ -3130,6 +3149,15 @@ export default function Emulator() {
     viewTransitionPendingRef.current?.shellAnimation?.cancel();
     viewTransitionPendingRef.current?.shellGhost?.remove();
     const computedFrameStyle = window.getComputedStyle(sourceFrame);
+    const sourceStyle = Object.fromEntries(
+      SCREEN_FRAME_ANIMATED_STYLES.map(([key]) => [key, computedFrameStyle[key]]),
+    );
+    // Hold the exact source bezel while React commits the destination view and
+    // its size settles. Without this freeze, one intermediate paint can expose
+    // the destination radius before the FLIP begins.
+    for (const [key, property] of SCREEN_FRAME_ANIMATED_STYLES) {
+      sourceFrame.style.setProperty(property, sourceStyle[key]);
+    }
     const sourceLayoutWidth = Math.max(1, sourceFrame.offsetWidth);
     const sourceLayoutHeight = Math.max(1, sourceFrame.offsetHeight);
     let shellGhost = null;
@@ -3189,16 +3217,7 @@ export default function Emulator() {
         width: sourceBounds.width,
         height: sourceBounds.height,
       },
-      sourceStyle: {
-        borderWidth: computedFrameStyle.borderWidth,
-        borderColor: computedFrameStyle.borderColor,
-        borderRadius: computedFrameStyle.borderRadius,
-        outlineWidth: computedFrameStyle.outlineWidth,
-        outlineColor: computedFrameStyle.outlineColor,
-        outlineOffset: computedFrameStyle.outlineOffset,
-        backgroundColor: computedFrameStyle.backgroundColor,
-        boxShadow: computedFrameStyle.boxShadow,
-      },
+      sourceStyle,
       sourceAncestorScaleX: sourceBounds.width / sourceLayoutWidth,
       sourceAncestorScaleY: sourceBounds.height / sourceLayoutHeight,
       sourcePauseWidth: sourceFrame
@@ -4110,6 +4129,9 @@ export default function Emulator() {
     if (!targetBounds.width || !targetBounds.height) {
       completeViewModeTransition(pending.run);
       return;
+    }
+    for (const [, property] of SCREEN_FRAME_ANIMATED_STYLES) {
+      frame.style.removeProperty(property);
     }
     const targetStyle = window.getComputedStyle(frame);
     const pauseOverlay = frame.querySelector(".pause-overlay");

@@ -163,13 +163,15 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /Promise\.all\(transitionFinishes\)[\s\S]*completeViewModeTransition\(pending\.run\)/s);
   assert.match(source, /lcdRendererRef\.current\?\.resizeAndRender\(duration \+ 120\)/);
   assert.match(source, /sourcePauseWidth[\s\S]*pauseCorrection[\s\S]*pauseOverlay\.animate/s);
-  assert.match(source, /borderWidth:\s*computedFrameStyle\.borderWidth[\s\S]*borderWidth:\s*targetStyle\.borderWidth/s);
+  assert.match(source, /SCREEN_FRAME_ANIMATED_STYLES\.map\(\(\[key\]\) => \[key, computedFrameStyle\[key\]\]\)[\s\S]*sourceFrame\.style\.setProperty\(property, sourceStyle\[key\]\)/s);
+  assert.match(source, /frame\.style\.removeProperty\(property\)[\s\S]*const targetStyle = window\.getComputedStyle\(frame\)[\s\S]*borderWidth:\s*targetStyle\.borderWidth/s);
   assert.doesNotMatch(source, /lcd-view-transition-overlay|syncLiveLcd|pauseIndicator\.cloneNode/);
   assert.doesNotMatch(source, /document\.startViewTransition|flushSync/);
   assert.doesNotMatch(css, /\.lcd-view-transition-overlay/);
-  assert.match(css, /\.screen-frame::after\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px #121719/s);
+  assert.match(css, /\.screen-frame\s*\{[^}]*border:\s*3px solid #121719[^}]*outline:\s*5px solid #121719/s);
+  assert.match(css, /\.screen-frame::after\s*\{[^}]*content:\s*none/s);
   assert.match(css, /\.cgb \.screen-frame\s*\{[^}]*border-color:\s*#0d0f13[^}]*outline-color:\s*#0d0f13[^}]*box-shadow:\s*none/s);
-  assert.match(css, /\.cgb \.screen-frame::after\s*\{[^}]*content:\s*none/s);
+  assert.doesNotMatch(css, /\.cgb \.screen-frame::after/);
   assert.match(css, /\.screen-frame\s*\{[^}]*margin:\s*0 auto[^}]*transform:\s*none/s);
   assert.match(css, /\.console-wrap\.view-zoom-in \.screen-frame,[\s\S]*\.console-wrap\.view-zoom-out \.screen-frame\s*\{[^}]*transition:\s*none/s);
   assert.doesNotMatch(css, /\.console-wrap\.view-zoom-in \.screen-frame,[^}]*visibility:\s*hidden/s);
@@ -349,6 +351,10 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(modelSwitchSource, /const hasCartridge = Boolean\(romRef\.current\)/);
   assert.match(
     modelSwitchSource,
+    /const resumeAfterSwitch = pauseReasonRef\.current === "safety"[\s\S]*if \(resumeAfterSwitch\)[\s\S]*resumeGame\("safety"\)/,
+  );
+  assert.match(
+    modelSwitchSource,
     /if \(hasCartridge\) captureDisplayTransition\(\);\s*else releaseDisplayTransition\(\)/,
   );
   assert.match(modelSwitchSource, /pendingPresentationRef\.current = hasCartridge/);
@@ -438,7 +444,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.cgb \.dpad-glyph-up\s*\{[^}]*clip-path:\s*polygon/s);
   assert.match(css, /\.library-tabletop\s*\{[^}]*overflow:\s*auto/s);
   assert.match(css, /\.library-tools\s*\{[^}]*position:\s*sticky[^}]*top:\s*65px[^}]*background:\s*var\(--paper\)/s);
-  assert.match(css, /\.screen-frame\s*\{[^}]*container-type:\s*inline-size[^}]*isolation:\s*isolate[^}]*overflow:\s*clip[^}]*outline:\s*5px solid #23262d/s);
+  assert.match(css, /\.screen-frame\s*\{[^}]*container-type:\s*inline-size[^}]*isolation:\s*isolate[^}]*overflow:\s*clip[^}]*outline:\s*5px solid #121719/s);
   assert.match(css, /\.screen-frame canvas\.lcd-output,[\s\S]*\.screen-frame \.pause-overlay\s*\{[^}]*clip-path:\s*inset\(0\)/s);
   assert.match(css, /\.screen-only \.screen-frame\s*\{[^}]*outline-width:\s*8px[^}]*box-shadow:\s*none/s);
   assert.match(source, /dimmed:\s*paused && running/);

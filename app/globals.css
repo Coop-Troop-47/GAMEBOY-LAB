@@ -289,7 +289,7 @@ input:focus-visible {
   margin: 0 auto;
   overflow: clip;
   border: 3px solid #121719;
-  outline: 5px solid #23262d;
+  outline: 5px solid #121719;
   outline-offset: 0;
   background: #cadc9f;
   transform: none;
@@ -340,12 +340,7 @@ input:focus-visible {
 }
 
 .screen-frame::after {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  content: "";
-  pointer-events: none;
-  box-shadow: inset 0 0 0 1px #121719;
+  content: none;
 }
 
 .screen-glass {
@@ -2458,10 +2453,6 @@ html[data-theme="dark"] body {
   outline-color: #0d0f13;
   background: #0d0f13;
   box-shadow: none;
-}
-
-.cgb .screen-frame::after {
-  content: none;
 }
 
 .cgb .screen-frame canvas.lcd-output,
