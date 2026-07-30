@@ -130,7 +130,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /window\.devicePixelRatio/);
   assert.match(source, /Math\.floor\(contentLimit \* density \/ GAMEBOY_WIDTH\)/);
   assert.match(source, /pixelScale \* GAMEBOY_WIDTH \/ \(screenContentWidth \* density\)/);
-  assert.match(source, /outerWidth = baseContentWidth \+ CONSOLE_FRAME_BORDER/);
+  assert.match(source, /outerWidth = baseContentWidth \* LCD_FRAME_RATIO/);
   assert.match(source, /pixelScale: integerScale/);
   assert.match(source, /const nextScale = fit \* manualScale \/ 100[\s\S]*setConsoleScale\(nextScale\)/);
   assert.match(source, /const insertedTipHeight = cartridgePresent \? 20 : 0/);
@@ -170,8 +170,10 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.doesNotMatch(source, /lcd-view-transition-overlay|syncLiveLcd|pauseIndicator\.cloneNode/);
   assert.doesNotMatch(source, /document\.startViewTransition|flushSync/);
   assert.doesNotMatch(css, /\.lcd-view-transition-overlay/);
-  assert.match(css, /\.screen-frame\s*\{[^}]*border:\s*8px solid #121719/s);
+  assert.match(css, /\.screen-frame\s*\{[^}]*border:\s*var\(--lcd-bezel-width,\s*8px\) solid #383b43/s);
   assert.doesNotMatch(css, /\.screen-frame\s*\{[^}]*outline:/s);
+  assert.match(css, /\.dmg \.screen-frame::before\s*\{[^}]*background:\s*#121719[^}]*calc\(var\(--lcd-bezel-width,\s*8px\) \/ 3\) #121719/s);
+  assert.doesNotMatch(source, /\["borderWidth",\s*"border-width"\]/);
   assert.match(css, /\.display-bezel\s*\{[^}]*display:\s*flex[^}]*align-items:\s*center[^}]*justify-content:\s*center/s);
   assert.doesNotMatch(css, /\.dmg \.screen-frame\s*\{[^}]*translate:/s);
   assert.match(css, /\.screen-frame::after\s*\{[^}]*content:\s*none/s);
@@ -330,8 +332,9 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.screen-only \.console-wrap\s*\{[^}]*--cartridge-width:\s*64%/s);
   assert.match(css, /\.screen-only \.cartridge-visual-rig\s*\{[^}]*clip-path:\s*inset\(-200vh -200vw 0 -200vw\)/s);
   assert.match(css, /\.screen-only \.device-rig\s*\{[^}]*transform:\s*scale\(var\(--screen-only-scale,\s*1\)\)[^}]*transform 180ms cubic-bezier\(\.2,\s*\.8,\s*\.2,\s*1\)/s);
-  assert.match(source, /SCREEN_ONLY_FRAME_BORDER = 24/);
-  assert.doesNotMatch(source, /SCREEN_ONLY_BEZEL_OUTLINE/);
+  assert.match(source, /LCD_BEZEL_RATIO = 0\.03/);
+  assert.match(source, /LCD_FRAME_RATIO = 1 \+ LCD_BEZEL_RATIO \* 2/);
+  assert.doesNotMatch(source, /SCREEN_ONLY_FRAME_BORDER|SCREEN_ONLY_BEZEL_OUTLINE/);
   assert.match(source, /function CartridgeDock\(/);
   assert.match(source, /function CartridgeGraphic\(/);
   assert.match(source, /className="device-rig"/);
@@ -450,9 +453,10 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.cgb \.dpad-glyph-up\s*\{[^}]*clip-path:\s*polygon/s);
   assert.match(css, /\.library-tabletop\s*\{[^}]*overflow:\s*auto/s);
   assert.match(css, /\.library-tools\s*\{[^}]*position:\s*sticky[^}]*top:\s*65px[^}]*background:\s*var\(--paper\)/s);
-  assert.match(css, /\.screen-frame\s*\{[^}]*container-type:\s*inline-size[^}]*isolation:\s*isolate[^}]*overflow:\s*clip[^}]*border:\s*8px solid #121719/s);
+  assert.match(css, /\.screen-frame\s*\{[^}]*container-type:\s*inline-size[^}]*isolation:\s*isolate[^}]*overflow:\s*clip[^}]*border:\s*var\(--lcd-bezel-width,\s*8px\) solid #383b43/s);
   assert.match(css, /\.screen-frame canvas\.lcd-output,[\s\S]*\.screen-frame \.pause-overlay\s*\{[^}]*clip-path:\s*inset\(0\)/s);
-  assert.match(css, /\.screen-only \.screen-frame\s*\{[^}]*border-width:\s*12px[^}]*box-shadow:\s*none/s);
+  assert.match(css, /\.screen-only \.screen-frame\s*\{[^}]*width:\s*var\(--screen-frame-width\)[^}]*box-shadow:\s*none/s);
+  assert.doesNotMatch(css, /\.screen-only \.screen-frame\s*\{[^}]*border-width:/s);
   assert.match(source, /dimmed:\s*paused && running/);
   assert.match(shader, /uniform float uDimFactor/);
   assert.match(shader, /averageAbsoluteSine\(nativePosition\.x, footprint\.x\)/);
@@ -490,6 +494,7 @@ test("renders reference-matched DMG and supplied-purple GBC shells", async () =>
   assert.match(css, /\.cgb \.screen-caption\s*\{[^}]*--cgb-caption-gap:\s*16px[^}]*--cgb-caption-height:\s*16px[^}]*left:\s*50%[^}]*bottom:\s*var\(--cgb-caption-gap\)[^}]*height:\s*var\(--cgb-caption-height\)[^}]*transform:\s*translateX\(-50%\)/s);
   assert.match(css, /\.cgb \.screen-caption strong\s*\{[^}]*font-size:\s*16px/s);
   assert.match(css, /\.cgb \.screen-frame\s*\{[^}]*position:\s*absolute[^}]*left:\s*50%[^}]*bottom:\s*48px[^}]*border-color:\s*#0d0f13[^}]*box-shadow:\s*none[^}]*translate:\s*-50% 0/s);
+  assert.match(css, /\.screen-only \.cgb \.screen-frame\s*\{[^}]*border-radius:\s*calc\(var\(--lcd-bezel-width,\s*8px\) \* 1\.6\)/s);
   assert.match(css, /\.screen-only \.screen-frame\s*\{[^}]*position:\s*relative[^}]*bottom:\s*auto[^}]*translate:\s*0 0/s);
   assert.match(css, /\.cgb \.meta-buttons\s*\{[^}]*left:\s*51\.5%[^}]*transform:\s*translateX\(-50%\)/s);
   assert.match(css, /\.cgb-nintendo\s*\{[^}]*font:\s*800 15px\/1/s);

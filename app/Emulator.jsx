@@ -42,8 +42,11 @@ const DEFAULT_BINDINGS = {
 const BINDING_ORDER = ["up", "down", "left", "right", "a", "b", "select", "start"];
 const LIBRARY_DISCOVERY_KEY = "gameboy-lab-library-discovery-v1";
 const SCALING_DEFAULTS_VERSION = 1;
-const CONSOLE_FRAME_BORDER = 16;
-const SCREEN_ONLY_FRAME_BORDER = 24;
+// Midpoint of the former console and screen-only bezel proportions. Every
+// presentation mode now keeps this same bezel-to-LCD ratio.
+const LCD_BEZEL_RATIO = 0.03;
+const LCD_FRAME_RATIO = 1 + LCD_BEZEL_RATIO * 2;
+const LCD_FRAME_HEIGHT_RATIO = GAMEBOY_HEIGHT / GAMEBOY_WIDTH + LCD_BEZEL_RATIO * 2;
 const SCREEN_ONLY_CARTRIDGE_OVERHANG = 20;
 const LOAD_HOLD_DURATION = 1000;
 const SCREEN_ONLY_CARTRIDGE_CENTER_OFFSET = (
@@ -54,11 +57,7 @@ const SAVE_TOOLTIP_DURATION = 1500;
 const SAVE_TOOLTIP_FADE_DURATION = 300;
 const TECHNICAL_READOUT_MEDIA = "(min-width: 1180px)";
 const SCREEN_FRAME_ANIMATED_STYLES = [
-  ["borderWidth", "border-width"],
-  ["borderColor", "border-color"],
   ["borderRadius", "border-radius"],
-  ["backgroundColor", "background-color"],
-  ["boxShadow", "box-shadow"],
 ];
 
 function BrandMark() {
@@ -4038,30 +4037,23 @@ export default function Emulator() {
         const insertedTipHeight = cartridgePresent
           ? SCREEN_ONLY_CARTRIDGE_OVERHANG
           : 0;
-        // Fit the full visible silhouette to the single physical black bezel.
-        // Its complete thickness is part of the frame border box, so no second
-        // outline or separate edge allowance participates in scaling.
-        const maximumOuterHeight = Math.max(
-          SCREEN_ONLY_FRAME_BORDER + 1,
-          availableHeight
-            - insertedTipHeight
-            - SCREEN_ONLY_EDGE_GUARD,
-        );
-        const horizontalChrome = SCREEN_ONLY_FRAME_BORDER;
+        // The bezel is a permanent fraction of the LCD, so solve directly for
+        // content size in each axis. The resulting frame scales as one object;
+        // its border never needs a separate zoom animation.
         const contentLimit = Math.max(
           1,
           Math.min(
-            availableWidth - horizontalChrome - SCREEN_ONLY_EDGE_GUARD,
-            (maximumOuterHeight - SCREEN_ONLY_FRAME_BORDER)
-              * GAMEBOY_WIDTH / GAMEBOY_HEIGHT,
+            (availableWidth - SCREEN_ONLY_EDGE_GUARD) / LCD_FRAME_RATIO,
+            (
+              availableHeight
+              - insertedTipHeight
+              - SCREEN_ONLY_EDGE_GUARD
+            ) / LCD_FRAME_HEIGHT_RATIO,
           ),
         );
         if (integerScaling) {
           integerScale = Math.max(1, Math.floor(contentLimit * density / GAMEBOY_WIDTH));
-          outerWidth = (
-            integerScale * GAMEBOY_WIDTH / density
-            + SCREEN_ONLY_FRAME_BORDER
-          );
+          outerWidth = integerScale * GAMEBOY_WIDTH / density * LCD_FRAME_RATIO;
         } else {
           // Keep the layout at its 100% fit and let the shared device rig
           // perform manual zoom as one compositor transform. This matches
@@ -4075,11 +4067,7 @@ export default function Emulator() {
               contentWidth * (manualScale / 100) * density / GAMEBOY_WIDTH,
             ),
           );
-          outerWidth = Math.min(
-            availableWidth
-              - SCREEN_ONLY_EDGE_GUARD,
-            contentWidth + SCREEN_ONLY_FRAME_BORDER,
-          );
+          outerWidth = contentWidth * LCD_FRAME_RATIO;
         }
       } else {
         const baseContentWidth = model === "cgb" ? 230 : 258;
@@ -4092,7 +4080,7 @@ export default function Emulator() {
         );
         // The LCD is a fixed part of the shell in console mode. Integer scaling
         // snaps the whole console transform, never the screen independently.
-        outerWidth = baseContentWidth + CONSOLE_FRAME_BORDER;
+        outerWidth = baseContentWidth * LCD_FRAME_RATIO;
       }
       targetScreenWidthRef.current = outerWidth;
       setScreenGeometry((current) => (
@@ -4192,7 +4180,6 @@ export default function Emulator() {
     };
     const sourceVisualStyle = {
       ...pending.sourceStyle,
-      borderWidth: compensateLength(pending.sourceStyle.borderWidth),
       borderRadius: compensateLength(pending.sourceStyle.borderRadius),
     };
     const inverseTransform = (
@@ -4556,6 +4543,12 @@ export default function Emulator() {
     }
   }, [audioFilter]);
 
+  const fallbackContentWidth = model === "cgb" ? 230 : 258;
+  const resolvedFrameWidth = screenGeometry.frameWidth
+    ?? fallbackContentWidth * LCD_FRAME_RATIO;
+  const resolvedContentWidth = resolvedFrameWidth / LCD_FRAME_RATIO;
+  const resolvedBezelWidth = resolvedContentWidth * LCD_BEZEL_RATIO;
+
   return (
     <main
       className={`app-shell theme-${resolvedTheme} ${viewMode === "screen" ? "screen-only" : ""} ${paused ? "is-paused" : ""} ${anyDrawerOpen ? "drawer-open" : ""} ${showTechnicalReadout ? "technical-open" : ""}`}
@@ -4647,15 +4640,11 @@ export default function Emulator() {
             "--console-offset-local": `${consoleOffsetY / Math.max(consoleScale, 0.001)}px`,
             "--shell-base-height": `${model === "cgb" ? 612 : 652}px`,
             "--shell-base-width": `${model === "cgb" ? 358 : 397}px`,
-            "--screen-frame-width": `${screenGeometry.frameWidth ?? (model === "cgb" ? 246 : 274)}px`,
+            "--lcd-bezel-width": `${resolvedBezelWidth}px`,
+            "--screen-frame-width": `${resolvedFrameWidth}px`,
             "--screen-frame-height": `${(
-              Math.max(
-                0,
-                (screenGeometry.frameWidth ?? (model === "cgb" ? 246 : 274))
-                  - (viewMode === "screen" ? SCREEN_ONLY_FRAME_BORDER : CONSOLE_FRAME_BORDER),
-              )
-              * GAMEBOY_HEIGHT / GAMEBOY_WIDTH
-              + (viewMode === "screen" ? SCREEN_ONLY_FRAME_BORDER : CONSOLE_FRAME_BORDER)
+              resolvedContentWidth * GAMEBOY_HEIGHT / GAMEBOY_WIDTH
+              + resolvedBezelWidth * 2
             )}px`,
           }}
         >
