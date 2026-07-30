@@ -1,11 +1,9 @@
 {
-  "version": "1.2.4",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.4/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.4",
+  "version": "1.2.5",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.5/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.5",
   "changes": [
-    "The detail-library toolbar now fully covers scrolling cards at its sticky header boundary, including the side gutters.",
-    "Switching between DMG and GBC while paused immediately redraws the selected hardware without advancing or resuming emulation.",
-    "Console and screen-only views now transition with a quick zoom before replaying the cartridge insertion animation.",
-    "The cataloguing wireframe now recedes with the paint line so stray outline pixels cannot protrude above the finished cartridge."
+    "Switching between DMG and GBC while paused now clears to the selected hardware’s blank LCD substrate instead of showing a startup graphic.",
+    "The pause darkening layer now overscans beneath the LCD bezel to eliminate bright pixel gaps at fractional and Retina scales."
   ]
 }

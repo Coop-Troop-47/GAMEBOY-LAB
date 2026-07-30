@@ -341,7 +341,7 @@ input:focus-visible {
 
 .pause-overlay {
   position: absolute;
-  inset: -1px;
+  inset: -4px;
   z-index: 4;
   width: auto;
   height: auto;

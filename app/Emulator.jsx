@@ -615,6 +615,15 @@ function drawWaitingScreen(context, model) {
   context.putImageData(image, 0, 0);
 }
 
+function drawBlankScreen(context, model) {
+  const image = context.createImageData(GAMEBOY_WIDTH, GAMEBOY_HEIGHT);
+  fillPixelScreen(
+    image,
+    model === "cgb" ? [232, 232, 224] : [202, 220, 159],
+  );
+  context.putImageData(image, 0, 0);
+}
+
 function drawDropScreen(context, model) {
   const image = context.createImageData(GAMEBOY_WIDTH, GAMEBOY_HEIGHT);
   const isColor = model === "cgb";
@@ -2974,9 +2983,9 @@ export default function Emulator() {
         const context = sourceCanvasRef.current?.getContext("2d", { alpha: false });
         if (context) {
           // A paused native-BIOS core cannot produce its first frame yet.
-          // Present the selected hardware's cold-boot surface immediately
-          // without advancing a single emulated cycle.
-          drawBootScreen(context, nextModel, 0.34, titleRef.current);
+          // Clear to the selected LCD's neutral substrate without advancing
+          // a single emulated cycle; the real BIOS starts only on resume.
+          drawBlankScreen(context, nextModel);
           lcdRendererRef.current?.uploadFrame(
             context.getImageData(0, 0, GAMEBOY_WIDTH, GAMEBOY_HEIGHT).data,
             { resetHistory: true },

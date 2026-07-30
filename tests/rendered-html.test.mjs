@@ -147,7 +147,8 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.has-cartridge \.cartridge-collision-anchor\s*\{[^}]*top:\s*-20px/s);
   assert.doesNotMatch(css, /\.cartridge-inserting \.cartridge-collision-anchor/);
   assert.match(source, /const contentWidth = contentLimit/);
-  assert.match(source, /const preservePause = pausedRef\.current[\s\S]*if \(preservePause\)[\s\S]*drawBootScreen\(context, nextModel, 0\.34, titleRef\.current\)[\s\S]*lcdRendererRef\.current\?\.uploadFrame\([\s\S]*resetHistory:\s*true[\s\S]*releaseDisplayTransition\(\)/);
+  assert.match(source, /function drawBlankScreen\(context, model\)[\s\S]*model === "cgb" \? \[232, 232, 224\] : \[202, 220, 159\]/);
+  assert.match(source, /const preservePause = pausedRef\.current[\s\S]*if \(preservePause\)[\s\S]*drawBlankScreen\(context, nextModel\)[\s\S]*lcdRendererRef\.current\?\.uploadFrame\([\s\S]*resetHistory:\s*true[\s\S]*releaseDisplayTransition\(\)/);
   assert.match(source, /setViewModeTransition\(nextViewMode === "screen" \? "zoom-in" : "zoom-out"\)[\s\S]*setViewMode\(nextViewMode\)[\s\S]*setViewModeTransition\(""\)[\s\S]*replayCartridgeInsertion\(\)[\s\S]*360/);
   assert.match(css, /\.console-wrap\.view-zoom-in \.device-rig\s*\{[^}]*view-mode-zoom-in 340ms/s);
   assert.match(css, /\.console-wrap\.view-zoom-out \.device-rig\s*\{[^}]*view-mode-zoom-out 340ms/s);
@@ -360,7 +361,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.app-shell:has\(\.control-deck\.open:not\(\.library-deck\)\) \.console-wrap\s*\{[^}]*width:\s*calc\(100% - 480px\)[^}]*margin-right:\s*480px/s);
   assert.match(css, /\.app-shell:has\(\.library-deck\.open\) \.console-wrap\s*\{[^}]*width:\s*calc\(100% - 500px\)[^}]*margin-left:\s*500px/s);
   assert.doesNotMatch(css, /\.pause-overlay\s*\{[^}]*backdrop-filter/s);
-  assert.match(css, /\.pause-overlay\s*\{[^}]*inset:\s*-1px[^}]*width:\s*auto[^}]*height:\s*auto[^}]*contain:\s*paint/s);
+  assert.match(css, /\.pause-overlay\s*\{[^}]*inset:\s*-4px[^}]*width:\s*auto[^}]*height:\s*auto[^}]*contain:\s*paint/s);
   assert.match(css, /canvas\.lcd-output\s*\{[^}]*image-rendering:\s*auto/s);
   assert.match(css, /canvas\.frame-source\s*\{[^}]*display:\s*none/s);
   assert.match(css, /\.console-wrap\s*\{[^}]*height:\s*100%[^}]*min-height:\s*0/s);
@@ -398,6 +399,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.library-tabletop\s*\{[^}]*overflow:\s*auto/s);
   assert.match(css, /\.library-tools\s*\{[^}]*position:\s*sticky[^}]*top:\s*65px[^}]*background:\s*var\(--paper\)/s);
   assert.match(css, /\.screen-frame\s*\{[^}]*container-type:\s*inline-size/s);
+  assert.match(css, /\.pause-overlay\s*\{[^}]*inset:\s*-4px[^}]*contain:\s*paint/s);
   assert.match(css, /\.console-wrap\s*\{[^}]*overflow:\s*clip/s);
   assert.match(source, /viewBox="0 0 570 660"/);
   assert.match(source, /className="cart-label-paper" x="90" y="120" width="380" height="380"/);
