@@ -150,10 +150,15 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /function drawBlankScreen\(context, model\)[\s\S]*model === "cgb" \? \[232, 232, 224\] : \[202, 220, 159\]/);
   assert.match(source, /const preservePause = pausedRef\.current[\s\S]*if \(preservePause\)[\s\S]*drawBlankScreen\(context, nextModel\)[\s\S]*lcdRendererRef\.current\?\.uploadFrame\([\s\S]*resetHistory:\s*true[\s\S]*releaseDisplayTransition\(\)/);
   assert.match(source, /const completeViewModeTransition = useCallback\([\s\S]*setViewModeTransition\(""\)[\s\S]*replayCartridgeInsertion\(\{ waitForGeometry: false \}\)/);
+  assert.match(source, /typeof document\.startViewTransition === "function"[\s\S]*document\.startViewTransition[\s\S]*flushSync\(applyViewMode\)[\s\S]*transition\.finished\.then/);
   assert.match(source, /setViewModeTransition\(nextViewMode === "screen" \? "zoom-in" : "zoom-out"\)[\s\S]*setViewMode\(nextViewMode\)[\s\S]*completeViewModeTransition[\s\S]*520/);
   assert.match(source, /event\.animationName\.startsWith\("view-mode-zoom-"\)[\s\S]*completeViewModeTransition\(\)/);
-  assert.match(css, /\.console-wrap\.view-zoom-in \.device-rig\s*\{[^}]*view-mode-zoom-in 360ms[^}]*transition:\s*none/s);
-  assert.match(css, /\.console-wrap\.view-zoom-out \.device-rig\s*\{[^}]*view-mode-zoom-out 360ms[^}]*transition:\s*none/s);
+  assert.match(css, /\.console-wrap:not\(\.native-view-transition\)\.view-zoom-in \.device-rig\s*\{[^}]*view-mode-zoom-in 360ms[^}]*transition:\s*none/s);
+  assert.match(css, /\.console-wrap:not\(\.native-view-transition\)\.view-zoom-out \.device-rig\s*\{[^}]*view-mode-zoom-out 360ms[^}]*transition:\s*none/s);
+  assert.match(css, /\.screen-frame\s*\{[^}]*view-transition-name:\s*gameboy-lcd/s);
+  assert.match(css, /::view-transition-group\(gameboy-lcd\)\s*\{[^}]*animation-duration:\s*420ms/s);
+  assert.match(css, /::view-transition-old\(gameboy-lcd\)\s*\{[^}]*opacity:\s*0/s);
+  assert.match(css, /::view-transition-new\(gameboy-lcd\)\s*\{[^}]*opacity:\s*1/s);
   assert.match(css, /\.console-wrap\.view-zoom-in \.screen-frame,[\s\S]*\.console-wrap\.view-zoom-out \.screen-frame\s*\{[^}]*transition:\s*none/s);
   assert.match(css, /\.console-wrap\.view-zoom-in \.cartridge-visual-rig,[\s\S]*\.console-wrap\.view-zoom-out \.cartridge-hover-rig\s*\{[^}]*visibility:\s*hidden/s);
   assert.match(css, /@keyframes view-mode-zoom-in\s*\{\s*from\s*\{\s*scale:\s*\.78[^}]*\}\s*to\s*\{\s*scale:\s*1/s);
@@ -408,6 +413,9 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.screen-frame\s*\{[^}]*container-type:\s*inline-size[^}]*isolation:\s*isolate[^}]*overflow:\s*clip[^}]*outline:\s*5px solid #23262d/s);
   assert.match(css, /\.screen-frame canvas\.lcd-output,[\s\S]*\.screen-frame \.pause-overlay\s*\{[^}]*clip-path:\s*inset\(0\)/s);
   assert.match(css, /\.screen-only \.screen-frame\s*\{[^}]*outline-width:\s*8px[^}]*box-shadow:\s*none/s);
+  assert.match(source, /className=\{`screen-frame \$\{paused && running \? "is-dimmed" : ""\}`\}/);
+  assert.match(css, /\.screen-frame\.is-dimmed canvas\.lcd-output,[\s\S]*\.screen-frame\.is-dimmed canvas\.frame-transition\s*\{[^}]*filter:\s*brightness\(\.34\)/s);
+  assert.match(css, /\.pause-overlay\s*\{[^}]*background:\s*transparent/s);
   assert.match(css, /\.pause-overlay\s*\{[^}]*inset:\s*-4px[^}]*contain:\s*paint/s);
   assert.match(css, /\.console-wrap\s*\{[^}]*overflow:\s*clip/s);
   assert.match(source, /viewBox="0 0 570 660"/);

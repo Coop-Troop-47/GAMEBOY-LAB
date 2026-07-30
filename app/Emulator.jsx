@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   CGB_COMPATIBILITY_PALETTES,
   GAMEBOY_HEIGHT,
@@ -3050,10 +3051,30 @@ export default function Emulator() {
     if (nextViewMode === viewMode) return;
     window.clearTimeout(viewTransitionTimerRef.current);
     viewTransitionTimerRef.current = 0;
-    setViewModeTransition(nextViewMode === "screen" ? "zoom-in" : "zoom-out");
-    setViewMode(nextViewMode);
-    // animationend normally completes the sequence. This is only a safety net
-    // for background tabs and engines that suppress animation events.
+    const applyViewMode = () => {
+      setViewModeTransition(nextViewMode === "screen" ? "zoom-in" : "zoom-out");
+      setViewMode(nextViewMode);
+    };
+    if (typeof document.startViewTransition === "function") {
+      const transition = document.startViewTransition(() => {
+        // Commit the destination shell and LCD geometry as one captured state.
+        // The named LCD snapshot then morphs continuously between the old and
+        // new rectangles without cross-fading or replacing the display.
+        flushSync(applyViewMode);
+      });
+      viewTransitionTimerRef.current = window.setTimeout(
+        completeViewModeTransition,
+        900,
+      );
+      transition.finished.then(
+        completeViewModeTransition,
+        completeViewModeTransition,
+      );
+      return;
+    }
+    applyViewMode();
+    // animationend normally completes the fallback sequence. This is only a
+    // safety net for background tabs and engines that suppress animation events.
     viewTransitionTimerRef.current = window.setTimeout(
       completeViewModeTransition,
       520,
@@ -4258,7 +4279,7 @@ export default function Emulator() {
       <section className="workspace">
         <div
           ref={consoleWrapRef}
-          className={`console-wrap model-${model} ${integerScaling ? "integer-scale" : "flexible-scale"} ${viewModeTransition ? `view-${viewModeTransition}` : ""} ${dragging ? "is-dragging" : ""} ${cartridgePresent ? "has-cartridge" : ""} ${cartridgeHovered ? "cartridge-hovered" : ""} ${cartridgePreflight ? "cartridge-preflight" : ""} ${cartridgeInserting && cartridgeAnimationEnabled ? "cartridge-inserting" : ""} ${showSaveTooltip || cartridgePreflight ? "tooltip-visible" : ""}`}
+          className={`console-wrap model-${model} ${integerScaling ? "integer-scale" : "flexible-scale"} ${viewModeTransition ? `view-${viewModeTransition}` : ""} ${viewModeTransition && typeof document.startViewTransition === "function" ? "native-view-transition" : ""} ${dragging ? "is-dragging" : ""} ${cartridgePresent ? "has-cartridge" : ""} ${cartridgeHovered ? "cartridge-hovered" : ""} ${cartridgePreflight ? "cartridge-preflight" : ""} ${cartridgeInserting && cartridgeAnimationEnabled ? "cartridge-inserting" : ""} ${showSaveTooltip || cartridgePreflight ? "tooltip-visible" : ""}`}
           onWheel={resizeWithWheel}
           style={{
             "--console-scale": consoleScale,
@@ -4318,7 +4339,7 @@ export default function Emulator() {
                 {model === "cgb" ? "POWER" : "BATTERY"}
               </div>
               <div
-                className="screen-frame"
+                className={`screen-frame ${paused && running ? "is-dimmed" : ""}`}
                 style={screenGeometry.frameWidth === null
                   ? undefined
                   : { width: `${screenGeometry.frameWidth}px` }}
