@@ -1,10 +1,10 @@
 {
-  "version": "1.2.2",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.2/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.2",
+  "version": "1.2.3",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.3/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.3",
   "changes": [
-    "Fixed console switching so DMG and GBC screens always refresh with the selected hardware, both empty and with a running cartridge.",
-    "The initial save hint now yields instantly to cartridge hover and fades back only while its original display window remains active.",
-    "The library search, filters, sorting, and layout controls now stay visible while browsing the detail list."
+    "Cartridge cataloguing now paints the complete shell, model details, label, and artwork in one slower left-to-right pass.",
+    "The unfinished side remains a clean transparent cartridge outline while the finished side reveals the correctly coloured DMG or GBC cartridge.",
+    "The wiping arm is locked to the cartridge bounds and painted edge at every supported scale."
   ]
 }
