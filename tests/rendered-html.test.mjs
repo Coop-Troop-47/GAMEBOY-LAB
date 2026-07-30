@@ -168,7 +168,8 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.doesNotMatch(source, /document\.startViewTransition|flushSync/);
   assert.doesNotMatch(css, /\.lcd-view-transition-overlay/);
   assert.match(css, /\.screen-frame::after\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px #121719/s);
-  assert.match(css, /\.cgb \.screen-frame::after\s*\{[^}]*#0d0f13/s);
+  assert.match(css, /\.cgb \.screen-frame\s*\{[^}]*border-color:\s*#0d0f13[^}]*outline-color:\s*#0d0f13[^}]*box-shadow:\s*none/s);
+  assert.match(css, /\.cgb \.screen-frame::after\s*\{[^}]*content:\s*none/s);
   assert.match(css, /\.screen-frame\s*\{[^}]*margin:\s*0 auto[^}]*transform:\s*none/s);
   assert.match(css, /\.console-wrap\.view-zoom-in \.screen-frame,[\s\S]*\.console-wrap\.view-zoom-out \.screen-frame\s*\{[^}]*transition:\s*none/s);
   assert.doesNotMatch(css, /\.console-wrap\.view-zoom-in \.screen-frame,[^}]*visibility:\s*hidden/s);
@@ -475,7 +476,7 @@ test("renders reference-matched DMG and supplied-purple GBC shells", async () =>
   assert.match(css, /\.handheld\.cgb\s*\{[^}]*border-radius:\s*14px 14px 50% 50%\s*\/\s*14px 14px 46px 46px/s);
   assert.match(css, /\.cgb \.screen-caption\s*\{[^}]*left:\s*50%[^}]*bottom:\s*16px[^}]*transform:\s*translateX\(-50%\)/s);
   assert.match(css, /\.cgb \.screen-caption strong\s*\{[^}]*font-size:\s*16px/s);
-  assert.match(css, /\.cgb \.screen-frame\s*\{[^}]*border-color:\s*#0d0f13[^}]*outline-color:\s*#101116/s);
+  assert.match(css, /\.cgb \.screen-frame\s*\{[^}]*border-color:\s*#0d0f13[^}]*outline-color:\s*#0d0f13[^}]*box-shadow:\s*none/s);
   assert.match(css, /\.cgb \.meta-buttons\s*\{[^}]*left:\s*51\.5%[^}]*transform:\s*translateX\(-50%\)/s);
   assert.match(css, /\.cgb-nintendo\s*\{[^}]*font:\s*800 15px\/1/s);
   assert.match(css, /\.cgb \.dpad\s*\{[^}]*background:\s*transparent/s);

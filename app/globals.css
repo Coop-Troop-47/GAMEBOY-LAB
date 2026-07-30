@@ -2455,13 +2455,13 @@ html[data-theme="dark"] body {
 .cgb .screen-frame {
   border-color: #0d0f13;
   border-radius: 2px;
-  outline-color: #101116;
+  outline-color: #0d0f13;
   background: #0d0f13;
-  box-shadow: inset 0 0 0 1px #0d0f13;
+  box-shadow: none;
 }
 
 .cgb .screen-frame::after {
-  box-shadow: inset 0 0 0 1px #0d0f13;
+  content: none;
 }
 
 .cgb .screen-frame canvas.lcd-output,
