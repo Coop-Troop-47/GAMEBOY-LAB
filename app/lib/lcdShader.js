@@ -486,7 +486,7 @@ export class LCDShaderRenderer {
     if (changed) this.render();
   }
 
-  resizeAndRender() {
+  resizeAndRender(syncDuration = 300) {
     if (this.disposed) return;
     this.resizeToDisplayBounds();
     this.render();
@@ -499,7 +499,7 @@ export class LCDShaderRenderer {
     // and the LCD grid is resampled into alternating thick/thin rows.
     this.displaySyncUntil = Math.max(
       this.displaySyncUntil,
-      window.performance.now() + 300,
+      window.performance.now() + Math.max(300, syncDuration),
     );
     if (this.displaySyncFrame !== null) return;
 

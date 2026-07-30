@@ -283,16 +283,16 @@ input:focus-visible {
   position: relative;
   container-type: inline-size;
   isolation: isolate;
-  left: 50%;
+  left: auto;
   width: 264px;
   aspect-ratio: auto;
-  margin: 0;
+  margin: 0 auto;
   overflow: clip;
   border: 3px solid #121719;
   outline: 5px solid #23262d;
   outline-offset: 0;
   background: #cadc9f;
-  transform: translateX(-50%);
+  transform: none;
   box-shadow: inset 0 0 22px rgba(23, 34, 33, 0.24);
 }
 
@@ -4450,8 +4450,18 @@ html[data-theme="dark"] body {
 
 .console-wrap.view-zoom-in .screen-frame,
 .console-wrap.view-zoom-out .screen-frame {
-  visibility: hidden;
   transition: none;
+}
+
+/* The console-to-screen FLIP isolates the real LCD. No shell layer is allowed
+   to scale behind it; the destination screen remains the sole visible child. */
+.console-wrap.view-zoom-in .handheld,
+.console-wrap.view-zoom-in .display-bezel {
+  visibility: hidden;
+}
+
+.console-wrap.view-zoom-in .screen-frame {
+  visibility: visible;
 }
 
 .console-wrap.view-zoom-in .device-rig,
@@ -4464,39 +4474,6 @@ html[data-theme="dark"] body {
 .console-wrap.view-zoom-out .cartridge-visual-rig,
 .console-wrap.view-zoom-out .cartridge-hover-rig {
   visibility: hidden;
-}
-
-.lcd-view-transition-overlay {
-  position: fixed;
-  z-index: 1000;
-  display: block;
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  pointer-events: none;
-  transform-origin: 0 0;
-  will-change: transform;
-  container-type: inline-size;
-}
-
-.lcd-view-transition-overlay canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.lcd-view-transition-overlay::after {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  content: "";
-  pointer-events: none;
-  box-shadow: inset 0 0 0 1px var(--lcd-edge, #121719);
-}
-
-.lcd-view-transition-overlay .pause-overlay {
-  clip-path: inset(0);
 }
 
 /* Split drawer navigation and selective visual wayfinding. */

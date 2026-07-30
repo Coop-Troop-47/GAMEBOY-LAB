@@ -1820,9 +1820,11 @@ export default function Emulator() {
   const transitionFrameTimerRef = useRef(0);
   const viewTransitionTimerRef = useRef(0);
   const viewTransitionRunRef = useRef(0);
-  const viewTransitionOverlayRef = useRef(null);
+  const viewTransitionPendingRef = useRef(null);
   const viewTransitionAnimationRef = useRef(null);
-  const viewTransitionCopyFrameRef = useRef(0);
+  const targetScreenWidthRef = useRef(null);
+  const targetConsoleScaleRef = useRef(null);
+  const targetConsoleOffsetYRef = useRef(null);
   const catalogueRunRef = useRef(0);
   const testRomLoadedRef = useRef(false);
   const consoleWrapRef = useRef(null);
@@ -1914,6 +1916,11 @@ export default function Emulator() {
   const [cartridgeAnimationKey, setCartridgeAnimationKey] = useState(0);
   const [showSaveTooltip, setShowSaveTooltip] = useState(false);
   const [cartridgePreflight, setCartridgePreflight] = useState(false);
+  const scaleAnimationLocked = Boolean(
+    viewModeTransition
+    || cartridgePreflight
+    || (cartridgeInserting && cartridgeAnimationEnabled)
+  );
   const [cartridgeHovered, setCartridgeHovered] = useState(false);
   const [consoleOffsetY, setConsoleOffsetY] = useState(0);
   const [scaleToast, setScaleToast] = useState("");
@@ -2008,8 +2015,8 @@ export default function Emulator() {
     window.clearTimeout(viewTransitionTimerRef.current);
     viewTransitionRunRef.current += 1;
     viewTransitionAnimationRef.current?.cancel();
-    window.cancelAnimationFrame(viewTransitionCopyFrameRef.current);
-    viewTransitionOverlayRef.current?.remove();
+    viewTransitionPendingRef.current?.pauseAnimation?.cancel();
+    viewTransitionPendingRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -3046,179 +3053,88 @@ export default function Emulator() {
   }, [pendingModel, performModelSwitch]);
 
   const completeViewModeTransition = useCallback((run = viewTransitionRunRef.current) => {
-    if (run !== viewTransitionRunRef.current) return;
+    const pending = viewTransitionPendingRef.current;
+    if (
+      run !== viewTransitionRunRef.current
+      || !pending
+      || pending.run !== run
+      || pending.completed
+    ) return;
+    pending.completed = true;
     window.clearTimeout(viewTransitionTimerRef.current);
     viewTransitionTimerRef.current = 0;
+    const animation = viewTransitionAnimationRef.current;
     viewTransitionAnimationRef.current = null;
-    window.cancelAnimationFrame(viewTransitionCopyFrameRef.current);
-    viewTransitionCopyFrameRef.current = 0;
-    viewTransitionOverlayRef.current?.remove();
-    viewTransitionOverlayRef.current = null;
+    animation?.cancel();
+    pending.pauseAnimation?.cancel();
+    const frame = screenFrameRef.current;
+    if (frame) {
+      frame.style.removeProperty("transform");
+      frame.style.removeProperty("transform-origin");
+      frame.style.removeProperty("will-change");
+    }
+    viewTransitionPendingRef.current = null;
+    lcdRendererRef.current?.resizeAndRender();
     setViewModeTransition("");
-    // The LCD overlay has reached the real destination canvas. Reveal that
-    // canvas and start insertion in the same frame.
+    // The real LCD has reached its destination. Reinsert the cartridge in the
+    // same frame so there is no dead beat between the two motions.
     replayCartridgeInsertion({ waitForGeometry: false });
   }, [replayCartridgeInsertion]);
 
   const switchViewMode = useCallback((nextViewMode) => {
-    if (nextViewMode === viewMode) return;
+    if (nextViewMode === viewMode || viewModeTransition) return;
+    const sourceFrame = screenFrameRef.current;
+    const sourceBounds = sourceFrame?.getBoundingClientRect();
+    if (!sourceFrame || !sourceBounds?.width || !sourceBounds.height) {
+      setViewMode(nextViewMode);
+      replayCartridgeInsertion({ waitForGeometry: false });
+      return;
+    }
     const run = viewTransitionRunRef.current + 1;
     viewTransitionRunRef.current = run;
     window.clearTimeout(viewTransitionTimerRef.current);
     viewTransitionTimerRef.current = 0;
     viewTransitionAnimationRef.current?.cancel();
     viewTransitionAnimationRef.current = null;
-    window.cancelAnimationFrame(viewTransitionCopyFrameRef.current);
-    viewTransitionCopyFrameRef.current = 0;
-    viewTransitionOverlayRef.current?.remove();
-    viewTransitionOverlayRef.current = null;
-
-    const source = canvasRef.current;
-    const sourceFrame = screenFrameRef.current;
-    const sourceBounds = sourceFrame?.getBoundingClientRect();
-    let overlay = null;
-    let snapshot = null;
-    let frameStyle = null;
-    if (source && sourceFrame && sourceBounds?.width > 0 && sourceBounds.height > 0) {
-      // Render immediately before copying so WebGL's presentation buffer is
-      // populated even when preserveDrawingBuffer is disabled.
-      lcdRendererRef.current?.render();
-      overlay = document.createElement("div");
-      overlay.className = "lcd-view-transition-overlay";
-      snapshot = document.createElement("canvas");
-      snapshot.width = Math.max(1, source.width);
-      snapshot.height = Math.max(1, source.height);
-      const context = snapshot.getContext("2d", { alpha: false });
-      context?.drawImage(source, 0, 0, snapshot.width, snapshot.height);
-      const computedFrameStyle = window.getComputedStyle(sourceFrame);
-      frameStyle = {
-        border: computedFrameStyle.border,
+    viewTransitionPendingRef.current?.pauseAnimation?.cancel();
+    const computedFrameStyle = window.getComputedStyle(sourceFrame);
+    viewTransitionPendingRef.current = {
+      run,
+      completed: false,
+      sourceBounds: {
+        left: sourceBounds.left,
+        top: sourceBounds.top,
+        width: sourceBounds.width,
+        height: sourceBounds.height,
+      },
+      sourceStyle: {
         borderWidth: computedFrameStyle.borderWidth,
         borderColor: computedFrameStyle.borderColor,
         borderRadius: computedFrameStyle.borderRadius,
-        outline: computedFrameStyle.outline,
         outlineWidth: computedFrameStyle.outlineWidth,
         outlineColor: computedFrameStyle.outlineColor,
         outlineOffset: computedFrameStyle.outlineOffset,
-        background: computedFrameStyle.background,
         backgroundColor: computedFrameStyle.backgroundColor,
         boxShadow: computedFrameStyle.boxShadow,
-      };
-      Object.assign(overlay.style, {
-        left: `${sourceBounds.left}px`,
-        top: `${sourceBounds.top}px`,
-        width: `${sourceBounds.width}px`,
-        height: `${sourceBounds.height}px`,
-        border: frameStyle.border,
-        borderRadius: frameStyle.borderRadius,
-        outline: frameStyle.outline,
-        outlineOffset: frameStyle.outlineOffset,
-        background: frameStyle.background,
-      });
-      overlay.style.setProperty("--lcd-edge", frameStyle.borderColor);
-      overlay.append(snapshot);
-      const pauseIndicator = sourceFrame.querySelector(".pause-overlay");
-      if (pauseIndicator) overlay.append(pauseIndicator.cloneNode(true));
-      document.body.append(overlay);
-      viewTransitionOverlayRef.current = overlay;
-    }
+      },
+      sourcePauseWidth: sourceFrame
+        .querySelector(".pause-symbol")
+        ?.getBoundingClientRect().width ?? 0,
+      pauseAnimation: null,
+    };
 
     setViewModeTransition(nextViewMode === "screen" ? "zoom-in" : "zoom-out");
     setViewMode(nextViewMode);
     viewTransitionTimerRef.current = window.setTimeout(
       () => completeViewModeTransition(run),
-      900,
+      1200,
     );
-
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        if (
-          run !== viewTransitionRunRef.current
-          || !overlay
-          || !snapshot
-          || !frameStyle
-        ) {
-          completeViewModeTransition(run);
-          return;
-        }
-        const targetBounds = screenFrameRef.current?.getBoundingClientRect();
-        if (!targetBounds?.width || !targetBounds.height) {
-          completeViewModeTransition(run);
-          return;
-        }
-        const translateX = targetBounds.left - sourceBounds.left;
-        const translateY = targetBounds.top - sourceBounds.top;
-        const scaleX = targetBounds.width / sourceBounds.width;
-        const scaleY = targetBounds.height / sourceBounds.height;
-        const targetStyle = window.getComputedStyle(screenFrameRef.current);
-
-        // Keep the moving LCD live and render it at the destination buffer
-        // resolution. Copying each presented shader frame avoids both a frozen
-        // game and a low-resolution source texture being enlarged.
-        const syncLiveLcd = () => {
-          if (run !== viewTransitionRunRef.current) return;
-          const liveCanvas = canvasRef.current;
-          if (!liveCanvas) return;
-          lcdRendererRef.current?.render();
-          if (snapshot.width !== liveCanvas.width) snapshot.width = liveCanvas.width;
-          if (snapshot.height !== liveCanvas.height) snapshot.height = liveCanvas.height;
-          snapshot.getContext("2d", { alpha: false })?.drawImage(
-            liveCanvas,
-            0,
-            0,
-            snapshot.width,
-            snapshot.height,
-          );
-          viewTransitionCopyFrameRef.current = window.requestAnimationFrame(syncLiveLcd);
-        };
-        syncLiveLcd();
-
-        const animation = overlay.animate(
-          [
-            {
-              transform: "translate3d(0, 0, 0) scale(1, 1)",
-              borderWidth: frameStyle.borderWidth,
-              borderColor: frameStyle.borderColor,
-              borderRadius: frameStyle.borderRadius,
-              outlineWidth: frameStyle.outlineWidth,
-              outlineColor: frameStyle.outlineColor,
-              backgroundColor: frameStyle.backgroundColor,
-              boxShadow: frameStyle.boxShadow,
-            },
-            {
-              transform: (
-                `translate3d(${translateX}px, ${translateY}px, 0) `
-                + `scale(${scaleX}, ${scaleY})`
-              ),
-              borderWidth: targetStyle.borderWidth,
-              borderColor: targetStyle.borderColor,
-              borderRadius: targetStyle.borderRadius,
-              outlineWidth: targetStyle.outlineWidth,
-              outlineColor: targetStyle.outlineColor,
-              backgroundColor: targetStyle.backgroundColor,
-              boxShadow: targetStyle.boxShadow,
-            },
-          ],
-          {
-            duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-              ? 1
-              : 420,
-            easing: "cubic-bezier(.22, 1, .36, 1)",
-            fill: "forwards",
-          },
-        );
-        viewTransitionAnimationRef.current = animation;
-        animation.finished.then(
-          () => completeViewModeTransition(run),
-          () => {
-            if (run === viewTransitionRunRef.current) {
-              completeViewModeTransition(run);
-            }
-          },
-        );
-      });
-    });
-  }, [completeViewModeTransition, viewMode]);
+  }, [
+    completeViewModeTransition,
+    replayCartridgeInsertion,
+    viewMode,
+    viewModeTransition,
+  ]);
 
   const reset = useCallback(() => {
     if (!romRef.current) return;
@@ -3518,6 +3434,10 @@ export default function Emulator() {
   const resizeWithWheel = useCallback((event) => {
     if (window.innerWidth < 900) return;
     event.preventDefault();
+    if (scaleAnimationLocked) {
+      showScaleMessage("CAN’T CHANGE SCALE DURING ANIMATION");
+      return;
+    }
     if (integerScaling) {
       showScaleMessage("CAN’T CHANGE SCALE — INTEGER SCALING IS ON");
       return;
@@ -3526,7 +3446,7 @@ export default function Emulator() {
       55,
       Math.min(100, current + (event.deltaY < 0 ? 2 : -2)),
     ));
-  }, [integerScaling, showScaleMessage]);
+  }, [integerScaling, scaleAnimationLocked, showScaleMessage]);
 
   const uploadSoftwareScreen = useCallback((resetHistory = false) => {
     const source = sourceCanvasRef.current;
@@ -3839,9 +3759,10 @@ export default function Emulator() {
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [anyDrawerOpen, backgroundPause, pauseGame, pauseOnMenu, resumeGame]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const resize = () => {
       if (viewMode === "screen") {
+        targetConsoleScaleRef.current = 1;
         setConsoleScale(1);
         return;
       }
@@ -3864,10 +3785,14 @@ export default function Emulator() {
           1,
           Math.floor(fit * screenContentWidth * density / GAMEBOY_WIDTH),
         );
-        setConsoleScale(pixelScale * GAMEBOY_WIDTH / (screenContentWidth * density));
+        const nextScale = pixelScale * GAMEBOY_WIDTH / (screenContentWidth * density);
+        targetConsoleScaleRef.current = nextScale;
+        setConsoleScale(nextScale);
         return;
       }
-      setConsoleScale(fit * manualScale / 100);
+      const nextScale = fit * manualScale / 100;
+      targetConsoleScaleRef.current = nextScale;
+      setConsoleScale(nextScale);
     };
     resize();
     const observer = new window.ResizeObserver(resize);
@@ -3885,6 +3810,7 @@ export default function Emulator() {
       const wrap = consoleWrapRef.current;
       const rig = deviceRigRef.current;
       if (!wrap || !rig) {
+        targetConsoleOffsetYRef.current = 0;
         consoleOffsetYRef.current = 0;
         setConsoleOffsetY(0);
         return;
@@ -3929,6 +3855,7 @@ export default function Emulator() {
       const nextOffset = clearanceActive
         ? Math.max(hoverDuck, Math.max(0, collisionSafeOffset))
         : baselineCenterOffset;
+      targetConsoleOffsetYRef.current = nextOffset;
       consoleOffsetYRef.current = nextOffset;
       setConsoleOffsetY(nextOffset);
     };
@@ -4038,6 +3965,7 @@ export default function Emulator() {
         // snaps the whole console transform, never the screen independently.
         outerWidth = baseContentWidth + 6;
       }
+      targetScreenWidthRef.current = outerWidth;
       setScreenGeometry((current) => (
         current.frameWidth !== null
         && Math.abs(current.frameWidth - outerWidth) < 0.01
@@ -4062,6 +3990,136 @@ export default function Emulator() {
     manualScale,
     model,
     viewMode,
+  ]);
+
+  useLayoutEffect(() => {
+    const pending = viewTransitionPendingRef.current;
+    const frame = screenFrameRef.current;
+    if (
+      !viewModeTransition
+      || !pending
+      || pending.run !== viewTransitionRunRef.current
+      || pending.completed
+      || viewTransitionAnimationRef.current
+      || !frame
+    ) return;
+    if (
+      targetConsoleScaleRef.current !== null
+      && Math.abs(consoleScale - targetConsoleScaleRef.current) > 0.0001
+    ) return;
+    if (
+      targetConsoleOffsetYRef.current !== null
+      && Math.abs(consoleOffsetY - targetConsoleOffsetYRef.current) > 0.01
+    ) return;
+    if (
+      targetScreenWidthRef.current !== null
+      && (
+        screenGeometry.frameWidth === null
+        || Math.abs(screenGeometry.frameWidth - targetScreenWidthRef.current) > 0.01
+      )
+    ) return;
+
+    const targetBounds = frame.getBoundingClientRect();
+    if (!targetBounds.width || !targetBounds.height) {
+      completeViewModeTransition(pending.run);
+      return;
+    }
+    const targetStyle = window.getComputedStyle(frame);
+    const pauseOverlay = frame.querySelector(".pause-overlay");
+    const targetPauseWidth = frame
+      .querySelector(".pause-symbol")
+      ?.getBoundingClientRect().width ?? 0;
+    const deltaX = pending.sourceBounds.left - targetBounds.left;
+    const deltaY = pending.sourceBounds.top - targetBounds.top;
+    const scaleX = pending.sourceBounds.width / targetBounds.width;
+    const scaleY = pending.sourceBounds.height / targetBounds.height;
+    const visualScale = Math.max(0.001, Math.sqrt(scaleX * scaleY));
+    const compensateLength = (value) => {
+      const pixels = Number.parseFloat(value);
+      return Number.isFinite(pixels) ? `${pixels / visualScale}px` : value;
+    };
+    const sourceVisualStyle = {
+      ...pending.sourceStyle,
+      borderWidth: compensateLength(pending.sourceStyle.borderWidth),
+      borderRadius: compensateLength(pending.sourceStyle.borderRadius),
+      outlineWidth: compensateLength(pending.sourceStyle.outlineWidth),
+      outlineOffset: compensateLength(pending.sourceStyle.outlineOffset),
+    };
+    const inverseTransform = (
+      `translate3d(${deltaX}px, ${deltaY}px, 0) scale(${scaleX}, ${scaleY})`
+    );
+    const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? 1
+      : 420;
+
+    frame.style.transformOrigin = "0 0";
+    frame.style.transform = inverseTransform;
+    frame.style.willChange = (
+      "transform, border-width, border-color, border-radius, outline-width"
+    );
+    // WebGL follows the transformed *visible* bounds for the whole FLIP. This
+    // keeps both zoom directions live and sharp rather than enlarging a
+    // low-resolution snapshot.
+    lcdRendererRef.current?.resizeAndRender(duration + 120);
+
+    const animation = frame.animate(
+      [
+        {
+          transform: inverseTransform,
+          ...sourceVisualStyle,
+        },
+        {
+          transform: "translate3d(0, 0, 0) scale(1, 1)",
+          borderWidth: targetStyle.borderWidth,
+          borderColor: targetStyle.borderColor,
+          borderRadius: targetStyle.borderRadius,
+          outlineWidth: targetStyle.outlineWidth,
+          outlineColor: targetStyle.outlineColor,
+          outlineOffset: targetStyle.outlineOffset,
+          backgroundColor: targetStyle.backgroundColor,
+          boxShadow: targetStyle.boxShadow,
+        },
+      ],
+      {
+        duration,
+        easing: "cubic-bezier(.22, 1, .36, 1)",
+        fill: "forwards",
+      },
+    );
+    viewTransitionAnimationRef.current = animation;
+
+    if (pauseOverlay && pending.sourcePauseWidth > 0 && targetPauseWidth > 0) {
+      const pauseCorrection = Math.max(
+        0.25,
+        Math.min(4, pending.sourcePauseWidth / (targetPauseWidth * scaleX)),
+      );
+      pending.pauseAnimation = pauseOverlay.animate(
+        [
+          { transform: `scale(${pauseCorrection})` },
+          { transform: "scale(1)" },
+        ],
+        {
+          duration,
+          easing: "cubic-bezier(.22, 1, .36, 1)",
+          fill: "forwards",
+        },
+      );
+    }
+
+    animation.finished.then(
+      () => completeViewModeTransition(pending.run),
+      () => {
+        if (pending.run === viewTransitionRunRef.current && !pending.completed) {
+          completeViewModeTransition(pending.run);
+        }
+      },
+    );
+  }, [
+    completeViewModeTransition,
+    consoleOffsetY,
+    consoleScale,
+    screenGeometry.frameWidth,
+    viewModeTransition,
   ]);
 
   useEffect(() => {
@@ -5080,6 +5138,7 @@ export default function Emulator() {
                         max="100"
                         step="1"
                         value={manualScale}
+                        disabled={scaleAnimationLocked}
                         onChange={(event) => setManualScale(Number(event.target.value))}
                         aria-label="Manual Game Boy scale"
                       />
@@ -5087,7 +5146,12 @@ export default function Emulator() {
                     <div>
                       <small>Desktop: scroll over the console to resize.</small>
                       {manualScale !== 90 && (
-                        <button onClick={() => setManualScale(90)}>RESET DEFAULT</button>
+                        <button
+                          disabled={scaleAnimationLocked}
+                          onClick={() => setManualScale(90)}
+                        >
+                          RESET DEFAULT
+                        </button>
                       )}
                     </div>
                   </div>

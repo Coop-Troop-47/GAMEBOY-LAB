@@ -1,10 +1,10 @@
 {
-  "version": "1.2.10",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.10/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.10",
+  "version": "1.2.11",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.11/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.11",
   "changes": [
-    "The LCD zoom now refreshes from the live WebGL output every animation frame at the destination device-pixel resolution, keeping gameplay moving and the enlarged image sharp.",
-    "Border width, outline, radius, shadow, and background now interpolate with the LCD, removing the bezel mismatch and final snap.",
-    "Paused transitions retain their pause icon, while a top-painted inner bezel guard prevents the outermost LCD fragment from leaking through the thin black edge."
+    "Screen-only switching now animates the actual live LCD and WebGL canvas instead of a copied overlay, so gameplay never freezes and no duplicate screen can snap into place.",
+    "The destination scale, duck offset, pixel geometry, bezel, and pause indicator settle into one FLIP animation; the console shell is isolated during zoom-in instead of moving behind the display.",
+    "WebGL output resolution follows the LCD throughout both zoom directions, and manual wheel, slider, and reset scaling are locked during LCD and cartridge insertion animations."
   ]
 }
