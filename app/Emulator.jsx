@@ -2016,6 +2016,7 @@ export default function Emulator() {
     viewTransitionRunRef.current += 1;
     viewTransitionAnimationRef.current?.cancel();
     viewTransitionPendingRef.current?.pauseAnimation?.cancel();
+    viewTransitionPendingRef.current?.bezelAnimation?.cancel();
     viewTransitionPendingRef.current = null;
   }, []);
 
@@ -3067,6 +3068,7 @@ export default function Emulator() {
     viewTransitionAnimationRef.current = null;
     animation?.cancel();
     pending.pauseAnimation?.cancel();
+    pending.bezelAnimation?.cancel();
     const frame = screenFrameRef.current;
     if (frame) {
       frame.style.removeProperty("transform");
@@ -3097,7 +3099,10 @@ export default function Emulator() {
     viewTransitionAnimationRef.current?.cancel();
     viewTransitionAnimationRef.current = null;
     viewTransitionPendingRef.current?.pauseAnimation?.cancel();
+    viewTransitionPendingRef.current?.bezelAnimation?.cancel();
     const computedFrameStyle = window.getComputedStyle(sourceFrame);
+    const sourceLayoutWidth = Math.max(1, sourceFrame.offsetWidth);
+    const sourceLayoutHeight = Math.max(1, sourceFrame.offsetHeight);
     viewTransitionPendingRef.current = {
       run,
       completed: false,
@@ -3117,10 +3122,13 @@ export default function Emulator() {
         backgroundColor: computedFrameStyle.backgroundColor,
         boxShadow: computedFrameStyle.boxShadow,
       },
+      sourceAncestorScaleX: sourceBounds.width / sourceLayoutWidth,
+      sourceAncestorScaleY: sourceBounds.height / sourceLayoutHeight,
       sourcePauseWidth: sourceFrame
         .querySelector(".pause-symbol")
         ?.getBoundingClientRect().width ?? 0,
       pauseAnimation: null,
+      bezelAnimation: null,
     };
 
     setViewModeTransition(nextViewMode === "screen" ? "zoom-in" : "zoom-out");
@@ -4031,12 +4039,29 @@ export default function Emulator() {
       ?.getBoundingClientRect().width ?? 0;
     const deltaX = pending.sourceBounds.left - targetBounds.left;
     const deltaY = pending.sourceBounds.top - targetBounds.top;
+    const targetAncestorScaleX = targetBounds.width / Math.max(1, frame.offsetWidth);
+    const targetAncestorScaleY = targetBounds.height / Math.max(1, frame.offsetHeight);
+    const localDeltaX = deltaX / Math.max(0.001, targetAncestorScaleX);
+    const localDeltaY = deltaY / Math.max(0.001, targetAncestorScaleY);
     const scaleX = pending.sourceBounds.width / targetBounds.width;
     const scaleY = pending.sourceBounds.height / targetBounds.height;
     const visualScale = Math.max(0.001, Math.sqrt(scaleX * scaleY));
+    const sourceAncestorScale = Math.max(
+      0.001,
+      Math.sqrt(pending.sourceAncestorScaleX * pending.sourceAncestorScaleY),
+    );
+    const targetAncestorScale = Math.max(
+      0.001,
+      Math.sqrt(targetAncestorScaleX * targetAncestorScaleY),
+    );
+    const startLengthCompensation = (
+      sourceAncestorScale / (targetAncestorScale * visualScale)
+    );
     const compensateLength = (value) => {
       const pixels = Number.parseFloat(value);
-      return Number.isFinite(pixels) ? `${pixels / visualScale}px` : value;
+      return Number.isFinite(pixels)
+        ? `${pixels * startLengthCompensation}px`
+        : value;
     };
     const sourceVisualStyle = {
       ...pending.sourceStyle,
@@ -4046,7 +4071,8 @@ export default function Emulator() {
       outlineOffset: compensateLength(pending.sourceStyle.outlineOffset),
     };
     const inverseTransform = (
-      `translate3d(${deltaX}px, ${deltaY}px, 0) scale(${scaleX}, ${scaleY})`
+      `translate3d(${localDeltaX}px, ${localDeltaY}px, 0) `
+      + `scale(${scaleX}, ${scaleY})`
     );
     const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches
       ? 1
@@ -4054,9 +4080,7 @@ export default function Emulator() {
 
     frame.style.transformOrigin = "0 0";
     frame.style.transform = inverseTransform;
-    frame.style.willChange = (
-      "transform, border-width, border-color, border-radius, outline-width"
-    );
+    frame.style.willChange = "transform";
     // WebGL follows the transformed *visible* bounds for the whole FLIP. This
     // keeps both zoom directions live and sharp rather than enlarging a
     // low-resolution snapshot.
@@ -4066,10 +4090,22 @@ export default function Emulator() {
       [
         {
           transform: inverseTransform,
-          ...sourceVisualStyle,
         },
         {
           transform: "translate3d(0, 0, 0) scale(1, 1)",
+        },
+      ],
+      {
+        duration,
+        easing: "cubic-bezier(.22, 1, .36, 1)",
+        fill: "forwards",
+      },
+    );
+    viewTransitionAnimationRef.current = animation;
+    pending.bezelAnimation = frame.animate(
+      [
+        sourceVisualStyle,
+        {
           borderWidth: targetStyle.borderWidth,
           borderColor: targetStyle.borderColor,
           borderRadius: targetStyle.borderRadius,
@@ -4082,11 +4118,10 @@ export default function Emulator() {
       ],
       {
         duration,
-        easing: "cubic-bezier(.22, 1, .36, 1)",
+        easing: "linear",
         fill: "forwards",
       },
     );
-    viewTransitionAnimationRef.current = animation;
 
     if (pauseOverlay && pending.sourcePauseWidth > 0 && targetPauseWidth > 0) {
       const pauseCorrection = Math.max(

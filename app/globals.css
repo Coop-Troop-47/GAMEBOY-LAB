@@ -4450,7 +4450,16 @@ html[data-theme="dark"] body {
 
 .console-wrap.view-zoom-in .screen-frame,
 .console-wrap.view-zoom-out .screen-frame {
+  z-index: 31;
   transition: none;
+}
+
+/* Keep the animated LCD above bezel labels and every lower control surface
+   while its transformed bounds cross the physical shell. */
+.console-wrap.view-zoom-in .display-bezel,
+.console-wrap.view-zoom-out .display-bezel {
+  z-index: 30;
+  isolation: isolate;
 }
 
 /* The console-to-screen FLIP isolates the real LCD. No shell layer is allowed
