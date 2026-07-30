@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   CGB_COMPATIBILITY_PALETTES,
   GAMEBOY_HEIGHT,
@@ -59,6 +66,17 @@ const TECHNICAL_READOUT_MEDIA = "(min-width: 1180px)";
 const DMG_LCD_CONTRAST_BASE = 150;
 const DMG_SHARP_CONTRAST_BASE = 112;
 const DMG_CONTRAST_ADJUSTMENT_LIMIT = 30;
+const CARTRIDGE_POWER_FADE_DURATION = 180;
+const BATTERY_CARTRIDGE_TYPES = new Set([
+  0x03,
+  0x06,
+  0x09,
+  0x0f,
+  0x10,
+  0x13,
+  0x1b,
+  0x1e,
+]);
 function BrandMark() {
   return (
     <svg
@@ -182,8 +200,65 @@ function formatLibraryDate(timestamp) {
   }).format(new Date(timestamp)).toUpperCase();
 }
 
+function recordRomBytes(record) {
+  if (record?.rom instanceof ArrayBuffer) return new Uint8Array(record.rom);
+  if (ArrayBuffer.isView(record?.rom)) {
+    return new Uint8Array(
+      record.rom.buffer,
+      record.rom.byteOffset,
+      record.rom.byteLength,
+    );
+  }
+  return null;
+}
+
+function libraryRecordHasBattery(record) {
+  if (typeof record?.battery === "boolean") return record.battery;
+  const bytes = recordRomBytes(record);
+  return Boolean(bytes && BATTERY_CARTRIDGE_TYPES.has(bytes[0x147]));
+}
+
+function readLibrarySaveMeta(record) {
+  const battery = libraryRecordHasBattery(record);
+  try {
+    const batteryStored = battery && Boolean(
+      globalThis.localStorage?.getItem(`gbc-lab-save:${record.id}`),
+    );
+    const stateSlots = [0, 1, 2].map((slot) => {
+      const value = globalThis.localStorage?.getItem(
+        `gbc-lab-state:${record.id}:${slot}`,
+      );
+      if (!value) return false;
+      const parsed = JSON.parse(value);
+      return Boolean(parsed?.state && parsed?.romKey === record.id);
+    });
+    return { battery, batteryStored, stateSlots };
+  } catch {
+    return {
+      battery,
+      batteryStored: false,
+      stateSlots: [false, false, false],
+    };
+  }
+}
+
 function modelLabel(model) {
   return model === "cgb" ? "GBC" : "DMG";
+}
+
+function FloppyIcon({ hasData }) {
+  return (
+    <svg
+      className={`library-floppy ${hasData ? "has-data" : ""}`}
+      viewBox="0 0 18 18"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M2 2H13L16 5V16H2Z" />
+      <path d="M5 2V7H12V2M5 11H13V16H5Z" />
+      <path d="M10 3V6" />
+    </svg>
+  );
 }
 
 function hashBytes(bytes) {
@@ -1042,6 +1117,7 @@ function CartridgeDock({
   cartridgeArtwork,
   cartridgeKind,
   cartridgeName,
+  disabled,
   inserting,
   onHoverChange,
   onOpenSaves,
@@ -1066,6 +1142,7 @@ function CartridgeDock({
           type="button"
           aria-label={`Open save options for ${cartridgeName}`}
           aria-controls="save-drawer"
+          disabled={disabled}
           onClick={onOpenSaves}
           onPointerEnter={() => onHoverChange(true)}
           onPointerLeave={() => onHoverChange(false)}
@@ -1096,7 +1173,12 @@ function CartridgeDock({
   );
 }
 
-function LibraryStackButton({ count, onOpen, open, showDiscoveryHint }) {
+function LibraryStackButton({
+  count,
+  onOpen,
+  open,
+  showDiscoveryHint,
+}) {
   return (
     <>
       <button
@@ -1135,6 +1217,7 @@ function RomLibraryDrawer({
   activeLibraryId,
   cartridgePresent,
   deletingLibraryId,
+  interactionLocked,
   libraryFilter,
   libraryQuery,
   libraryReady,
@@ -1152,6 +1235,7 @@ function RomLibraryDrawer({
   onView,
   open,
   removingLibraryId,
+  saveDataRevision,
 }) {
   const drawerRef = useRef(null);
   const layoutPositionsRef = useRef(new Map());
@@ -1166,6 +1250,12 @@ function RomLibraryDrawer({
     activeLibraryId,
   );
   const visibleLayoutKey = `${libraryView}:${visibleRoms.map((rom) => rom.id).join("|")}`;
+  const visibleSaveMeta = useMemo(
+    () => new Map(
+      visibleRoms.map((rom) => [rom.id, readLibrarySaveMeta(rom)]),
+    ),
+    [libraryRoms, saveDataRevision, visibleLayoutKey],
+  );
 
   useLayoutEffect(() => {
     if (libraryView === "tabletop") {
@@ -1227,6 +1317,7 @@ function RomLibraryDrawer({
       id="library-drawer"
       className={`control-deck library-deck ${libraryView === "tabletop" ? "tabletop-mode" : ""} ${open ? "open" : ""}`}
       aria-hidden={!open}
+      aria-busy={interactionLocked}
       inert={!open}
     >
       <div className="drawer-heading library-drawer-heading">
@@ -1373,6 +1464,7 @@ function RomLibraryDrawer({
                 confirmName={rom.title}
                 onConfirm={() => loadLibraryRom(rom)}
                 requiresHold={cartridgePresent}
+                disabled={interactionLocked}
                 style={{
                   "--library-index": index,
                   "--cart-tilt": `${[-2.4, 1.7, -0.8, 2.2, -1.5][index % 5]}deg`,
@@ -1393,61 +1485,101 @@ function RomLibraryDrawer({
             ))}
           </div>
         )}
-        {libraryReady && libraryView === "detail" && visibleRoms.map((rom, index) => (
-          <article
-            className={`library-card ${activeLibraryId === rom.id ? "is-active" : ""} ${deletingLibraryId === rom.id ? "is-deleting" : ""}`}
-            data-library-id={rom.id}
-            key={`${libraryView}:${libraryFilter}:${rom.id}`}
-            style={{ "--library-index": index }}
-          >
-            <CartridgeGraphic
-              artwork={rom.artwork}
-              cartridgeKind={rom.system === "gbc" ? "gbc" : "gb"}
-              className="library-cartridge-graphic"
-            />
-            <div className="library-card-copy">
-              <div className="library-title-row">
-                <OverflowTitle as="h3">{rom.title}</OverflowTitle>
-                <span className={`library-system-tag system-${rom.system === "gbc" ? "gbc" : "dmg"}`}>
-                  {rom.system === "gbc" ? "GBC" : "DMG"}
-                </span>
+        {libraryReady && libraryView === "detail" && visibleRoms.map((rom, index) => {
+          const saveMeta = visibleSaveMeta.get(rom.id) ?? {
+            battery: false,
+            batteryStored: false,
+            stateSlots: [false, false, false],
+          };
+          const usedStateCount = saveMeta.stateSlots.filter(Boolean).length;
+          return (
+            <article
+              className={`library-card ${activeLibraryId === rom.id ? "is-active" : ""} ${deletingLibraryId === rom.id ? "is-deleting" : ""}`}
+              data-library-id={rom.id}
+              key={`${libraryView}:${libraryFilter}:${rom.id}`}
+              style={{ "--library-index": index }}
+            >
+              <CartridgeGraphic
+                artwork={rom.artwork}
+                cartridgeKind={rom.system === "gbc" ? "gbc" : "gb"}
+                className="library-cartridge-graphic"
+              />
+              <div className="library-card-copy">
+                <div className="library-title-row">
+                  <OverflowTitle as="h3">{rom.title}</OverflowTitle>
+                  <span className={`library-system-tag system-${rom.system === "gbc" ? "gbc" : "dmg"}`}>
+                    {rom.system === "gbc" ? "GBC" : "DMG"}
+                  </span>
+                </div>
+                <p title={rom.fileName}>{rom.fileName}</p>
+                <dl>
+                  <div>
+                    <dt>ROM</dt>
+                    <dd>{formatBytes(rom.romSize || rom.rom?.byteLength)}</dd>
+                  </div>
+                  <div>
+                    <dt>LAST PLAYED</dt>
+                    <dd>{formatLibraryDate(rom.lastPlayedAt)}</dd>
+                  </div>
+                  {saveMeta.battery && (
+                    <div className="library-battery-stat">
+                      <dt>SAVE BATTERY</dt>
+                      <dd className={saveMeta.batteryStored ? "has-data" : ""}>
+                        <FloppyIcon hasData={saveMeta.batteryStored} />
+                        <span>{saveMeta.batteryStored ? "SAVED" : "EMPTY"}</span>
+                      </dd>
+                    </div>
+                  )}
+                  <div className="library-state-stat">
+                    <dt>SAVE STATES</dt>
+                    <dd
+                      className="library-state-slots"
+                      role="img"
+                      aria-label={`${usedStateCount} of 3 save-state slots used`}
+                    >
+                      {saveMeta.stateSlots.map((used, slot) => (
+                        <i
+                          className={used ? "used" : ""}
+                          key={slot}
+                          title={`Slot ${slot + 1}: ${used ? "used" : "empty"}`}
+                        />
+                      ))}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="library-card-actions">
+                  <HoldToLoadButton
+                    confirmName={rom.title}
+                    onConfirm={() => loadLibraryRom(rom)}
+                    requiresHold={cartridgePresent}
+                    disabled={interactionLocked}
+                  >
+                    {activeLibraryId === rom.id ? "REPLAY" : "PLAY"}
+                  </HoldToLoadButton>
+                  <button
+                    className={
+                      removingLibraryId === rom.id || deletingLibraryId === rom.id
+                        ? "confirming"
+                        : ""
+                    }
+                    type="button"
+                    onClick={() => onRemove(rom.id)}
+                    disabled={rom.builtIn || deletingLibraryId === rom.id || interactionLocked}
+                    title={rom.builtIn ? "Included with this private GAMEBOY LAB build" : undefined}
+                  >
+                    {rom.builtIn
+                      ? "BUILT IN"
+                      : deletingLibraryId === rom.id
+                        ? "REMOVING…"
+                      : removingLibraryId === rom.id
+                        ? "CONFIRM REMOVE"
+                        : "REMOVE"}
+                  </button>
+                </div>
               </div>
-              <p title={rom.fileName}>{rom.fileName}</p>
-              <dl>
-                <div><dt>ROM</dt><dd>{formatBytes(rom.romSize || rom.rom?.byteLength)}</dd></div>
-                <div><dt>LAST PLAYED</dt><dd>{formatLibraryDate(rom.lastPlayedAt)}</dd></div>
-              </dl>
-              <div className="library-card-actions">
-                <HoldToLoadButton
-                  confirmName={rom.title}
-                  onConfirm={() => loadLibraryRom(rom)}
-                  requiresHold={cartridgePresent}
-                >
-                  {activeLibraryId === rom.id ? "REPLAY" : "PLAY"}
-                </HoldToLoadButton>
-                <button
-                  className={
-                    removingLibraryId === rom.id || deletingLibraryId === rom.id
-                      ? "confirming"
-                      : ""
-                  }
-                  type="button"
-                  onClick={() => onRemove(rom.id)}
-                  disabled={rom.builtIn || deletingLibraryId === rom.id}
-                  title={rom.builtIn ? "Included with this private GAMEBOY LAB build" : undefined}
-                >
-                  {rom.builtIn
-                    ? "BUILT IN"
-                    : deletingLibraryId === rom.id
-                      ? "REMOVING…"
-                    : removingLibraryId === rom.id
-                      ? "CONFIRM REMOVE"
-                      : "REMOVE"}
-                </button>
-              </div>
-            </div>
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </div>
 
       {libraryView === "detail" && (
@@ -1822,8 +1954,13 @@ export default function Emulator() {
   const scaleToastTimerRef = useRef(0);
   const saveTooltipTimerRef = useRef(0);
   const saveTooltipFadeTimerRef = useRef(0);
+  const suppressSaveTooltipRef = useRef(false);
   const cartridgeAnimationTimerRef = useRef(0);
   const cartridgeAnimationRunRef = useRef(0);
+  const cartridgeSwitchRunRef = useRef(0);
+  const cartridgeSwitchingRef = useRef(false);
+  const cartridgeStartingRef = useRef(false);
+  const pauseOnStartupRef = useRef(false);
   const transitionFrameTimerRef = useRef(0);
   const viewTransitionTimerRef = useRef(0);
   const viewTransitionCleanupFrameRef = useRef(0);
@@ -1922,6 +2059,8 @@ export default function Emulator() {
   const [activeLibraryId, setActiveLibraryId] = useState("");
   const [cartridgePresent, setCartridgePresent] = useState(false);
   const [cartridgeInserting, setCartridgeInserting] = useState(false);
+  const [cartridgeSwitching, setCartridgeSwitching] = useState(false);
+  const [cartridgeStarting, setCartridgeStarting] = useState(false);
   const [cartridgeName, setCartridgeName] = useState("GAME CARTRIDGE");
   const [cartridgeKind, setCartridgeKind] = useState("gb");
   const [cartridgeArtwork, setCartridgeArtwork] = useState("");
@@ -1929,8 +2068,10 @@ export default function Emulator() {
   const [showSaveTooltip, setShowSaveTooltip] = useState(false);
   const [saveTooltipFading, setSaveTooltipFading] = useState(false);
   const [cartridgePreflight, setCartridgePreflight] = useState(false);
+  const cartridgeBusy = cartridgeSwitching || cartridgeStarting;
   const presentationAnimationLocked = Boolean(
     viewModeTransition
+    || cartridgeSwitching
     || cartridgePreflight
     || (cartridgeInserting && cartridgeAnimationEnabled)
     || showSaveTooltip
@@ -1941,6 +2082,7 @@ export default function Emulator() {
   const [consoleOffsetY, setConsoleOffsetY] = useState(0);
   const [scaleToast, setScaleToast] = useState("");
   const [saveSlots, setSaveSlots] = useState([null, null, null]);
+  const [saveDataRevision, setSaveDataRevision] = useState(0);
   const [saveStatus, setSaveStatus] = useState("NO CARTRIDGE");
   const [backupStatus, setBackupStatus] = useState("READY");
   const [confirmingSlot, setConfirmingSlot] = useState(null);
@@ -1957,11 +2099,15 @@ export default function Emulator() {
     try {
       const storedRecords = await listLibraryRoms();
       const refreshedStoredRecords = await Promise.all(storedRecords.map(async (record) => {
-        if (record.artworkSource !== "generated") return record;
+        const withCapabilities = {
+          ...record,
+          battery: libraryRecordHasBattery(record),
+        };
+        if (record.artworkSource !== "generated") return withCapabilities;
         const seed = String(record.id || "").split(":").at(-1) || record.title;
         const artwork = createFallbackArtwork(record.title, record.system, seed);
-        if (artwork === record.artwork) return record;
-        const refreshed = { ...record, artwork };
+        if (artwork === record.artwork) return withCapabilities;
+        const refreshed = { ...withCapabilities, artwork };
         try {
           await putLibraryRom(refreshed);
         } catch {
@@ -2024,6 +2170,11 @@ export default function Emulator() {
 
   useEffect(() => () => {
     cartridgeAnimationRunRef.current += 1;
+    cartridgeSwitchRunRef.current += 1;
+    cartridgeSwitchingRef.current = false;
+    cartridgeStartingRef.current = false;
+    pauseOnStartupRef.current = false;
+    suppressSaveTooltipRef.current = false;
     catalogueRunRef.current += 1;
     window.clearTimeout(scaleToastTimerRef.current);
     window.clearTimeout(saveTooltipTimerRef.current);
@@ -2192,65 +2343,105 @@ export default function Emulator() {
     return true;
   }, []);
 
-  const openOptions = useCallback(() => {
-    if (pauseOnMenu) pauseGame("menu");
-    setEmulationDrawerOpen(false);
-    setSaveDrawerOpen(false);
-    setLibraryDrawerOpen(false);
-    setDrawerOpen(true);
-  }, [pauseGame, pauseOnMenu]);
-
-  const closeOptions = useCallback(() => {
-    setDrawerOpen(false);
-    if (pauseReasonRef.current === "menu") resumeGame("menu");
-  }, [resumeGame]);
-
-  const openEmulationSettings = useCallback(() => {
-    if (pauseOnMenu) pauseGame("menu");
-    setDrawerOpen(false);
-    setSaveDrawerOpen(false);
-    setLibraryDrawerOpen(false);
-    setEmulationDrawerOpen(true);
-  }, [pauseGame, pauseOnMenu]);
-
-  const closeEmulationSettings = useCallback(() => {
-    setEmulationDrawerOpen(false);
-    if (pauseReasonRef.current === "menu") resumeGame("menu");
-  }, [resumeGame]);
-
-  const openSaveDrawer = useCallback(() => {
-    if (!romRef.current) return;
+  const pauseForDrawer = useCallback(() => {
     window.clearTimeout(saveTooltipTimerRef.current);
     window.clearTimeout(saveTooltipFadeTimerRef.current);
     setShowSaveTooltip(false);
     setSaveTooltipFading(false);
-    if (pauseOnMenu) pauseGame("menu");
+    const startupBusy = (
+      cartridgeSwitchingRef.current
+      || cartridgeStartingRef.current
+    );
+    if (startupBusy) suppressSaveTooltipRef.current = true;
+    if (!pauseOnMenu) return;
+    if (startupBusy) {
+      pauseOnStartupRef.current = true;
+      return;
+    }
+    pauseGame("menu");
+  }, [pauseGame, pauseOnMenu]);
+
+  const releaseDrawerPause = useCallback(() => {
+    pauseOnStartupRef.current = false;
+    if (cartridgeSwitchingRef.current || cartridgeStartingRef.current) {
+      suppressSaveTooltipRef.current = false;
+    }
+    if (pauseReasonRef.current === "menu") resumeGame("menu");
+  }, [resumeGame]);
+
+  const finishCartridgeStartup = useCallback(() => {
+    if (!cartridgeStartingRef.current) return;
+    cartridgeStartingRef.current = false;
+    suppressSaveTooltipRef.current = false;
+    setCartridgeStarting(false);
+    if (!pauseOnStartupRef.current) return;
+    pauseOnStartupRef.current = false;
+    pauseGame("menu");
+  }, [pauseGame]);
+
+  const openOptions = useCallback(() => {
+    pauseForDrawer();
+    setEmulationDrawerOpen(false);
+    setSaveDrawerOpen(false);
+    setLibraryDrawerOpen(false);
+    setDrawerOpen(true);
+  }, [pauseForDrawer]);
+
+  const closeOptions = useCallback(() => {
+    setDrawerOpen(false);
+    releaseDrawerPause();
+  }, [releaseDrawerPause]);
+
+  const openEmulationSettings = useCallback(() => {
+    pauseForDrawer();
+    setDrawerOpen(false);
+    setSaveDrawerOpen(false);
+    setLibraryDrawerOpen(false);
+    setEmulationDrawerOpen(true);
+  }, [pauseForDrawer]);
+
+  const closeEmulationSettings = useCallback(() => {
+    setEmulationDrawerOpen(false);
+    releaseDrawerPause();
+  }, [releaseDrawerPause]);
+
+  const openSaveDrawer = useCallback(() => {
+    if (
+      !romRef.current
+      || cartridgeSwitchingRef.current
+      || cartridgeStartingRef.current
+    ) return;
+    window.clearTimeout(saveTooltipTimerRef.current);
+    window.clearTimeout(saveTooltipFadeTimerRef.current);
+    setShowSaveTooltip(false);
+    setSaveTooltipFading(false);
+    pauseForDrawer();
     setDrawerOpen(false);
     setEmulationDrawerOpen(false);
     setLibraryDrawerOpen(false);
     setSaveDrawerOpen(true);
-  }, [pauseGame, pauseOnMenu]);
+  }, [pauseForDrawer]);
 
   const closeSaveDrawer = useCallback(() => {
     setSaveDrawerOpen(false);
-    if (pauseReasonRef.current === "menu") resumeGame("menu");
-  }, [resumeGame]);
+    releaseDrawerPause();
+  }, [releaseDrawerPause]);
 
   const openLibraryDrawer = useCallback(() => {
     dismissLibraryDiscovery();
-    if (pauseOnMenu) pauseGame("menu");
+    pauseForDrawer();
     setDrawerOpen(false);
     setEmulationDrawerOpen(false);
     setSaveDrawerOpen(false);
     setRemovingLibraryId(null);
     setLibraryDrawerOpen(true);
-  }, [dismissLibraryDiscovery, pauseGame, pauseOnMenu]);
+  }, [dismissLibraryDiscovery, pauseForDrawer]);
 
   const closeLibraryDrawer = useCallback(() => {
     setLibraryDrawerOpen(false);
     setRemovingLibraryId(null);
-    if (pauseReasonRef.current === "menu") resumeGame("menu");
-  }, [resumeGame]);
+    releaseDrawerPause();
+  }, [releaseDrawerPause]);
 
   const closeDrawers = useCallback(() => {
     setDrawerOpen(false);
@@ -2258,15 +2449,24 @@ export default function Emulator() {
     setSaveDrawerOpen(false);
     setLibraryDrawerOpen(false);
     setRemovingLibraryId(null);
-    if (pauseReasonRef.current === "menu") resumeGame("menu");
-  }, [resumeGame]);
+    releaseDrawerPause();
+  }, [releaseDrawerPause]);
 
   const togglePauseOnMenu = useCallback(() => {
     const next = !pauseOnMenu;
     setPauseOnMenu(next);
     if (!anyDrawerOpen) return;
-    if (next) pauseGame("menu");
-    else if (pauseReasonRef.current === "menu") resumeGame("menu");
+    if (next) {
+      if (cartridgeSwitchingRef.current || cartridgeStartingRef.current) {
+        pauseOnStartupRef.current = true;
+      } else {
+        pauseGame("menu");
+      }
+    }
+    else {
+      pauseOnStartupRef.current = false;
+      if (pauseReasonRef.current === "menu") resumeGame("menu");
+    }
   }, [anyDrawerOpen, pauseGame, pauseOnMenu, resumeGame]);
 
   const saveBattery = useCallback(() => {
@@ -2274,13 +2474,16 @@ export default function Emulator() {
     const battery = emulator.exportBatteryState();
     if (!battery || !romKeyRef.current) return;
     try {
-      localStorage.setItem(`gbc-lab-save:${romKeyRef.current}`, JSON.stringify({
+      const storageKey = `gbc-lab-save:${romKeyRef.current}`;
+      const hadStoredSave = localStorage.getItem(storageKey) !== null;
+      localStorage.setItem(storageKey, JSON.stringify({
         version: 2,
         ram: bytesToBase64(battery.ram),
         rtc: battery.rtc,
       }));
       emulator.markBatterySaved();
       setSaveStatus("AUTO-SAVED");
+      if (!hadStoredSave) setSaveDataRevision((value) => value + 1);
     } catch {
       // A full storage quota must never interrupt emulation.
       setSaveStatus("STORAGE FULL");
@@ -2509,15 +2712,60 @@ export default function Emulator() {
     });
   }, []);
 
+  const clearDisplayTransition = useCallback(() => {
+    window.clearTimeout(transitionFrameTimerRef.current);
+    transitionFrameTimerRef.current = 0;
+    const transition = transitionCanvasRef.current;
+    if (!transition) return;
+    transition.classList.remove("is-active", "is-fading");
+    const context = transition.getContext("2d");
+    context?.clearRect(0, 0, transition.width, transition.height);
+  }, []);
+
   const loadFile = useCallback(async (file, libraryEntry = null) => {
-    if (!file) return;
+    if (!file || cartridgeSwitchingRef.current) return;
     const lower = file.name.toLowerCase();
     if (!lower.endsWith(".gb") && !lower.endsWith(".gbc")) {
       setMessage("That is not a .gb or .gbc cartridge image.");
       return;
     }
+    const switchRun = cartridgeSwitchRunRef.current + 1;
+    cartridgeSwitchRunRef.current = switchRun;
+    const switchIsCurrent = () => cartridgeSwitchRunRef.current === switchRun;
+    const previousVisual = {
+      artwork: cartridgeArtwork,
+      kind: cartridgeKind,
+      name: cartridgeName,
+      present: cartridgePresent,
+    };
+    const previousStatus = status;
+    const hadRunningCartridge = Boolean(runningRef.current && romRef.current);
+    const powerDownStarted = window.performance.now();
+
+    // One state now owns the complete physical exchange. It freezes the old
+    // core, starts the LCD fade and powers both shell LEDs down before any
+    // asynchronous file, artwork, geometry or storage work can begin.
+    cartridgeSwitchingRef.current = true;
+    cartridgeStartingRef.current = true;
+    setCartridgeSwitching(true);
+    setCartridgeStarting(true);
+    setStatus("Changing cartridge");
+    saveBattery();
+    flushAudio();
+    closeDrawers();
+    clearDisplayTransition();
+    cartridgeAnimationRunRef.current += 1;
+    window.clearTimeout(cartridgeAnimationTimerRef.current);
+    window.clearTimeout(saveTooltipTimerRef.current);
+    window.clearTimeout(saveTooltipFadeTimerRef.current);
+    setShowSaveTooltip(false);
+    setSaveTooltipFading(false);
+    setCartridgePreflight(false);
+    setCartridgeInserting(false);
+
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!switchIsCurrent()) return;
       const hash = hashBytes(bytes);
       const key = `${bytes.length}:${hash}`;
       const libraryTitle = readRomTitle(bytes);
@@ -2531,15 +2779,7 @@ export default function Emulator() {
           // Library availability must never prevent a cartridge from loading.
         }
       }
-
-      closeDrawers();
-      cartridgeAnimationRunRef.current += 1;
-      window.clearTimeout(cartridgeAnimationTimerRef.current);
-      window.clearTimeout(saveTooltipTimerRef.current);
-      window.clearTimeout(saveTooltipFadeTimerRef.current);
-      setShowSaveTooltip(false);
-      setSaveTooltipFading(false);
-      setCartridgePreflight(false);
+      if (!switchIsCurrent()) return;
       setStatus("Cataloguing cartridge");
       setMessage(cachedEntry?.artwork
         ? "Opening cartridge from the local library."
@@ -2561,6 +2801,17 @@ export default function Emulator() {
           seed: hash,
         });
       }
+      if (!switchIsCurrent()) return;
+
+      const remainingPowerFade = Math.max(
+        0,
+        CARTRIDGE_POWER_FADE_DURATION
+          - (window.performance.now() - powerDownStarted),
+      );
+      if (remainingPowerFade > 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, remainingPowerFade));
+      }
+      if (!switchIsCurrent()) return;
 
       setCartridgeName(
         (cachedEntry?.title || safeFileStem(file.name).replace(/-/g, " ")).toUpperCase(),
@@ -2574,41 +2825,48 @@ export default function Emulator() {
         // the shared rig completes its single duck before the cartridge moves.
         setCartridgePreflight(true);
         await afterNextPaint();
+        if (!switchIsCurrent()) return;
         await waitForVisualStability(deviceRigRef.current);
+        if (!switchIsCurrent()) return;
         setCartridgeInserting(true);
         await new Promise((resolve) => window.setTimeout(resolve, 560));
-        setSaveTooltipFading(false);
-        setShowSaveTooltip(true);
+        if (!switchIsCurrent()) return;
         setCartridgePreflight(false);
         setCartridgeInserting(false);
       } else {
         setCartridgeInserting(false);
+      }
+
+      const shouldShowSaveTooltip = !suppressSaveTooltipRef.current;
+      suppressSaveTooltipRef.current = false;
+      if (shouldShowSaveTooltip) {
         setSaveTooltipFading(false);
         setShowSaveTooltip(true);
+        saveTooltipTimerRef.current = window.setTimeout(
+          () => {
+            setShowSaveTooltip(false);
+            setSaveTooltipFading(true);
+            window.clearTimeout(saveTooltipFadeTimerRef.current);
+            saveTooltipFadeTimerRef.current = window.setTimeout(
+              () => setSaveTooltipFading(false),
+              SAVE_TOOLTIP_FADE_DURATION,
+            );
+          },
+          SAVE_TOOLTIP_DURATION,
+        );
+      } else {
+        setShowSaveTooltip(false);
+        setSaveTooltipFading(false);
       }
-      saveTooltipTimerRef.current = window.setTimeout(
-        () => {
-          setShowSaveTooltip(false);
-          setSaveTooltipFading(true);
-          window.clearTimeout(saveTooltipFadeTimerRef.current);
-          saveTooltipFadeTimerRef.current = window.setTimeout(
-            () => setSaveTooltipFading(false),
-            SAVE_TOOLTIP_FADE_DURATION,
-          );
-        },
-        SAVE_TOOLTIP_DURATION,
-      );
 
       const legacyKey = `${file.name}:${bytes.length}:${hash}`;
       const battery = readStoredBattery(key) ?? readStoredBattery(legacyKey);
-      saveBattery();
       const emulator = createEmulator(
         model,
         compatibilityPalette,
         audioRef.current.context?.sampleRate ?? 48000,
       );
       const header = emulator.loadROM(bytes, battery);
-      captureDisplayTransition();
       pendingPresentationRef.current = true;
       pendingPresentationFramesRef.current = 0;
       emulatorRef.current = emulator;
@@ -2622,10 +2880,29 @@ export default function Emulator() {
       });
       setSaveStatus(header.battery ? (battery ? "RESTORED" : "READY") : "NOT SUPPORTED");
       refreshSaveSlots(key);
+
+      // Replace every visible pixel while the power cover is still opaque.
+      // Validate only after this clear so a rejected cartridge can never
+      // uncover stale pixels from the previously inserted game.
+      const sourceContext = sourceCanvasRef.current?.getContext("2d", { alpha: false });
+      if (sourceContext) {
+        drawBlankScreen(sourceContext, model);
+        lcdRendererRef.current?.uploadFrame(
+          sourceContext.getImageData(0, 0, GAMEBOY_WIDTH, GAMEBOY_HEIGHT).data,
+          { resetHistory: true },
+        );
+      }
+      clearDisplayTransition();
+
       if ((!header.logoValid || !header.checksumValid) && !emulator.bootEnabled) {
         setStatus("Header check failed");
         runningRef.current = false;
         setRunning(false);
+        cartridgeSwitchingRef.current = false;
+        cartridgeStartingRef.current = false;
+        pauseOnStartupRef.current = false;
+        setCartridgeSwitching(false);
+        setCartridgeStarting(false);
         setMessage("Hardware lockout: cartridge logo or header checksum is invalid.");
         return;
       }
@@ -2639,6 +2916,7 @@ export default function Emulator() {
         cgbOnly: Boolean(header.cgbOnly),
         cartridgeKind: nextCartridgeKind,
         mapper: header.mapper,
+        battery: Boolean(header.battery),
         romSize: header.romSize || bytes.byteLength,
         rom: bytes,
         artwork: artworkResult.artwork,
@@ -2647,13 +2925,35 @@ export default function Emulator() {
         lastPlayedAt: now,
         builtIn: Boolean(cachedEntry?.builtIn),
       };
+
+      // The cover now reveals either the real BIOS framebuffer or the fallback
+      // startup, never the previous cartridge or a white canvas.
+      nativeBootRef.current = emulator.bootEnabled;
+      bootRef.current = emulator.bootEnabled
+        ? { active: false, start: 0 }
+        : { active: true, start: Date.now() };
+      runningRef.current = true;
+      setRunning(true);
+      resumeGame();
+      cartridgeSwitchingRef.current = false;
+      setCartridgeSwitching(false);
+      startAudio();
+      setStatus(emulator.bootEnabled ? `${modelLabel(model)} BIOS running` : `${modelLabel(model)} fallback startup`);
+      setMessage(
+        emulator.bootEnabled
+          ? `Executing the embedded production ${modelLabel(model)} BIOS.`
+          : battery
+            ? "Battery-backed save restored from this browser."
+            : "Cartridge verified. Running locally in your browser.",
+      );
+
       try {
         setActiveLibraryId(key);
         if (cachedEntry?.builtIn) {
           setLibraryRoms((records) => records
             .map((record) => (
               record.id === key
-                ? { ...record, lastPlayedAt: now }
+                ? { ...record, battery: Boolean(header.battery), lastPlayedAt: now }
                 : record
             ))
             .sort((left, right) => (
@@ -2670,51 +2970,62 @@ export default function Emulator() {
           ? `CARTRIDGE RUNNING · LIBRARY: ${error.message.toUpperCase()}`
           : "CARTRIDGE RUNNING · LIBRARY STORAGE UNAVAILABLE");
       }
-
-      startAudio();
-      nativeBootRef.current = emulator.bootEnabled;
-      bootRef.current = emulator.bootEnabled
-        ? { active: false, start: 0 }
-        : { active: true, start: Date.now() };
-      runningRef.current = true;
-      setRunning(true);
-      resumeGame();
-      setStatus(emulator.bootEnabled ? `${modelLabel(model)} BIOS running` : `${modelLabel(model)} fallback startup`);
-      setMessage(
-        emulator.bootEnabled
-          ? `Executing the embedded production ${modelLabel(model)} BIOS.`
-          : battery
-            ? "Battery-backed save restored from this browser."
-            : "Cartridge verified. Running locally in your browser.",
-      );
       return libraryRecord;
     } catch (error) {
+      if (!switchIsCurrent()) return;
+      const pauseRestoredGame = pauseOnStartupRef.current;
+      pauseOnStartupRef.current = false;
+      cartridgeSwitchingRef.current = false;
+      cartridgeStartingRef.current = false;
+      setCartridgeSwitching(false);
+      setCartridgeStarting(false);
       setCartridgePreflight(false);
       setCartridgeInserting(false);
+      setCartridgeArtwork(previousVisual.artwork);
+      setCartridgeKind(previousVisual.kind);
+      setCartridgeName(previousVisual.name);
+      setCartridgePresent(previousVisual.present);
       setMessage(error instanceof Error ? error.message : "Unable to read this cartridge.");
-      setStatus("Load error");
-      setRunning(false);
+      if (hadRunningCartridge) {
+        runningRef.current = true;
+        setRunning(true);
+        if (pauseRestoredGame) pauseGame("menu");
+        else resumeGame();
+        setStatus(previousStatus);
+      } else {
+        runningRef.current = false;
+        setRunning(false);
+        setStatus("Load error");
+      }
     }
   }, [
+    cartridgeArtwork,
     cartridgeAnimationEnabled,
-    captureDisplayTransition,
+    cartridgeKind,
+    cartridgeName,
+    cartridgePresent,
+    clearDisplayTransition,
     closeDrawers,
     compatibilityPalette,
-    consoleScale,
-    integerScaling,
-    manualScale,
+    flushAudio,
     model,
+    pauseGame,
     resumeGame,
     readStoredBattery,
     refreshLibrary,
     refreshSaveSlots,
     saveBattery,
     startAudio,
-    viewMode,
+    status,
   ]);
 
   const catalogueFile = useCallback(async (file) => {
-    if (!file || cataloguing) return;
+    if (
+      !file
+      || cataloguing
+      || cartridgeSwitchingRef.current
+      || cartridgeStartingRef.current
+    ) return;
     const lower = file.name.toLowerCase();
     if (!lower.endsWith(".gb") && !lower.endsWith(".gbc")) {
       setMessage("That is not a .gb or .gbc cartridge image.");
@@ -2840,6 +3151,7 @@ export default function Emulator() {
         cgbOnly: Boolean(header.cgbOnly),
         cartridgeKind: librarySystem,
         mapper: header.mapper,
+        battery: Boolean(header.battery),
         romSize: header.romSize || bytes.byteLength,
         rom: bytes,
         artwork: artworkResult.artwork,
@@ -2914,8 +3226,11 @@ export default function Emulator() {
   ]);
 
   const loadLibraryRom = useCallback((entry) => {
-    if (!entry?.rom && !entry?.romBase64) return;
-    startAudio();
+    if (
+      cartridgeSwitchingRef.current
+      || cartridgeStartingRef.current
+      || (!entry?.rom && !entry?.romBase64)
+    ) return;
     const fileName = entry.fileName
       || `${safeFileStem(entry.title || "game")}.${entry.system === "gbc" ? "gbc" : "gb"}`;
     const rom = entry.builtIn
@@ -2926,7 +3241,7 @@ export default function Emulator() {
       fileName,
       { type: "application/octet-stream" },
     ), entry);
-  }, [loadFile, startAudio]);
+  }, [loadFile]);
 
   const removeFromLibrary = useCallback(async (id) => {
     if (libraryRoms.find((record) => record.id === id)?.builtIn) return;
@@ -3003,6 +3318,8 @@ export default function Emulator() {
   const performModelSwitch = useCallback((nextModel) => {
     if (nextModel === model) return;
     const hasCartridge = Boolean(romRef.current);
+    cartridgeStartingRef.current = hasCartridge;
+    setCartridgeStarting(hasCartridge);
     const preservePause = pausedRef.current;
     const resumeAfterSwitch = pauseReasonRef.current === "safety";
     replayCartridgeInsertion();
@@ -3252,31 +3569,6 @@ export default function Emulator() {
     viewMode,
   ]);
 
-  const reset = useCallback(() => {
-    if (!romRef.current) return;
-    saveBattery();
-    captureDisplayTransition();
-    emulatorRef.current.reset();
-    pendingPresentationRef.current = true;
-    pendingPresentationFramesRef.current = 0;
-    correctedFrameRef.current = null;
-    nativeBootRef.current = emulatorRef.current.bootEnabled;
-    bootRef.current = emulatorRef.current.bootEnabled
-      ? { active: false, start: 0 }
-      : { active: true, start: Date.now() };
-    if (anyDrawerOpen && pauseOnMenu) pauseGame("menu");
-    else resumeGame();
-    setStatus(`${modelLabel(model)} cold boot`);
-  }, [
-    anyDrawerOpen,
-    captureDisplayTransition,
-    model,
-    pauseGame,
-    pauseOnMenu,
-    resumeGame,
-    saveBattery,
-  ]);
-
   const saveStateSlot = useCallback((slot) => {
     const snapshot = emulatorRef.current.exportState();
     if (!snapshot || !romKeyRef.current) return;
@@ -3291,6 +3583,7 @@ export default function Emulator() {
         state: encodeStateValue(snapshot),
       }));
       refreshSaveSlots();
+      setSaveDataRevision((value) => value + 1);
       setConfirmingSlot(null);
       setMessage(`Save state ${slot + 1} captured. In-game cartridge progress remains separate.`);
     } catch {
@@ -3355,6 +3648,7 @@ export default function Emulator() {
     try {
       localStorage.removeItem(`gbc-lab-state:${romKeyRef.current}:${slot}`);
       refreshSaveSlots();
+      setSaveDataRevision((value) => value + 1);
       setMessage(`Save state ${slot + 1} cleared. The cartridge save was not touched.`);
     } catch {
       setMessage("Unable to clear that save state.");
@@ -3434,6 +3728,7 @@ export default function Emulator() {
     try {
       const summary = replaceSaveArchive(localStorage, pendingRestore.archive);
       refreshSaveSlots();
+      setSaveDataRevision((value) => value + 1);
       if (romRef.current) {
         const displayTitle = titleRef.current;
         const currentModel = modelRef.current;
@@ -4269,12 +4564,27 @@ export default function Emulator() {
         return;
       }
 
+      if (cartridgeSwitchingRef.current) {
+        ownAnimation = requestAnimationFrame(frame);
+        animationRef.current = ownAnimation;
+        return;
+      }
+
+      if (!runningRef.current || pausedRef.current) {
+        ownAnimation = requestAnimationFrame(frame);
+        animationRef.current = ownAnimation;
+        return;
+      }
+
       if (bootRef.current.active) {
         const progress = (wallTime - bootRef.current.start) / 1850;
         drawBootScreen(context, modelRef.current, Math.min(1, progress), titleRef.current);
         if (!pendingPresentationRef.current || progress >= 0.02) {
           uploadSoftwareScreen(pendingPresentationRef.current);
-          if (pendingPresentationRef.current) releaseDisplayTransition();
+          if (pendingPresentationRef.current) {
+            releaseDisplayTransition();
+            finishCartridgeStartup();
+          }
           pendingPresentationRef.current = false;
           pendingPresentationFramesRef.current = 0;
         }
@@ -4284,11 +4594,6 @@ export default function Emulator() {
           lastAnimationRef.current = hostTime;
           frameAccumulatorRef.current = 0;
         }
-        ownAnimation = requestAnimationFrame(frame);
-        animationRef.current = ownAnimation;
-        return;
-      }
-      if (!runningRef.current || pausedRef.current) {
         ownAnimation = requestAnimationFrame(frame);
         animationRef.current = ownAnimation;
         return;
@@ -4313,6 +4618,30 @@ export default function Emulator() {
       }
       frameAccumulatorRef.current = Math.min(frameAccumulatorRef.current, frameDuration * 12);
       if (frames) {
+        // The new core has now executed its first complete frame. The LCD is
+        // already a model-correct blank substrate. If a drawer opened during
+        // insertion, show this safe BIOS frame first and then honour its queued
+        // pause without carrying startup audio into the later resume.
+        const pauseAfterStartupFrame = (
+          cartridgeStartingRef.current
+          && pauseOnStartupRef.current
+        );
+        if (pauseAfterStartupFrame) {
+          pendingPresentationRef.current = false;
+          pendingPresentationFramesRef.current = 0;
+          presentFrameRef.current?.({ resetHistory: true });
+          releaseDisplayTransition();
+        }
+        if (cartridgeStartingRef.current) {
+          finishCartridgeStartup();
+        }
+        if (pauseAfterStartupFrame) {
+          emulator.drainAudio();
+          lastPresentRef.current = hostTime;
+          ownAnimation = requestAnimationFrame(frame);
+          animationRef.current = ownAnimation;
+          return;
+        }
         const skipPreset = FRAME_SKIP_PRESETS[frameSkipRef.current] ?? FRAME_SKIP_PRESETS.off;
         let shouldPresent;
         if (skipPreset.frames === "auto") {
@@ -4403,7 +4732,12 @@ export default function Emulator() {
       if (window.__gbcLabLoopToken === pageLoopToken) window.__gbcLabLoopToken = null;
       cancelAnimationFrame(ownAnimation);
     };
-  }, [enqueueAudio, releaseDisplayTransition, uploadSoftwareScreen]);
+  }, [
+    enqueueAudio,
+    finishCartridgeStartup,
+    releaseDisplayTransition,
+    uploadSoftwareScreen,
+  ]);
 
   useEffect(() => {
     const save = () => saveBattery();
@@ -4498,7 +4832,8 @@ export default function Emulator() {
 
   return (
     <main
-      className={`app-shell theme-${resolvedTheme} ${viewMode === "screen" ? "screen-only" : ""} ${paused ? "is-paused" : ""} ${anyDrawerOpen ? "drawer-open" : ""} ${showTechnicalReadout ? "technical-open" : ""}`}
+      className={`app-shell theme-${resolvedTheme} ${viewMode === "screen" ? "screen-only" : ""} ${paused ? "is-paused" : ""} ${cartridgeSwitching ? "is-cartridge-switching" : ""} ${cartridgeStarting ? "is-cartridge-starting" : ""} ${anyDrawerOpen ? "drawer-open" : ""} ${showTechnicalReadout ? "technical-open" : ""}`}
+      aria-busy={cartridgeBusy}
       onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
       onDragOver={(event) => event.preventDefault()}
       onDragLeave={(event) => {
@@ -4520,8 +4855,14 @@ export default function Emulator() {
           </div>
         </div>
         <div className="system-status">
-          <span className={`status-light ${running && !paused ? "live" : ""}`} />
-          <span>{paused ? "PAUSED" : status.toUpperCase()}</span>
+          <span className={`status-light ${running && !paused && !cartridgeSwitching ? "live" : ""}`} />
+          <span>
+            {cartridgeSwitching
+              ? "CHANGING CARTRIDGE"
+              : cartridgeStarting
+                ? "STARTING GAME"
+              : paused ? "PAUSED" : status.toUpperCase()}
+          </span>
           <div className="topbar-drawer-triggers">
             <button
               className="options-trigger"
@@ -4560,6 +4901,7 @@ export default function Emulator() {
         className="visually-hidden"
         type="file"
         accept=".gb,.gbc,application/octet-stream"
+        disabled={cartridgeBusy}
         onChange={(event) => {
           catalogueFile(event.target.files?.[0]);
           event.target.value = "";
@@ -4576,7 +4918,7 @@ export default function Emulator() {
       <section className="workspace">
         <div
           ref={consoleWrapRef}
-          className={`console-wrap model-${model} ${integerScaling ? "integer-scale" : "flexible-scale"} ${viewModeTransition ? `view-${viewModeTransition}` : ""} ${dragging ? "is-dragging" : ""} ${cartridgePresent ? "has-cartridge" : ""} ${cartridgeHovered ? "cartridge-hovered" : ""} ${cartridgePreflight ? "cartridge-preflight" : ""} ${cartridgeInserting && cartridgeAnimationEnabled ? "cartridge-inserting" : ""} ${showSaveTooltip || cartridgePreflight ? "tooltip-visible" : ""}`}
+          className={`console-wrap model-${model} ${integerScaling ? "integer-scale" : "flexible-scale"} ${viewModeTransition ? `view-${viewModeTransition}` : ""} ${dragging ? "is-dragging" : ""} ${cartridgePresent ? "has-cartridge" : ""} ${cartridgeSwitching ? "cartridge-changing" : ""} ${cartridgeHovered ? "cartridge-hovered" : ""} ${cartridgePreflight ? "cartridge-preflight" : ""} ${cartridgeInserting && cartridgeAnimationEnabled ? "cartridge-inserting" : ""} ${showSaveTooltip || cartridgePreflight ? "tooltip-visible" : ""}`}
           onWheel={resizeWithWheel}
           style={{
             "--console-scale": consoleScale,
@@ -4602,7 +4944,8 @@ export default function Emulator() {
                 cartridgeArtwork={cartridgeArtwork}
                 cartridgeKind={cartridgeKind}
                 cartridgeName={cartridgeName}
-                inserting={cartridgeInserting || cartridgePreflight}
+                disabled={cartridgeBusy}
+                inserting={cartridgeSwitching || cartridgeInserting || cartridgePreflight}
                 onHoverChange={setCartridgeHovered}
                 onOpenSaves={openSaveDrawer}
                 showTooltip={showSaveTooltip}
@@ -4621,7 +4964,7 @@ export default function Emulator() {
                 </div>
               )}
               <div className="power-label">
-                <i className={running ? "on" : ""} />
+                <i className={running && !cartridgeSwitching ? "on" : ""} />
                 {model === "cgb" ? "POWER" : "BATTERY"}
               </div>
               <div
@@ -4654,6 +4997,10 @@ export default function Emulator() {
                     aria-hidden="true"
                   />
                   <span className="screen-glass" aria-hidden="true" />
+                  <span
+                    className={`cartridge-power-cover ${cartridgeSwitching ? "visible" : ""}`}
+                    aria-hidden="true"
+                  />
                   {paused && running && (
                     <div
                       className={`pause-overlay pause-${pauseReason ?? "manual"}`}
@@ -4757,6 +5104,7 @@ export default function Emulator() {
         <RomLibraryDrawer
           activeLibraryId={activeLibraryId}
           cartridgePresent={cartridgePresent}
+          interactionLocked={cartridgeBusy}
           deletingLibraryId={deletingLibraryId}
           libraryFilter={libraryFilter}
           libraryQuery={libraryQuery}
@@ -4778,6 +5126,7 @@ export default function Emulator() {
           onView={setLibraryView}
           open={libraryDrawerOpen}
           removingLibraryId={removingLibraryId}
+          saveDataRevision={saveDataRevision}
         />
 
         <aside
@@ -5077,7 +5426,7 @@ export default function Emulator() {
             </button>
           </section>
 
-          <section className="deck-section">
+          <section className="deck-section app-behavior-section">
             <div className="section-heading">
               <span>05</span>
               <div>
@@ -5130,7 +5479,7 @@ export default function Emulator() {
             </div>
             <div className="app-data-summary">
               <span>ALL SAVED GAMES</span>
-              <b>{backupStatus}</b>
+              <b className="app-data-status" key={backupStatus}>{backupStatus}</b>
               <p>
                 One portable file containing every battery save, RTC record, and emulator
                 save state. ROMs, artwork, and preferences stay separate.

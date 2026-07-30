@@ -100,6 +100,8 @@ function embeddedLibraryRoms() {
             cgbOnly: bytes[0x143] === 0xc0,
             cartridgeKind: cgb ? "gbc" : "gb",
             mapper: embeddedMapper(bytes[0x147]),
+            battery: [0x03, 0x06, 0x09, 0x0f, 0x10, 0x13, 0x1b, 0x1e]
+              .includes(bytes[0x147]),
             romSize: bytes.length,
             romBase64: bytes.toString("base64"),
             artwork: `data:image/png;base64,${artwork.toString("base64")}`,

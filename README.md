@@ -20,6 +20,8 @@ JavaScript. No third-party emulator core or WebAssembly binary is used.
 - Console and large screen-only presentation modes
 - Fractional scaling at 90% by default, with optional whole-device integer scaling
 - Clearly separated cartridge `.sav` files and three browser-local snapshot slots
+- Library cards show battery-save support, stored-save status, and all three
+  save-state slots without opening the save drawer
 - Browser-local battery RAM/RTC persistence with standard `.sav` import/export
 - One-file backups for every cached battery/RTC save and save-state slot, with
   validated, transactional restore and no ROM or preference replacement
@@ -33,6 +35,8 @@ JavaScript. No third-party emulator core or WebAssembly binary is used.
 - Reusable render buffers, precomputed GBC color conversion, variable PPU mode 3
   timing, DIV-driven APU sequencing, and GBC double-speed clock domains
 - Header/logo lockout checks and model-specific startup animation
+- Guarded physical cartridge swaps with neutral LCD fade, power-light sequencing,
+  and drawer pauses queued to the first safe BIOS frame
 - Embedded production DMG and GBC startup firmware
 - Every `.gb` and `.gbc` cartridge in `SELECT_ROMS/` embedded into the local
   library, with offline Libretro cover artwork, detail cards, and filterable

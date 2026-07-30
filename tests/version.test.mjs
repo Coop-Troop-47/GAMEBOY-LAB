@@ -17,14 +17,14 @@ test("release discovery returns only a newer standalone asset", async () => {
   const update = await findAvailableUpdate(async () => ({
     ok: true,
     json: async () => ({
-      version: "v1.3.0",
+      version: "v1.3.1",
       downloadUrl: "https://example.test/gbc-lab.html",
       notesUrl: "https://example.test/release",
       changes: ["Faster renderer", "", 42, "Clearer updates"],
     }),
   }));
   assert.deepEqual(update, {
-    version: "1.3.0",
+    version: "1.3.1",
     downloadUrl: "https://example.test/gbc-lab.html",
     notesUrl: "https://example.test/release",
     changes: ["Faster renderer", "Clearer updates"],
