@@ -282,17 +282,18 @@ input:focus-visible {
 .screen-frame {
   position: relative;
   container-type: inline-size;
+  isolation: isolate;
   left: 50%;
   width: 264px;
   aspect-ratio: auto;
   margin: 0;
-  overflow: hidden;
+  overflow: clip;
   border: 3px solid #121719;
+  outline: 5px solid #23262d;
+  outline-offset: 0;
   background: #cadc9f;
   transform: translateX(-50%);
-  box-shadow:
-    0 0 0 5px #23262d,
-    inset 0 0 22px rgba(23, 34, 33, 0.24);
+  box-shadow: inset 0 0 22px rgba(23, 34, 33, 0.24);
 }
 
 .screen-frame canvas.lcd-output {
@@ -301,6 +302,13 @@ input:focus-visible {
   height: auto;
   aspect-ratio: 160 / 144;
   image-rendering: auto;
+}
+
+.screen-frame canvas.lcd-output,
+.screen-frame canvas.frame-transition,
+.screen-frame .screen-glass,
+.screen-frame .pause-overlay {
+  clip-path: inset(0);
 }
 
 .screen-frame canvas.frame-source {
@@ -2431,13 +2439,11 @@ html[data-theme="dark"] body {
 }
 
 .cgb .screen-frame {
-  overflow: hidden;
   border-color: #0d0f13;
   border-radius: 2px;
+  outline-color: #101116;
   background: #0d0f13;
-  box-shadow:
-    0 0 0 5px #101116,
-    inset 0 0 0 1px #0d0f13;
+  box-shadow: inset 0 0 0 1px #0d0f13;
 }
 
 .cgb .screen-frame canvas.lcd-output,
@@ -4328,7 +4334,8 @@ html[data-theme="dark"] body {
   width: var(--screen-frame-width);
   border-width: 4px;
   border-radius: 3px;
-  box-shadow: 0 0 0 8px #23262d;
+  outline-width: 8px;
+  box-shadow: none;
   transition:
     width 180ms cubic-bezier(.2, .8, .2, 1);
 }
@@ -4430,38 +4437,35 @@ html[data-theme="dark"] body {
 
 .console-wrap.view-zoom-in .device-rig {
   animation: view-mode-zoom-in 340ms cubic-bezier(.16, .9, .24, 1) both;
+  transition: none;
 }
 
 .console-wrap.view-zoom-out .device-rig {
   animation: view-mode-zoom-out 340ms cubic-bezier(.16, .9, .24, 1) both;
+  transition: none;
+}
+
+.console-wrap.view-zoom-in .cartridge-visual-rig,
+.console-wrap.view-zoom-in .cartridge-hover-rig,
+.console-wrap.view-zoom-out .cartridge-visual-rig,
+.console-wrap.view-zoom-out .cartridge-hover-rig {
+  visibility: hidden;
 }
 
 @keyframes view-mode-zoom-in {
   from {
-    opacity: .38;
     scale: .78;
   }
-  62% {
-    opacity: 1;
-    scale: 1.025;
-  }
   to {
-    opacity: 1;
     scale: 1;
   }
 }
 
 @keyframes view-mode-zoom-out {
   from {
-    opacity: .48;
     scale: 1.14;
   }
-  68% {
-    opacity: 1;
-    scale: .985;
-  }
   to {
-    opacity: 1;
     scale: 1;
   }
 }

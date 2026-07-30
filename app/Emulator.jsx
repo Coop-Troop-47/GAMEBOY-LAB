@@ -3800,8 +3800,8 @@ export default function Emulator() {
           ? SCREEN_ONLY_CARTRIDGE_OVERHANG
           : 0;
         // Fit the full visible silhouette. The screen-frame box ends at its
-        // border, while the screen-only bezel is an 8 px outer ring drawn by
-        // box-shadow. Reserve that ring explicitly so 100% ends at the bezel's
+        // border, while the screen-only bezel is an 8 px outer outline. Reserve
+        // that ring explicitly so 100% ends at the bezel's
         // bottom edge rather than clipping it at the LCD or border edge.
         const verticalOutline = cartridgePresent
           ? SCREEN_ONLY_BEZEL_OUTLINE

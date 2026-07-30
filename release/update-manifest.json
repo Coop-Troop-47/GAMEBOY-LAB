@@ -1,9 +1,10 @@
 {
-  "version": "1.2.5",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.5/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.5",
+  "version": "1.2.6",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.2.6/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.2.6",
   "changes": [
-    "Switching between DMG and GBC while paused now clears to the selected hardware’s blank LCD substrate instead of showing a startup graphic.",
-    "The pause darkening layer now overscans beneath the LCD bezel to eliminate bright pixel gaps at fractional and Retina scales."
+    "DMG and GBC LCD, transition, glass, and pause layers now share a hard bezel clip at fractional and Retina scales.",
+    "The bezel ring now paints above composited shader surfaces, preventing LCD pixels and pause darkening from bleeding outside the thin black edge.",
+    "Console and screen-only changes now use a centered scale-only zoom; the cartridge disappears before the zoom and returns through the insertion animation."
   ]
 }
