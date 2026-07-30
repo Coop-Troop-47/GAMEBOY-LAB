@@ -2926,11 +2926,12 @@ export default function Emulator() {
 
   const performModelSwitch = useCallback((nextModel) => {
     if (nextModel === model) return;
+    const hasCartridge = Boolean(romRef.current);
     replayCartridgeInsertion();
     saveBattery();
     setModelState(nextModel);
     modelRef.current = nextModel;
-    setStatus(romRef.current ? "Restarting core" : "Awaiting cartridge");
+    setStatus(hasCartridge ? "Restarting core" : "Awaiting cartridge");
     setMessage(nextModel === "cgb"
       ? "GBC hardware selected. Color-capable cartridges use native color mode."
       : "DMG hardware selected. GBC-only cartridges are blocked like original hardware.");
@@ -2939,12 +2940,13 @@ export default function Emulator() {
       compatibilityPalette,
       audioRef.current.context?.sampleRate ?? 48000,
     );
-    captureDisplayTransition();
-    pendingPresentationRef.current = Boolean(romRef.current);
+    if (hasCartridge) captureDisplayTransition();
+    else releaseDisplayTransition();
+    pendingPresentationRef.current = hasCartridge;
     pendingPresentationFramesRef.current = 0;
     emulatorRef.current = emulator;
     correctedFrameRef.current = null;
-    if (romRef.current) {
+    if (hasCartridge) {
       const battery = readStoredBattery(romKeyRef.current);
       const header = emulator.loadROM(romRef.current, battery);
       setInfo({ ...header, title: titleRef.current || header.title });
@@ -2968,6 +2970,7 @@ export default function Emulator() {
     pauseGame,
     pauseOnMenu,
     readStoredBattery,
+    releaseDisplayTransition,
     replayCartridgeInsertion,
     resumeGame,
     saveBattery,

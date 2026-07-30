@@ -296,6 +296,16 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /replaceSaveArchive\(localStorage/);
   assert.match(source, /event\.returnValue = ""/);
   assert.match(source, /title=\{`Switch to \$\{modelLabel\(pendingModel\)\}\?`\}/);
+  const modelSwitchStart = source.indexOf("const performModelSwitch");
+  const modelSwitchEnd = source.indexOf("const switchModel", modelSwitchStart);
+  assert.ok(modelSwitchStart >= 0 && modelSwitchEnd > modelSwitchStart);
+  const modelSwitchSource = source.slice(modelSwitchStart, modelSwitchEnd);
+  assert.match(modelSwitchSource, /const hasCartridge = Boolean\(romRef\.current\)/);
+  assert.match(
+    modelSwitchSource,
+    /if \(hasCartridge\) captureDisplayTransition\(\);\s*else releaseDisplayTransition\(\)/,
+  );
+  assert.match(modelSwitchSource, /pendingPresentationRef\.current = hasCartridge/);
   assert.match(source, /function ReadoutMetric\(/);
   assert.match(css, /--metric-value-fit/);
   assert.match(source, /listLibraryRoms\(\)/);
