@@ -56,10 +56,6 @@ const SCREEN_ONLY_EDGE_GUARD = 1;
 const SAVE_TOOLTIP_DURATION = 1500;
 const SAVE_TOOLTIP_FADE_DURATION = 300;
 const TECHNICAL_READOUT_MEDIA = "(min-width: 1180px)";
-const SCREEN_FRAME_ANIMATED_STYLES = [
-  ["borderRadius", "border-radius"],
-];
-
 function BrandMark() {
   return (
     <svg
@@ -2031,7 +2027,6 @@ export default function Emulator() {
     viewTransitionRunRef.current += 1;
     viewTransitionAnimationRef.current?.cancel();
     viewTransitionPendingRef.current?.pauseAnimation?.cancel();
-    viewTransitionPendingRef.current?.bezelAnimation?.cancel();
     viewTransitionPendingRef.current?.shellAnimation?.cancel();
     viewTransitionPendingRef.current?.shellGhost?.remove();
     viewTransitionPendingRef.current = null;
@@ -3106,21 +3101,16 @@ export default function Emulator() {
     const animation = viewTransitionAnimationRef.current;
     viewTransitionAnimationRef.current = null;
     const frame = screenFrameRef.current;
-    // Pin the exact destination before cancelling the fill-forwards animations.
-    // React removes the transition class asynchronously; retaining these final
-    // values through that commit prevents the border width and radius from
-    // flashing back to either endpoint on the last animation frame.
-    if (frame && pending.targetStyle) {
+    // Pin the destination transform until React removes the transition class.
+    // Bezel proportions and corners are identical in both layouts, so the
+    // single FLIP transform is now the only visual geometry animation.
+    if (frame) {
       frame.style.transform = "translate3d(0, 0, 0) scale(1, 1)";
-      for (const [key, property] of SCREEN_FRAME_ANIMATED_STYLES) {
-        frame.style.setProperty(property, pending.targetStyle[key]);
-      }
       const pauseOverlay = frame.querySelector(".pause-overlay");
       if (pauseOverlay) pauseOverlay.style.transform = "scale(1)";
     }
     animation?.cancel();
     pending.pauseAnimation?.cancel();
-    pending.bezelAnimation?.cancel();
     pending.shellAnimation?.cancel();
     pending.shellGhost?.remove();
     if (frame) {
@@ -3137,9 +3127,6 @@ export default function Emulator() {
       ) return;
       frame.style.removeProperty("transform");
       frame.style.removeProperty("transform-origin");
-      for (const [, property] of SCREEN_FRAME_ANIMATED_STYLES) {
-        frame.style.removeProperty(property);
-      }
       frame.querySelector(".pause-overlay")?.style.removeProperty("transform");
       pending.sourceHandheld?.style.removeProperty("visibility");
       frame.style.removeProperty("visibility");
@@ -3167,21 +3154,8 @@ export default function Emulator() {
     viewTransitionAnimationRef.current?.cancel();
     viewTransitionAnimationRef.current = null;
     viewTransitionPendingRef.current?.pauseAnimation?.cancel();
-    viewTransitionPendingRef.current?.bezelAnimation?.cancel();
     viewTransitionPendingRef.current?.shellAnimation?.cancel();
     viewTransitionPendingRef.current?.shellGhost?.remove();
-    const computedFrameStyle = window.getComputedStyle(sourceFrame);
-    const sourceStyle = Object.fromEntries(
-      SCREEN_FRAME_ANIMATED_STYLES.map(([key]) => [key, computedFrameStyle[key]]),
-    );
-    // Hold the exact source bezel while React commits the destination view and
-    // its size settles. Without this freeze, one intermediate paint can expose
-    // the destination radius before the FLIP begins.
-    for (const [key, property] of SCREEN_FRAME_ANIMATED_STYLES) {
-      sourceFrame.style.setProperty(property, sourceStyle[key]);
-    }
-    const sourceLayoutWidth = Math.max(1, sourceFrame.offsetWidth);
-    const sourceLayoutHeight = Math.max(1, sourceFrame.offsetHeight);
     let shellGhost = null;
     let shellAnimation = null;
     if (nextViewMode === "screen") {
@@ -3244,18 +3218,13 @@ export default function Emulator() {
         width: sourceBounds.width,
         height: sourceBounds.height,
       },
-      sourceStyle,
-      targetStyle: null,
       sourceHandheld: nextViewMode === "screen"
         ? sourceFrame.closest(".handheld")
         : null,
-      sourceAncestorScaleX: sourceBounds.width / sourceLayoutWidth,
-      sourceAncestorScaleY: sourceBounds.height / sourceLayoutHeight,
       sourcePauseWidth: sourceFrame
         .querySelector(".pause-symbol")
         ?.getBoundingClientRect().width ?? 0,
       pauseAnimation: null,
-      bezelAnimation: null,
       shellGhost,
       shellAnimation,
     };
@@ -4141,13 +4110,6 @@ export default function Emulator() {
       completeViewModeTransition(pending.run);
       return;
     }
-    for (const [, property] of SCREEN_FRAME_ANIMATED_STYLES) {
-      frame.style.removeProperty(property);
-    }
-    const targetStyle = window.getComputedStyle(frame);
-    pending.targetStyle = Object.fromEntries(
-      SCREEN_FRAME_ANIMATED_STYLES.map(([key]) => [key, targetStyle[key]]),
-    );
     const pauseOverlay = frame.querySelector(".pause-overlay");
     const targetPauseWidth = frame
       .querySelector(".pause-symbol")
@@ -4160,28 +4122,6 @@ export default function Emulator() {
     const localDeltaY = deltaY / Math.max(0.001, targetAncestorScaleY);
     const scaleX = pending.sourceBounds.width / targetBounds.width;
     const scaleY = pending.sourceBounds.height / targetBounds.height;
-    const visualScale = Math.max(0.001, Math.sqrt(scaleX * scaleY));
-    const sourceAncestorScale = Math.max(
-      0.001,
-      Math.sqrt(pending.sourceAncestorScaleX * pending.sourceAncestorScaleY),
-    );
-    const targetAncestorScale = Math.max(
-      0.001,
-      Math.sqrt(targetAncestorScaleX * targetAncestorScaleY),
-    );
-    const startLengthCompensation = (
-      sourceAncestorScale / (targetAncestorScale * visualScale)
-    );
-    const compensateLength = (value) => {
-      const pixels = Number.parseFloat(value);
-      return Number.isFinite(pixels)
-        ? `${pixels * startLengthCompensation}px`
-        : value;
-    };
-    const sourceVisualStyle = {
-      ...pending.sourceStyle,
-      borderRadius: compensateLength(pending.sourceStyle.borderRadius),
-    };
     const inverseTransform = (
       `translate3d(${localDeltaX}px, ${localDeltaY}px, 0) `
       + `scale(${scaleX}, ${scaleY})`
@@ -4214,19 +4154,6 @@ export default function Emulator() {
       },
     );
     viewTransitionAnimationRef.current = animation;
-    pending.bezelAnimation = frame.animate(
-      [
-        sourceVisualStyle,
-        {
-          ...pending.targetStyle,
-        },
-      ],
-      {
-        duration,
-        easing: "linear",
-        fill: "forwards",
-      },
-    );
     if (pauseOverlay && pending.sourcePauseWidth > 0 && targetPauseWidth > 0) {
       const pauseCorrection = Math.max(
         0.25,
@@ -4247,7 +4174,6 @@ export default function Emulator() {
 
     const transitionFinishes = [
       animation.finished,
-      pending.bezelAnimation.finished,
       pending.pauseAnimation?.finished,
       pending.shellAnimation?.finished,
     ].filter(Boolean);
@@ -4684,39 +4610,41 @@ export default function Emulator() {
                   ? undefined
                   : { width: `${screenGeometry.frameWidth}px` }}
               >
-                <canvas
-                  ref={sourceCanvasRef}
-                  className="frame-source"
-                  width={GAMEBOY_WIDTH}
-                  height={GAMEBOY_HEIGHT}
-                  aria-hidden="true"
-                />
-                <canvas
-                  ref={canvasRef}
-                  className="lcd-output"
-                  width={GAMEBOY_WIDTH}
-                  height={GAMEBOY_HEIGHT}
-                  aria-label={`${modelLabel(model)} emulation display`}
-                />
-                <canvas
-                  ref={transitionCanvasRef}
-                  className="frame-transition"
-                  width={GAMEBOY_WIDTH}
-                  height={GAMEBOY_HEIGHT}
-                  aria-hidden="true"
-                />
-                <span className="screen-glass" aria-hidden="true" />
-                {paused && running && (
-                  <div
-                    className={`pause-overlay pause-${pauseReason ?? "manual"}`}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <span className="pause-symbol" aria-hidden="true"><i /><i /></span>
-                    <strong>{pauseReason === "menu" ? "MENU PAUSE" : "EMULATION PAUSED"}</strong>
-                    <small>{pauseReason === "menu" ? "CLOSE DRAWER TO RESUME" : "CORE TIMING FROZEN"}</small>
-                  </div>
-                )}
+                <div className="screen-inner">
+                  <canvas
+                    ref={sourceCanvasRef}
+                    className="frame-source"
+                    width={GAMEBOY_WIDTH}
+                    height={GAMEBOY_HEIGHT}
+                    aria-hidden="true"
+                  />
+                  <canvas
+                    ref={canvasRef}
+                    className="lcd-output"
+                    width={GAMEBOY_WIDTH}
+                    height={GAMEBOY_HEIGHT}
+                    aria-label={`${modelLabel(model)} emulation display`}
+                  />
+                  <canvas
+                    ref={transitionCanvasRef}
+                    className="frame-transition"
+                    width={GAMEBOY_WIDTH}
+                    height={GAMEBOY_HEIGHT}
+                    aria-hidden="true"
+                  />
+                  <span className="screen-glass" aria-hidden="true" />
+                  {paused && running && (
+                    <div
+                      className={`pause-overlay pause-${pauseReason ?? "manual"}`}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <span className="pause-symbol" aria-hidden="true"><i /><i /></span>
+                      <strong>{pauseReason === "menu" ? "MENU PAUSE" : "EMULATION PAUSED"}</strong>
+                      <small>{pauseReason === "menu" ? "CLOSE DRAWER TO RESUME" : "CORE TIMING FROZEN"}</small>
+                    </div>
+                  )}
+                </div>
               </div>
               {model === "cgb" && viewMode === "console" && (
                 <div className="screen-caption">

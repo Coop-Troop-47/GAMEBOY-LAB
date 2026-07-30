@@ -292,10 +292,23 @@ input:focus-visible {
   aspect-ratio: auto;
   margin: 0;
   overflow: clip;
-  border: var(--lcd-bezel-width, 8px) solid #383b43;
+  border: calc(var(--lcd-bezel-width, 8px) * 2 / 3) solid #383b43;
+  border-radius: 3px;
   background: #cadc9f;
   transform: none;
   box-shadow: none;
+}
+
+.screen-inner {
+  position: relative;
+  width: 100%;
+  overflow: clip;
+  background: #cadc9f;
+}
+
+.dmg .screen-inner {
+  border: calc(var(--lcd-bezel-width, 8px) / 3) solid #121719;
+  border-radius: 0;
 }
 
 .screen-frame canvas.lcd-output {
@@ -345,16 +358,6 @@ input:focus-visible {
 
 .screen-frame::after {
   content: none;
-}
-
-.dmg .screen-frame::before {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  content: "";
-  pointer-events: none;
-  background: #121719;
-  box-shadow: 0 0 0 calc(var(--lcd-bezel-width, 8px) / 3) #121719;
 }
 
 .screen-glass {
@@ -2465,11 +2468,17 @@ html[data-theme="dark"] body {
   position: absolute;
   left: 50%;
   bottom: 48px;
+  border-width: var(--lcd-bezel-width, 8px);
   border-color: #0d0f13;
-  border-radius: calc(var(--lcd-bezel-width, 8px) * 1.6);
+  border-radius: calc(var(--lcd-bezel-width, 8px) * 1.25);
   background: #0d0f13;
   box-shadow: none;
   translate: -50% 0;
+}
+
+.cgb .screen-inner {
+  border: 0;
+  border-radius: calc(var(--lcd-bezel-width, 8px) * .25);
 }
 
 .cgb .screen-frame canvas.lcd-output,
@@ -4372,7 +4381,7 @@ html[data-theme="dark"] body {
 }
 
 .screen-only .cgb .screen-frame {
-  border-radius: calc(var(--lcd-bezel-width, 8px) * 1.6);
+  border-radius: calc(var(--lcd-bezel-width, 8px) * 1.25);
 }
 
 @media (max-width: 620px) {
