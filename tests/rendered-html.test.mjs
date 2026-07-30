@@ -173,7 +173,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.screen-frame\s*\{[^}]*border:\s*8px solid #121719/s);
   assert.doesNotMatch(css, /\.screen-frame\s*\{[^}]*outline:/s);
   assert.match(css, /\.display-bezel\s*\{[^}]*display:\s*flex[^}]*align-items:\s*center[^}]*justify-content:\s*center/s);
-  assert.doesNotMatch(css, /\.(?:dmg|cgb) \.screen-frame\s*\{[^}]*translate:/s);
+  assert.doesNotMatch(css, /\.dmg \.screen-frame\s*\{[^}]*translate:/s);
   assert.match(css, /\.screen-frame::after\s*\{[^}]*content:\s*none/s);
   assert.match(css, /\.cgb \.screen-frame\s*\{[^}]*border-color:\s*#0d0f13[^}]*box-shadow:\s*none/s);
   assert.doesNotMatch(css, /\.cgb \.screen-frame::after/);
@@ -183,7 +183,8 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(css, /\.console-wrap\.view-zoom-in \.handheld,[\s\S]*\.console-wrap\.view-zoom-in \.display-bezel\s*\{[^}]*visibility:\s*hidden/s);
   assert.match(css, /\.console-wrap\.view-zoom-in \.screen-frame\s*\{[^}]*visibility:\s*visible/s);
   assert.match(css, /\.console-wrap\.view-zoom-in \.display-bezel,[\s\S]*\.console-wrap\.view-zoom-out \.display-bezel\s*\{[^}]*z-index:\s*30[^}]*isolation:\s*isolate/s);
-  assert.match(css, /\.console-transition-shell\s*\{[^}]*position:\s*fixed[^}]*z-index:\s*0[^}]*will-change:\s*opacity/s);
+  assert.match(css, /\.console-transition-shell\s*\{[^}]*position:\s*fixed[^}]*z-index:\s*10[^}]*will-change:\s*opacity/s);
+  assert.match(css, /\.console-wrap\.view-zoom-in,[\s\S]*\.console-wrap\.view-zoom-out\s*\{[^}]*z-index:\s*20[^}]*isolation:\s*isolate/s);
   assert.match(css, /\.console-wrap\.view-zoom-in \.device-rig,[\s\S]*\.console-wrap\.view-zoom-out \.device-rig\s*\{[^}]*z-index:\s*20[^}]*transition:\s*none/s);
   assert.doesNotMatch(css, /::view-transition|@keyframes view-mode-zoom/);
   assert.match(css, /\.console-wrap\.view-zoom-in \.cartridge-visual-rig,[\s\S]*\.console-wrap\.view-zoom-out \.cartridge-hover-rig\s*\{[^}]*visibility:\s*hidden/s);
@@ -486,9 +487,10 @@ test("renders reference-matched DMG and supplied-purple GBC shells", async () =>
   assert.match(css, /\.dmg \.meta-buttons\s*\{[^}]*left:\s*91px[^}]*top:\s*183px[^}]*transform:\s*none/s);
   assert.match(css, /\.dmg \.meta-buttons \.control-button\s*\{[^}]*transform:\s*rotate\(-22deg\)/s);
   assert.match(css, /\.handheld\.cgb\s*\{[^}]*border-radius:\s*14px 14px 50% 50%\s*\/\s*14px 14px 46px 46px/s);
-  assert.match(css, /\.cgb \.screen-caption\s*\{[^}]*left:\s*50%[^}]*bottom:\s*16px[^}]*transform:\s*translateX\(-50%\)/s);
+  assert.match(css, /\.cgb \.screen-caption\s*\{[^}]*--cgb-caption-gap:\s*16px[^}]*--cgb-caption-height:\s*16px[^}]*left:\s*50%[^}]*bottom:\s*var\(--cgb-caption-gap\)[^}]*height:\s*var\(--cgb-caption-height\)[^}]*transform:\s*translateX\(-50%\)/s);
   assert.match(css, /\.cgb \.screen-caption strong\s*\{[^}]*font-size:\s*16px/s);
-  assert.match(css, /\.cgb \.screen-frame\s*\{[^}]*border-color:\s*#0d0f13[^}]*box-shadow:\s*none/s);
+  assert.match(css, /\.cgb \.screen-frame\s*\{[^}]*position:\s*absolute[^}]*left:\s*50%[^}]*bottom:\s*48px[^}]*border-color:\s*#0d0f13[^}]*box-shadow:\s*none[^}]*translate:\s*-50% 0/s);
+  assert.match(css, /\.screen-only \.screen-frame\s*\{[^}]*position:\s*relative[^}]*bottom:\s*auto[^}]*translate:\s*0 0/s);
   assert.match(css, /\.cgb \.meta-buttons\s*\{[^}]*left:\s*51\.5%[^}]*transform:\s*translateX\(-50%\)/s);
   assert.match(css, /\.cgb-nintendo\s*\{[^}]*font:\s*800 15px\/1/s);
   assert.match(css, /\.cgb \.dpad\s*\{[^}]*background:\s*transparent/s);

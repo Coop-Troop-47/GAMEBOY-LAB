@@ -2450,10 +2450,14 @@ html[data-theme="dark"] body {
 }
 
 .cgb .screen-frame {
+  position: absolute;
+  left: 50%;
+  bottom: 48px;
   border-color: #0d0f13;
   border-radius: 2px;
   background: #0d0f13;
   box-shadow: none;
+  translate: -50% 0;
 }
 
 .cgb .screen-frame canvas.lcd-output,
@@ -2476,10 +2480,13 @@ html[data-theme="dark"] body {
 }
 
 .cgb .screen-caption {
+  --cgb-caption-gap: 16px;
+  --cgb-caption-height: 16px;
   position: absolute;
   left: 50%;
-  bottom: 16px;
+  bottom: var(--cgb-caption-gap);
   width: max-content;
+  height: var(--cgb-caption-height);
   margin: 0;
   gap: 5px;
   color: #5f6069;
@@ -4341,10 +4348,14 @@ html[data-theme="dark"] body {
 }
 
 .screen-only .screen-frame {
+  position: relative;
+  left: auto;
+  bottom: auto;
   width: var(--screen-frame-width);
   border-width: 12px;
   border-radius: 3px;
   box-shadow: none;
+  translate: 0 0;
   transition:
     width 180ms cubic-bezier(.2, .8, .2, 1);
 }
@@ -4450,6 +4461,15 @@ html[data-theme="dark"] body {
   transition: none;
 }
 
+/* perspective makes console-wrap a stacking context. Elevate that complete
+   context—not merely a descendant—so the live LCD is unconditionally above
+   the body-level shell clone while the clone fades behind it. */
+.console-wrap.view-zoom-in,
+.console-wrap.view-zoom-out {
+  z-index: 20;
+  isolation: isolate;
+}
+
 /* Keep the animated LCD above bezel labels and every lower control surface
    while its transformed bounds cross the physical shell. */
 .console-wrap.view-zoom-in .display-bezel,
@@ -4471,7 +4491,7 @@ html[data-theme="dark"] body {
 
 .console-transition-shell {
   position: fixed;
-  z-index: 0;
+  z-index: 10;
   overflow: visible;
   pointer-events: none;
   contain: layout style;
