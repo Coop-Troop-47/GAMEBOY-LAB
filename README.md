@@ -9,11 +9,13 @@ JavaScript. No third-party emulator core or WebAssembly binary is used.
 - DMG and native GBC hardware modes
 - MBC1, MBC2, MBC3/RTC, and MBC5 cartridges; MBC3 clock latch, halt,
   carry/overflow, elapsed-time restoration, and browser persistence are covered
-- Scanline PPU with window, sprites, priority, palettes, VRAM/OAM lockouts,
-  OAM DMA, and GBC HDMA
-- Four-channel stereo audio synthesis with hardware-rate NR43 noise, DIV-driven
-  envelopes/length/sweep, and analog-style DC coupling
-- Hardware-inspired timer edges, interrupt behavior, delayed `EI`, and HALT bug
+- Event-driven scanline PPU with variable mode 3 timing, window, sprites,
+  priority, palettes, VRAM/OAM bus lockouts, timed OAM DMA and GBC HDMA
+- Four-channel stereo audio synthesis with hardware-rate channel timers,
+  DIV-driven envelopes/length/sweep, exact sample-window integration, and
+  sample-rate-correct analog-style DC coupling
+- M-cycle CPU bus behavior, timer reload/glitch timing, interrupt cancellation,
+  delayed `EI`, HALT bug, STOP, and GBC double-speed switching
 - Sharp and hardware-grid LCD modes with independently adjustable ghosting
 - Remappable keyboard controls with optional physical-button motion
 - Pointer and touch controls, volume/mute controls, and an OS-following theme
@@ -27,13 +29,15 @@ JavaScript. No third-party emulator core or WebAssembly binary is used.
   validated, transactional restore and no ROM or preference replacement
 - Running-game confirmation before console changes and close-tab protection
 - Bounded AudioWorklet output with four buffering profiles, adaptive backlog
-  correction, underrun/trim diagnostics, and stereo-safe fallback buffering
+  correction through interpolated resampling, soft underrun recovery,
+  underrun/trim diagnostics, and stereo-safe fallback buffering
 - Off, one-frame, two-frame, and automatic presentation frame skipping; the
   emulated CPU, PPU, APU, timers, input, and saves always remain full speed
 - Toggleable main-screen technical monitor for emulated/presented/skipped FPS,
   audio queue health, CPU/PPU state, and cartridge/RTC details
-- Reusable render buffers, precomputed GBC color conversion, variable PPU mode 3
-  timing, DIV-driven APU sequencing, and GBC double-speed clock domains
+- Batched event-domain execution, reusable render/audio buffers, precomputed
+  GBC color conversion, and separate CPU/base-speed clock domains
+- Engine-level serial-link and GBC infrared endpoints for external integrations
 - Header/logo lockout checks and model-specific startup animation
 - Guarded physical cartridge swaps with neutral LCD fade, power-light sequencing,
   and drawer pauses queued to the first safe BIOS frame
@@ -61,6 +65,7 @@ npm install
 npm run sync:artwork
 npm run dev
 npm test
+npm run benchmark:core -- --baseline-ref v1.3.0
 ```
 
 `npm run sync:artwork` refreshes the local cover-art cache in
@@ -73,6 +78,10 @@ network requests.
 database, or cloud configuration. Cartridge files, preferences, and battery
 saves remain local to the browser and are never uploaded.
 
+The external conformance runners in `scripts/` accept locally sourced test-ROM
+directories. See `EMULATION_AUDIT.md` for the v2.0.0 methodology, measured
+results, hardware-revision exclusions, and deliberately unclaimed areas.
+
 ## Releases
 
 The updater has two separate changelogs:
@@ -82,10 +91,10 @@ The updater has two separate changelogs:
   public `update-manifest.json` Gist fetched by `app/version.js`. These are the
   concise changes shown inside GAMEBOY LAB before the user downloads an
   update. The app displays at most six non-empty entries.
-- **GitHub release changelog:** the GitHub release body created with
-  `gh release create` or edited on GitHub. This is the longer release page for
-  people viewing the repository. GAMEBOY LAB does not read this text, so
-  changing it does not update the in-app changelog.
+- **GitHub release changelog:** the matching file in `release/` is supplied as
+  the GitHub release body. This is the longer release page for people viewing
+  the repository. GAMEBOY LAB does not read this text, so changing it does not
+  update the in-app changelog.
 
 Keep both descriptions accurate, but maintain them independently. For every
 release:
@@ -98,8 +107,8 @@ release:
    the distributable at `public/gbc-lab.html`.
 4. Commit the exact tested state, create the matching annotated version tag,
    and push the branch and tag.
-5. Create the GitHub release, write its separate detailed release body, and
-   upload `public/gbc-lab.html` as the `gbc-lab.html` asset.
+5. Create the GitHub release using the matching detailed notes in `release/`
+   as its body, and upload `public/gbc-lab.html` as `gbc-lab.html`.
 6. Verify that the uploaded asset is available and matches the local SHA-256.
 7. **Last**, copy `release/update-manifest.json` to the public manifest Gist.
    Publishing the Gist earlier can advertise an update before its download is

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -17,14 +18,14 @@ test("release discovery returns only a newer standalone asset", async () => {
   const update = await findAvailableUpdate(async () => ({
     ok: true,
     json: async () => ({
-      version: "v1.3.1",
+      version: "v2.0.1",
       downloadUrl: "https://example.test/gbc-lab.html",
       notesUrl: "https://example.test/release",
       changes: ["Faster renderer", "", 42, "Clearer updates"],
     }),
   }));
   assert.deepEqual(update, {
-    version: "1.3.1",
+    version: "2.0.1",
     downloadUrl: "https://example.test/gbc-lab.html",
     notesUrl: "https://example.test/release",
     changes: ["Faster renderer", "Clearer updates"],
@@ -38,4 +39,21 @@ test("release discovery returns only a newer standalone asset", async () => {
     }),
   }));
   assert.equal(current, null);
+});
+
+test("release manifest matches the embedded application version and asset", () => {
+  const manifest = JSON.parse(readFileSync(
+    new URL("../release/update-manifest.json", import.meta.url),
+    "utf8",
+  ));
+  assert.equal(manifest.version, APP_VERSION);
+  assert.match(
+    manifest.downloadUrl,
+    new RegExp(`/v${APP_VERSION.replaceAll(".", "\\.")}/gbc-lab\\.html$`),
+  );
+  assert.match(
+    manifest.notesUrl,
+    new RegExp(`/tag/v${APP_VERSION.replaceAll(".", "\\.")}$`),
+  );
+  assert.ok(manifest.changes.length > 0 && manifest.changes.length <= 6);
 });

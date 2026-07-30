@@ -11,21 +11,11 @@ const DUTY_PATTERNS = [
   new Uint8Array([1, 0, 0, 0, 0, 1, 1, 1]),
   new Uint8Array([0, 1, 1, 1, 1, 1, 1, 0]),
 ];
-const NOISE_DIVISORS = new Float64Array([0.5, 1, 2, 3, 4, 5, 6, 7]);
-const NOISE_STEP_8_LONG = new Uint16Array(0x8000);
-const NOISE_STEP_8_SHORT = new Uint16Array(0x8000);
-for (let state = 0; state < 0x8000; state += 1) {
-  let longState = state;
-  let shortState = state;
-  for (let step = 0; step < 8; step += 1) {
-    let bit = (longState & 1) ^ ((longState >> 1) & 1);
-    longState = (longState >> 1) | (bit << 14);
-    bit = (shortState & 1) ^ ((shortState >> 1) & 1);
-    shortState = (shortState >> 1) | (bit << 14);
-    shortState = (shortState & ~(1 << 6)) | (bit << 6);
-  }
-  NOISE_STEP_8_LONG[state] = longState;
-  NOISE_STEP_8_SHORT[state] = shortState;
+const NOISE_PERIODS = new Uint16Array([8, 16, 32, 48, 64, 80, 96, 112]);
+const TIMER_MASKS = new Uint16Array([1 << 9, 1 << 3, 1 << 5, 1 << 7]);
+const ILLEGAL_OPCODES = new Uint8Array(256);
+for (const opcode of [0xd3, 0xdb, 0xdd, 0xe3, 0xe4, 0xeb, 0xec, 0xed, 0xf4, 0xfc, 0xfd]) {
+  ILLEGAL_OPCODES[opcode] = 1;
 }
 
 const FLAG_Z = 0x80;
@@ -78,16 +68,21 @@ for (let value = 0; value < 0x8000; value += 1) {
 
 const STATE_SCALARS = [
   "a", "f", "b", "c", "d", "e", "h", "l", "sp", "pc",
-  "ime", "imeDelay", "halted", "stopped", "haltBug", "ie", "iflag",
+  "ime", "imeDelay", "halted", "stopped", "locked", "haltBug", "ie", "iflag",
   "joypad", "joypSelect", "divCounter", "tima", "tma", "tac",
   "timerReload", "timerReloading", "serialData", "serialControl", "serialCycles",
+  "serialBits", "serialTransmitByte", "infraredInput", "infraredOutput",
   "vramBank", "wramBank", "romBank", "ramBank", "ramEnabled", "mbc1Mode",
-  "mbc1High", "rtcSelect", "rtcLatchValue", "dmaCycles", "dmaSource",
-  "dmaIndex", "dmaSubcycle", "hdmaSource", "hdmaDestination", "hdmaBlocks",
-  "hdmaActive", "bgPaletteIndex", "objPaletteIndex", "opri", "ppuDot", "ly",
-  "ppuMode", "ppuMode3End", "statSignal", "windowLine", "frameReady",
+  "mbc1High", "rumbleEnabled", "rtcSelect", "rtcLatchValue", "dmaCycles", "dmaSource",
+  "dmaIndex", "dmaSubcycle", "dmaStartDelay", "dmaPendingSource",
+  "hdmaSource", "hdmaDestination", "hdmaBlocks",
+  "hdmaActive", "hdmaStallCycles", "bgPaletteIndex", "objPaletteIndex", "opri", "ppuDot", "ly",
+  "ppuMode", "ppuMode3End", "ppuBusMode", "ppuBusDot", "ppuBusLine",
+  "lcdStartup", "lycMatch", "statSignal", "windowLine", "frameReady",
   "frameNumber", "cycles", "bootEnabled", "doubleSpeed", "speedSwitchArmed",
-  "speedSubcycle", "audioClock", "audioFrameStep", "cgbMode",
+  "baseCycles",
+  "speedSwitchCycles", "speedSubcycle", "audioClock", "audioIntegralLeft",
+  "audioIntegralRight", "audioFrameStep", "cgbMode",
 ];
 
 // Production CGB boot-ROM palette dictionary in RGB555 form. Compatibility
@@ -218,7 +213,7 @@ export class GameBoy {
     this.lineBgPriority = new Uint8Array(SCREEN_WIDTH);
     this.lineSprites = [];
     this.colorScratch = new Uint8Array(3);
-    this.audioMix = new Float64Array(4);
+    this.audioMix = new Float64Array(6);
     this.audioSamples = new Float32Array(4096);
     this.audioSampleCount = 0;
     this.audioRate = AUDIO_RATE;
@@ -231,6 +226,8 @@ export class GameBoy {
     this.refreshPackedDmgPalettes();
     this.onFrame = null;
     this.onBatterySave = null;
+    this.serialEndpoint = null;
+    this.onInfraredOutput = null;
     this.hasROM = false;
     this.reset();
   }
@@ -256,8 +253,11 @@ export class GameBoy {
 
   setAudioSampleRate(rate) {
     if (!Number.isFinite(rate)) return false;
+    this.flushAPU();
     this.audioRate = Math.max(8000, Math.min(192000, Math.round(rate)));
     this.audioClock = 0;
+    this.audioIntegralLeft = 0;
+    this.audioIntegralRight = 0;
     this.audioSampleCount = 0;
     this.refreshAudioSteps();
     return true;
@@ -293,12 +293,15 @@ export class GameBoy {
       [0x05, 0x06].includes(this.cartType) ? 2 :
       [0x0f, 0x10, 0x11, 0x12, 0x13].includes(this.cartType) ? 3 :
       this.cartType >= 0x19 && this.cartType <= 0x1e ? 5 : 0;
+    this.mbc1Multicart = this.mapper === 1
+      && bytes.length >= 0x100000
+      && NINTENDO_LOGO.every((value, index) => bytes[0x40000 + 0x104 + index] === value);
     this.hasBattery = [0x03, 0x06, 0x09, 0x0f, 0x10, 0x13, 0x1b, 0x1e].includes(this.cartType);
     this.hasRTC = [0x0f, 0x10].includes(this.cartType);
     const ramCode = bytes[0x149];
     const ramSizes = { 0: 0, 1: 0x800, 2: 0x2000, 3: 0x8000, 4: 0x20000, 5: 0x10000 };
     const ramSize = this.mapper === 2 ? 0x200 : (ramSizes[ramCode] || 0);
-    this.eram = new Uint8Array(ramSize || 0x2000);
+    this.eram = new Uint8Array(ramSize);
     const batteryRam = batteryData && !(batteryData instanceof ArrayBuffer) && !ArrayBuffer.isView(batteryData)
       ? batteryData.ram
       : batteryData;
@@ -354,7 +357,9 @@ export class GameBoy {
     this.refreshPackedDmgPalettes();
     this.doubleSpeed = false;
     this.speedSwitchArmed = false;
+    this.speedSwitchCycles = 0;
     this.speedSubcycle = 0;
+    this.baseCycles = 0;
     this.a = this.cgbMode ? 0x11 : 0x01;
     this.f = 0xb0;
     this.b = 0x00;
@@ -369,6 +374,7 @@ export class GameBoy {
     this.imeDelay = 0;
     this.halted = false;
     this.stopped = false;
+    this.locked = false;
     this.haltBug = false;
     this.ie = 0;
     this.iflag = 0xe1;
@@ -383,14 +389,19 @@ export class GameBoy {
     this.serialData = 0;
     this.serialControl = 0x7e;
     this.serialCycles = 0;
+    this.serialBits = 0;
+    this.serialTransmitByte = 0;
     this.serialOutput = "";
+    this.infraredInput = false;
+    this.infraredOutput = false;
     this.vramBank = 0;
     this.wramBank = 1;
     this.romBank = 1;
     this.ramBank = 0;
-    this.ramEnabled = false;
+    this.ramEnabled = this.cartType === 0x08 || this.cartType === 0x09;
     this.mbc1Mode = 0;
     this.mbc1High = 0;
+    this.rumbleEnabled = false;
     this.rtcSelect = 0;
     this.rtcLatchValue = 0;
     this.rtc = { seconds: 0, minutes: 0, hours: 0, days: 0, halt: false, carry: false, last: Date.now() };
@@ -398,10 +409,13 @@ export class GameBoy {
     this.dmaSource = 0;
     this.dmaIndex = 0;
     this.dmaSubcycle = 0;
+    this.dmaStartDelay = 0;
+    this.dmaPendingSource = 0;
     this.hdmaSource = 0;
     this.hdmaDestination = 0x8000;
     this.hdmaBlocks = 0;
     this.hdmaActive = false;
+    this.hdmaStallCycles = 0;
     this.bgPaletteIndex = 0;
     this.objPaletteIndex = 0;
     this.opri = this.cgbMode ? 0 : 1;
@@ -409,12 +423,18 @@ export class GameBoy {
     this.ly = 0;
     this.ppuMode = 2;
     this.ppuMode3End = 252;
+    this.ppuBusMode = 2;
+    this.ppuBusDot = -1;
+    this.ppuBusLine = -1;
+    this.lcdStartup = false;
+    this.lycMatch = true;
     this.statSignal = false;
     this.windowLine = 0;
     this.frameReady = false;
     this.frameNumber = 0;
     this.runFrameCalls = 0;
     this.cycles = 0;
+    this.instructionTicks = 0;
     this.batteryDirty = false;
     this.io.fill(0);
     this.vram.fill(0);
@@ -454,7 +474,10 @@ export class GameBoy {
       this.imeDelay = 0;
       this.ie = 0;
       this.iflag = 0xe0;
-      this.divCounter = 0;
+      this.joypSelect = 0x00;
+      // The divider starts eight T-cycles into its phase on powered hardware;
+      // boot-timing and serial-clock alignment tests observe this offset.
+      this.divCounter = 7;
       this.io.fill(0);
       this.io[0x41] = 0x80;
       this.ppuMode = 0;
@@ -530,14 +553,23 @@ export class GameBoy {
     this.updateCompatibilityPaletteAliases();
   }
 
-  apuReset() {
+  apuReset(preserveLengths = false) {
+    const lengths = preserveLengths && this.ch1
+      ? [this.ch1.length, this.ch2.length, this.ch3.length, this.ch4.length]
+      : [0, 0, 0, 0];
     this.audioSampleCount = 0;
     this.audioClock = 0;
+    this.audioIntegralLeft = 0;
+    this.audioIntegralRight = 0;
+    this.apuPendingClocks = 0;
     this.audioFrameStep = 0;
     this.ch1 = {
       enabled: false,
       phase: 0,
-      length: 0,
+      timer: 0,
+      timerPeriod: 8192,
+      dutyPosition: 0,
+      length: lengths[0],
       volume: 0,
       envCounter: 0,
       envRunning: false,
@@ -550,17 +582,31 @@ export class GameBoy {
     this.ch2 = {
       enabled: false,
       phase: 0,
-      length: 0,
+      timer: 0,
+      timerPeriod: 8192,
+      dutyPosition: 0,
+      length: lengths[1],
       volume: 0,
       envCounter: 0,
       envRunning: false,
       phaseStep: 0,
     };
-    this.ch3 = { enabled: false, phase: 0, phaseStep: 0, length: 0 };
+    this.ch3 = {
+      enabled: false,
+      phase: 0,
+      phaseStep: 0,
+      timer: 0,
+      timerPeriod: 4096,
+      wavePosition: 0,
+      waveAccess: 0,
+      length: lengths[2],
+    };
     this.ch4 = {
       enabled: false,
       phase: 0,
-      length: 0,
+      timer: 0,
+      timerPeriod: 8,
+      length: lengths[3],
       volume: 0,
       envCounter: 0,
       envRunning: false,
@@ -600,8 +646,9 @@ export class GameBoy {
   }
 
   fetch8() {
-    const value = this.cpuRead(this.pc);
-    if (!this.haltBug) this.pc = (this.pc + 1) & 0xffff;
+    const increment = !this.haltBug;
+    const value = this.cpuRead(this.pc, increment);
+    if (increment) this.pc = (this.pc + 1) & 0xffff;
     else this.haltBug = false;
     return value;
   }
@@ -642,7 +689,8 @@ export class GameBoy {
   }
 
   pop16() {
-    const low = this.cpuRead(this.sp);
+    // POP/RET expose only the first SP increment to the OAM IDU glitch.
+    const low = this.cpuRead(this.sp, true);
     this.sp = (this.sp + 1) & 0xffff;
     const high = this.cpuRead(this.sp);
     this.sp = (this.sp + 1) & 0xffff;
@@ -651,17 +699,26 @@ export class GameBoy {
 
   selectedRomBank0() {
     if (this.mapper !== 1 || this.mbc1Mode === 0) return 0;
-    return ((this.mbc1High << 5) % this.romBanks) & ~0x1f;
+    return (this.mbc1High << (this.mbc1Multicart ? 4 : 5)) % this.romBanks;
   }
 
   selectedRomBank() {
-    let bank = this.romBank;
+    let bank;
     if (this.mapper === 1) {
-      bank = (this.romBank & 0x1f) | (this.mbc1High << 5);
-      if ((bank & 0x1f) === 0) bank += 1;
+      const low = this.romBank & 0x1f;
+      const translated = low === 0 ? 1 : low;
+      bank = (translated & (this.mbc1Multicart ? 0x0f : 0x1f))
+        | (this.mbc1High << (this.mbc1Multicart ? 4 : 5));
+    } else if (this.mapper === 2) {
+      bank = this.romBank & 0x0f;
+      if (bank === 0) bank = 1;
+    } else if (this.mapper === 3) {
+      bank = this.romBank & 0x7f;
+      if (bank === 0) bank = 1;
+    } else {
+      bank = this.romBank;
     }
-    bank %= this.romBanks;
-    return bank || (this.romBanks > 1 ? 1 : 0);
+    return bank % this.romBanks;
   }
 
   selectedRamBank() {
@@ -682,14 +739,16 @@ export class GameBoy {
       return this.rom[offset % this.rom.length] ?? 0xff;
     }
     if (address < 0xa000) {
-      if (!direct && (this.io[0x40] & 0x80) && this.ppuMode === 3) return 0xff;
+      if (!direct && (this.io[0x40] & 0x80) && this.cpuAccessPPUMode() === 3) return 0xff;
       return this.vram[(this.vramBank * 0x2000) + address - 0x8000];
     }
     if (address < 0xc000) {
-      if (!this.ramEnabled || this.eram.length === 0) return 0xff;
+      if (!this.ramEnabled) return 0xff;
       if (this.mapper === 3 && this.rtcSelect >= 0x08 && this.rtcSelect <= 0x0c) {
         return this.readRTC(this.rtcSelect);
       }
+      if (this.mapper === 3 && this.rtcSelect > 0x03) return 0xff;
+      if (this.eram.length === 0) return 0xff;
       const offset = (this.selectedRamBank() * 0x2000 + address - 0xa000) % this.eram.length;
       return this.mapper === 2 ? 0xf0 | this.eram[offset] : this.eram[offset];
     }
@@ -697,31 +756,145 @@ export class GameBoy {
     if (address < 0xe000) return this.wram[this.wramBank * 0x1000 + address - 0xd000];
     if (address < 0xfe00) return this.read8(address - 0x2000, direct);
     if (address < 0xfea0) {
-      if (!direct && (this.dmaCycles > 0 || ((this.io[0x40] & 0x80) && (this.ppuMode === 2 || this.ppuMode === 3)))) return 0xff;
+      const mode = this.cpuAccessPPUMode();
+      if (!direct && (this.dmaCycles > 0 || ((this.io[0x40] & 0x80) && (mode === 2 || mode === 3)))) return 0xff;
       return this.oam[address - 0xfe00];
     }
     if (address < 0xff00) return 0xff;
-    if (address === 0xffff) return this.ie | 0xe0;
+    if (address === 0xffff) return this.ie;
     if (address >= 0xff80) return this.hram[address - 0xff80];
     return this.readIO(address & 0x7f);
   }
 
-  cpuRead(address) {
-    const blocked = this.dmaCycles > 0 && address < 0xff80;
-    const value = blocked ? 0xff : this.read8(address);
-    this.tick(4);
-    this.instructionTicks += 4;
-    return value;
+  oamScanRow() {
+    if (
+      this.model !== "dmg"
+      || !(this.io[0x40] & 0x80)
+      || this.ppuMode !== 2
+      || this.ly >= 144
+    ) return -1;
+    // DMG OAM search begins on row zero, then exposes one eight-byte row for
+    // each pair of objects. The first hand-off occurs two dots into mode 2.
+    if (this.ppuDot < 2) return 0;
+    return Math.min(0x98, (Math.floor((this.ppuDot - 2) / 4) + 1) * 8);
   }
 
-  cpuWrite(address, value) {
-    const blocked = this.dmaCycles > 0 && address < 0xff80 && address !== 0xff46;
-    if (!blocked) this.write8(address, value);
-    this.tick(4);
-    this.instructionTicks += 4;
+  readOAMWord(offset) {
+    return this.oam[offset] | (this.oam[offset + 1] << 8);
   }
 
-  write8(address, value, direct = false) {
+  writeOAMWord(offset, value) {
+    this.oam[offset] = value & 0xff;
+    this.oam[offset + 1] = value >> 8;
+  }
+
+  copyOAMRow(destination, source) {
+    for (let index = 0; index < 8; index += 1) {
+      this.oam[destination + index] = this.oam[source + index];
+    }
+  }
+
+  triggerOAMCorruption(kind, address) {
+    if (address < 0xfe00 || address >= 0xff00) return;
+    const row = this.oamScanRow();
+    if (row < 8) return;
+
+    if (kind === "read-write") {
+      // A read sharing an M-cycle with a 16-bit IDU increment first corrupts
+      // and mirrors the preceding row, then undergoes normal read corruption.
+      if (row >= 0x20 && row < 0x98) {
+        const a = this.readOAMWord(row - 0x10);
+        const b = this.readOAMWord(row - 0x08);
+        const c = this.readOAMWord(row);
+        const d = this.readOAMWord(row - 0x04);
+        this.writeOAMWord(row - 0x08, (b & (a | c | d)) | (a & c & d));
+        this.copyOAMRow(row, row - 0x08);
+        this.copyOAMRow(row - 0x10, row - 0x08);
+      }
+      this.triggerOAMCorruption("read", address);
+      return;
+    }
+
+    const a = this.readOAMWord(row);
+    const b = this.readOAMWord(row - 0x08);
+    const c = this.readOAMWord(row - 0x04);
+    const first = kind === "read"
+      ? b | (a & c)
+      : ((a ^ c) & (b ^ c)) ^ c;
+
+    if (kind === "read") {
+      this.writeOAMWord(row - 0x08, first);
+      this.copyOAMRow(row, row - 0x08);
+    } else {
+      this.writeOAMWord(row, first);
+      for (let index = 2; index < 8; index += 1) {
+        this.oam[row + index] = this.oam[row - 8 + index];
+      }
+    }
+  }
+
+  cpuRead(address, iduIncrement = false) {
+    this.tick(4);
+    this.instructionTicks += 4;
+    this.triggerOAMCorruption(iduIncrement ? "read-write" : "read", address);
+    if (this.dmaConflictsWith(address)) {
+      // During a conflicting read the CPU sees the byte currently driven by
+      // the DMA source bus, rather than a fabricated constant $FF.
+      const source = this.dmaSource + Math.max(0, this.dmaIndex - 1);
+      return this.readDmaSource(source);
+    }
+    return this.read8(address);
+  }
+
+  cpuWrite(address, value, iduAddress = -1) {
+    this.tick(4);
+    this.instructionTicks += 4;
+    if (
+      (address >= 0xfe00 && address < 0xff00)
+      || (iduAddress >= 0xfe00 && iduAddress < 0xff00)
+    ) this.triggerOAMCorruption("write", address >= 0xfe00 && address < 0xff00 ? address : iduAddress);
+    if (!this.dmaConflictsWith(address)) this.write8(address, value, false, true);
+  }
+
+  cpuInternalCycle(iduAddress = -1) {
+    this.tick(4);
+    this.instructionTicks += 4;
+    this.triggerOAMCorruption("write", iduAddress);
+  }
+
+  readDmaSource(address) {
+    // On DMG, DMA source addresses E000-FFFF alias C000-DFFF. This also
+    // applies to FE00 and FF00: the DMA unit does not read OAM or I/O there.
+    if (address >= 0xe000) {
+      if (this.model === "cgb") return 0xff;
+      address &= ~0x2000;
+    }
+    return this.read8(address, true);
+  }
+
+  dmaBusForAddress(address) {
+    address &= 0xffff;
+    if (address >= 0x8000 && address < 0xa000) return 2; // VRAM bus
+    if (this.model === "cgb" && address >= 0xc000 && address < 0xfe00) return 1; // WRAM bus
+    return 0; // cartridge/main bus
+  }
+
+  dmaConflictsWith(address) {
+    address &= 0xffff;
+    if (this.dmaCycles <= 0 || this.dmaIndex === 0 || address >= 0xfe00) return false;
+    const source = (this.dmaSource + this.dmaIndex) & 0xffff;
+    const sourceBus = this.dmaBusForAddress(source);
+    const addressBus = this.dmaBusForAddress(address);
+    if (this.model === "dmg") return addressBus === sourceBus;
+    // CGB splits cartridge, VRAM, and WRAM traffic. WRAM is unavailable when
+    // DMA uses either the cartridge or WRAM bus, while a high/echo source
+    // leaves only VRAM uncontended.
+    if (address >= 0xc000) return sourceBus !== 2;
+    if (source >= 0xe000) return addressBus !== 2;
+    return addressBus === sourceBus;
+  }
+
+  write8(address, value, direct = false, cpuBusWrite = false) {
     address &= 0xffff;
     value &= 0xff;
     if (address < 0x8000) {
@@ -729,16 +902,19 @@ export class GameBoy {
       return;
     }
     if (address < 0xa000) {
-      if (direct || !(this.io[0x40] & 0x80) || this.ppuMode !== 3) {
+      if (direct || !(this.io[0x40] & 0x80) || this.cpuAccessPPUMode(cpuBusWrite) !== 3) {
         this.vram[this.vramBank * 0x2000 + address - 0x8000] = value;
       }
       return;
     }
     if (address < 0xc000) {
-      if (!this.ramEnabled || this.eram.length === 0) return;
+      if (!this.ramEnabled) return;
       if (this.mapper === 3 && this.rtcSelect >= 0x08 && this.rtcSelect <= 0x0c) {
         this.writeRTC(this.rtcSelect, value);
+      } else if (this.mapper === 3 && this.rtcSelect > 0x03) {
+        return;
       } else {
+        if (this.eram.length === 0) return;
         const offset = (this.selectedRamBank() * 0x2000 + address - 0xa000) % this.eram.length;
         this.eram[offset] = this.mapper === 2 ? value & 0x0f : value;
         if (this.hasBattery) this.batteryDirty = true;
@@ -754,18 +930,21 @@ export class GameBoy {
       return;
     }
     if (address < 0xfe00) {
-      this.write8(address - 0x2000, value, direct);
+      this.write8(address - 0x2000, value, direct, cpuBusWrite);
       return;
     }
     if (address < 0xfea0) {
-      if (direct || (!(this.dmaCycles > 0) && (!(this.io[0x40] & 0x80) || (this.ppuMode !== 2 && this.ppuMode !== 3)))) {
+      const mode = this.cpuAccessPPUMode(cpuBusWrite);
+      if (direct || (!(this.dmaCycles > 0) && (!(this.io[0x40] & 0x80) || (mode !== 2 && mode !== 3)))) {
         this.oam[address - 0xfe00] = value;
       }
       return;
     }
     if (address < 0xff00) return;
     if (address === 0xffff) {
-      this.ie = value & 0x1f;
+      // IE is backed by a full byte of storage. Only the low five bits feed
+      // interrupt arbitration, but the upper three bits remain readable RAM.
+      this.ie = value;
       return;
     }
     if (address >= 0xff80) {
@@ -779,17 +958,17 @@ export class GameBoy {
     if (this.mapper === 0) return;
     if (this.mapper === 1) {
       if (address < 0x2000) this.ramEnabled = (value & 0x0f) === 0x0a;
-      else if (address < 0x4000) this.romBank = value & 0x1f || 1;
+      else if (address < 0x4000) this.romBank = value & 0x1f;
       else if (address < 0x6000) this.mbc1High = value & 0x03;
       else this.mbc1Mode = value & 1;
     } else if (this.mapper === 2) {
       if (address < 0x4000) {
-        if (address & 0x0100) this.romBank = value & 0x0f || 1;
+        if (address & 0x0100) this.romBank = value & 0x0f;
         else this.ramEnabled = (value & 0x0f) === 0x0a;
       }
     } else if (this.mapper === 3) {
       if (address < 0x2000) this.ramEnabled = (value & 0x0f) === 0x0a;
-      else if (address < 0x4000) this.romBank = value & 0x7f || 1;
+      else if (address < 0x4000) this.romBank = value & 0x7f;
       else if (address < 0x6000) {
         this.ramBank = value & 0x03;
         this.rtcSelect = value;
@@ -801,80 +980,160 @@ export class GameBoy {
       if (address < 0x2000) this.ramEnabled = (value & 0x0f) === 0x0a;
       else if (address < 0x3000) this.romBank = (this.romBank & 0x100) | value;
       else if (address < 0x4000) this.romBank = (this.romBank & 0xff) | ((value & 1) << 8);
-      else if (address < 0x6000) this.ramBank = value & 0x0f;
+      else if (address < 0x6000) {
+        this.rumbleEnabled = this.cartType >= 0x1c && !!(value & 0x08);
+        this.ramBank = value & (this.cartType >= 0x1c ? 0x07 : 0x0f);
+      }
     }
   }
 
   readIO(register) {
     if (register === 0x00) return this.readJoypad();
     if (register === 0x01) return this.serialData;
-    if (register === 0x02) return this.serialControl | 0x7c;
+    if (register === 0x02) return this.cgbRegistersAvailable()
+      ? (this.serialControl & 0x83) | 0x7c
+      : (this.serialControl & 0x81) | 0x7e;
     if (register === 0x04) return (this.divCounter >> 8) & 0xff;
     if (register === 0x05) return this.tima;
     if (register === 0x06) return this.tma;
     if (register === 0x07) return this.tac | 0xf8;
     if (register === 0x0f) return this.iflag | 0xe0;
     if (register === 0x41) {
-      const displayLy = this.displayLy();
-      return (this.io[0x41] & 0xf8) | (displayLy === this.io[0x45] ? 4 : 0) | ((this.io[0x40] & 0x80) ? this.ppuMode : 0);
+      return (this.io[0x41] & 0xf8) | (this.lycMatch ? 4 : 0)
+        | ((this.io[0x40] & 0x80) ? this.cpuVisiblePPUMode() : 0);
     }
     if (register === 0x44) return this.displayLy();
-    if (register === 0x4d) return (this.doubleSpeed ? 0x80 : 0) | (this.speedSwitchArmed ? 1 : 0) | 0x7e;
-    if (register === 0x4f) return this.cgbRegistersAvailable() ? 0xfe | this.vramBank : 0xff;
-    if (register === 0x50) return this.bootEnabled ? 0x00 : 0xff;
-    if (register === 0x55) return this.cgbRegistersAvailable()
-      ? (this.hdmaActive ? 0 : 0x80) | Math.max(0, this.hdmaBlocks - 1)
+    if (register === 0x4d) return this.cgbRegistersAvailable()
+      ? (this.doubleSpeed ? 0x80 : 0) | (this.speedSwitchArmed ? 1 : 0) | 0x7e
       : 0xff;
-    if (register === 0x68) return this.cgbRegistersAvailable() ? this.bgPaletteIndex | 0x40 : 0xff;
+    if (register === 0x4f) return this.model === "cgb" ? 0xfe | this.vramBank : 0xff;
+    if (register === 0x50) return this.bootEnabled ? 0x00 : 0xff;
+    if (register === 0x56) {
+      if (!this.cgbRegistersAvailable()) return 0xff;
+      let value = (this.io[0x56] & 0xc1) | 0x3e;
+      if (
+        (this.io[0x56] & 0xc0) === 0xc0
+        && (this.infraredInput || this.infraredOutput)
+      ) value &= ~0x02;
+      return value;
+    }
+    if (register === 0x55) return this.cgbRegistersAvailable()
+      ? (this.hdmaActive ? 0 : 0x80)
+        | (this.hdmaBlocks > 0 ? (this.hdmaBlocks - 1) & 0x7f : 0x7f)
+      : 0xff;
+    if (register === 0x68) return this.model === "cgb" ? this.bgPaletteIndex | 0x40 : 0xff;
     if (register === 0x69) return !this.cgbRegistersAvailable() || this.ppuMode === 3
       ? 0xff
       : this.bgPalette[this.bgPaletteIndex & 0x3f];
-    if (register === 0x6a) return this.cgbRegistersAvailable() ? this.objPaletteIndex | 0x40 : 0xff;
+    if (register === 0x6a) return this.model === "cgb" ? this.objPaletteIndex | 0x40 : 0xff;
     if (register === 0x6b) return !this.cgbRegistersAvailable() || this.ppuMode === 3
       ? 0xff
       : this.objPalette[this.objPaletteIndex & 0x3f];
     if (register === 0x6c) return this.cgbRegistersAvailable() ? 0xfe | this.opri : 0xff;
     if (register === 0x70) return this.cgbRegistersAvailable() ? 0xf8 | this.wramBank : 0xff;
+    if (register === 0x72 || register === 0x73) {
+      return this.model === "cgb" ? this.io[register] : 0xff;
+    }
+    if (register === 0x75) {
+      return this.model === "cgb" ? 0x8f | (this.io[0x75] & 0x70) : 0xff;
+    }
+    if (register === 0x76) {
+      if (this.model !== "cgb") return 0xff;
+      this.flushAPU();
+      const channel1 = this.ch1.enabled
+        && DUTY_PATTERNS[this.io[0x11] >> 6][this.ch1.dutyPosition]
+        ? this.ch1.volume
+        : 0;
+      const channel2 = this.ch2.enabled
+        && DUTY_PATTERNS[this.io[0x16] >> 6][this.ch2.dutyPosition]
+        ? this.ch2.volume
+        : 0;
+      return channel1 | (channel2 << 4);
+    }
+    if (register === 0x77) {
+      if (this.model !== "cgb") return 0xff;
+      this.flushAPU();
+      let channel3 = 0;
+      if (this.ch3.enabled && (this.io[0x1a] & 0x80)) {
+        const byte = this.io[0x30 + (this.ch3.wavePosition >> 1)];
+        channel3 = (this.ch3.wavePosition & 1) ? byte & 0x0f : byte >> 4;
+        const level = (this.io[0x1c] >> 5) & 3;
+        channel3 = level === 0 ? 0 : channel3 >> (level - 1);
+      }
+      const channel4 = this.ch4.enabled && !(this.ch4.lfsr & 1) ? this.ch4.volume : 0;
+      return channel3 | (channel4 << 4);
+    }
     if (register >= 0x10 && register <= 0x3f) return this.readAPU(register);
-    return this.io[register] ?? 0xff;
+    if (
+      register === 0x40
+      || register === 0x42
+      || register === 0x43
+      || register === 0x45
+      || register === 0x46
+      || (register >= 0x47 && register <= 0x4b)
+    ) return this.io[register];
+    return 0xff;
   }
 
   writeIO(register, value) {
     if (register === 0x00) {
       const before = this.readJoypad();
       this.joypSelect = value & 0x30;
-      if ((before & 0x0f) === 0x0f && (this.readJoypad() & 0x0f) !== 0x0f) this.requestInterrupt(4);
+      const after = this.readJoypad();
+      if ((before & ~after & 0x0f) !== 0) this.requestInterrupt(4);
       return;
     }
     if (register === 0x01) { this.serialData = value; return; }
     if (register === 0x02) {
-      this.serialControl = value;
-      if ((value & 0x81) === 0x81) this.serialCycles = this.cgbMode && (value & 2) ? 128 : 4096;
+      // The serial clock is a free-running divider of the system clock. A
+      // control write synchronises to its current phase instead of starting a
+      // fresh byte-length countdown.
+      this.serialControl = this.cgbRegistersAvailable() ? value & 0x83 : value & 0x81;
+      if (value & 0x80) {
+        this.serialTransmitByte = this.serialData;
+        this.serialBits = 8;
+        this.serialCycles = value & 1 ? 1 : 0;
+      } else if (!(value & 0x80)) {
+        this.serialCycles = 0;
+        this.serialBits = 0;
+      }
       return;
     }
     if (register === 0x04) {
       const before = this.timerSignal();
       const apuBefore = this.apuDividerSignal();
+      const serialBefore = this.serialDividerSignal();
+      this.flushAPU();
       this.divCounter = 0;
       if (before && !this.timerSignal()) this.incrementTima();
       if (apuBefore && !this.apuDividerSignal()) this.clockAPUFrameSequencer();
+      if (serialBefore && !this.serialDividerSignal()) this.clockSerialMaster();
       return;
     }
     if (register === 0x05) {
-      if (this.timerReload === 1) return;
+      if (this.timerReload === 1 || this.timerReloading) return;
       this.tima = value;
       if (this.timerReload > 1) this.timerReload = 0;
       return;
     }
     if (register === 0x06) {
       this.tma = value;
-      if (this.timerReload === 1) this.tima = value;
+      if (this.timerReload === 1 || this.timerReloading) this.tima = value;
       return;
     }
     if (register === 0x07) {
       const before = this.timerSignal();
       this.tac = value & 0x07;
-      if (before && !this.timerSignal()) this.incrementTima();
+      if (before && !this.timerSignal()) {
+        if (!this.timerReload && !this.timerReloading && this.tima === 0xff) {
+          // The TAC edge occurs during the write M-cycle. By the time the CPU
+          // reaches the following instruction boundary, the four-T-cycle
+          // overflow window has elapsed and the interrupt is observable.
+          this.tima = this.tma;
+          this.timerReloading = true;
+          this.requestInterrupt(2);
+        } else this.incrementTima();
+      }
       return;
     }
     if (register === 0x0f) { this.iflag = value & 0x1f; return; }
@@ -890,20 +1149,34 @@ export class GameBoy {
         this.ly = 0;
         this.ppuDot = 0;
         this.ppuMode = 0;
+        this.ppuBusDot = -1;
+        this.ppuBusLine = -1;
         this.windowLine = 0;
-        this.statSignal = false;
+        this.lcdStartup = false;
       } else if (!wasEnabled && enabled) {
         this.ly = 0;
         this.ppuDot = 0;
-        this.ppuMode = 2;
+        // The first scanline after LCD power-on has no OAM mode. DMG PPU
+        // startup is two dots late, beginning in HBlank before entering mode 3.
+        this.ppuMode = 0;
+        this.ppuMode3End = 252;
+        this.ppuBusDot = -1;
+        this.ppuBusLine = -1;
+        this.lcdStartup = true;
         this.windowLine = 0;
+        this.lycMatch = this.io[0x45] === 0;
       }
       this.updateStat();
       return;
     }
     if (register === 0x41) {
-      if (this.model === "dmg" && (this.ppuMode !== 3 || this.displayLy() === this.io[0x45])) {
-        this.requestInterrupt(1);
+      if (this.model === "dmg" && (this.io[0x40] & 0x80)) {
+        // On DMG, a STAT write exposes all four interrupt-enable inputs for
+        // one bus phase. It is still the combined line's rising edge—not the
+        // write itself—that requests an interrupt.
+        const glitchSignal = this.ppuMode !== 3 || this.lycMatch;
+        if (glitchSignal && !this.statSignal) this.requestInterrupt(1);
+        this.statSignal = glitchSignal;
       }
       this.io[0x41] = (value & 0x78) | 0x80;
       this.updateStat();
@@ -912,23 +1185,28 @@ export class GameBoy {
     if (register === 0x44) return;
     if (register === 0x45) {
       this.io[0x45] = value;
-      this.updateStat();
+      if (this.io[0x40] & 0x80) {
+        this.lycMatch = this.displayLy() === value;
+        this.updateStat();
+      }
       return;
     }
     if (register === 0x46) {
       this.io[0x46] = value;
-      this.dmaSource = value << 8;
-      this.dmaCycles = 640;
-      this.dmaIndex = 0;
-      this.dmaSubcycle = 0;
+      // The write is M-cycle 0, followed by one complete setup M-cycle.
+      // A fresh transfer therefore starts at M=2. When a running transfer is
+      // restarted, the old transfer keeps ownership of OAM during both setup
+      // cycles and is replaced only when the new source becomes active.
+      this.dmaPendingSource = value << 8;
+      this.dmaStartDelay = 8;
       return;
     }
     if (register === 0x4d) {
-      if (this.model === "cgb") this.speedSwitchArmed = !!(value & 1);
+      if (this.cgbRegistersAvailable()) this.speedSwitchArmed = !!(value & 1);
       return;
     }
     if (register === 0x4f) {
-      if (this.cgbRegistersAvailable()) this.vramBank = value & 1;
+      if (this.model === "cgb") this.vramBank = value & 1;
       return;
     }
     if (register === 0x50) {
@@ -943,11 +1221,22 @@ export class GameBoy {
       this.io[0x50] = value;
       return;
     }
+    if (register === 0x56) {
+      if (this.model === "cgb") {
+        this.io[0x56] = value & 0xc1;
+        const output = !!(value & 1);
+        if (output !== this.infraredOutput) {
+          this.infraredOutput = output;
+          this.onInfraredOutput?.(output);
+        }
+      }
+      return;
+    }
     if (register >= 0x51 && register <= 0x55) {
       if (this.cgbRegistersAvailable()) this.writeHDMA(register, value);
       return;
     }
-    if (register === 0x68) { if (this.cgbRegistersAvailable()) this.bgPaletteIndex = value & 0xbf; return; }
+    if (register === 0x68) { if (this.model === "cgb") this.bgPaletteIndex = value & 0xbf; return; }
     if (register === 0x69) {
       if (this.cgbRegistersAvailable() && this.ppuMode !== 3) {
         this.bgPalette[this.bgPaletteIndex & 0x3f] = value;
@@ -955,7 +1244,7 @@ export class GameBoy {
       }
       return;
     }
-    if (register === 0x6a) { if (this.cgbRegistersAvailable()) this.objPaletteIndex = value & 0xbf; return; }
+    if (register === 0x6a) { if (this.model === "cgb") this.objPaletteIndex = value & 0xbf; return; }
     if (register === 0x6b) {
       if (this.cgbRegistersAvailable() && this.ppuMode !== 3) {
         this.objPalette[this.objPaletteIndex & 0x3f] = value;
@@ -965,7 +1254,20 @@ export class GameBoy {
     }
     if (register === 0x6c) { if (this.cgbRegistersAvailable()) this.opri = value & 1; return; }
     if (register === 0x70) { if (this.cgbRegistersAvailable()) this.wramBank = value & 7 || 1; return; }
-    this.io[register] = value;
+    if (register === 0x72 || register === 0x73) {
+      if (this.model === "cgb") this.io[register] = value;
+      return;
+    }
+    if (register === 0x75) {
+      if (this.model === "cgb") this.io[0x75] = value & 0x70;
+      return;
+    }
+    if (register === 0x76 || register === 0x77) return;
+    if (
+      register === 0x42
+      || register === 0x43
+      || (register >= 0x47 && register <= 0x4b)
+    ) this.io[register] = value;
   }
 
   readJoypad() {
@@ -979,13 +1281,24 @@ export class GameBoy {
     const bits = { right: 0, left: 1, up: 2, down: 3, a: 4, b: 5, select: 6, start: 7 };
     const bit = bits[button];
     if (bit === undefined) return;
-    const before = this.joypad;
+    const before = this.readJoypad();
     if (pressed) this.joypad &= ~(1 << bit);
     else this.joypad |= 1 << bit;
-    if ((before & (1 << bit)) && !(this.joypad & (1 << bit))) {
-      this.requestInterrupt(4);
-      this.stopped = false;
-    }
+    const after = this.readJoypad();
+    if ((before & ~after & 0x0f) !== 0) this.requestInterrupt(4);
+    if (pressed) this.stopped = false;
+  }
+
+  setSerialEndpoint(endpoint) {
+    this.serialEndpoint = typeof endpoint === "function" ? endpoint : null;
+  }
+
+  setInfraredInput(active) {
+    this.infraredInput = !!active;
+  }
+
+  setInfraredOutputHandler(handler) {
+    this.onInfraredOutput = typeof handler === "function" ? handler : null;
   }
 
   requestInterrupt(bit) {
@@ -1002,8 +1315,47 @@ export class GameBoy {
     return !!(this.divCounter & (1 << (this.doubleSpeed ? 13 : 12)));
   }
 
+  serialDividerSignal() {
+    // Each falling edge is one serial bit. DIV bit 8 yields 8192 bit/s at
+    // normal speed; CGB fast mode uses bit 3 for 262144 bit/s. The serial
+    // divider's reset phase leads the software-visible system counter by one
+    // M-cycle on production DMG/MGB silicon.
+    const bit = this.cgbMode && (this.serialControl & 2) ? 3 : 8;
+    return !!(((this.divCounter + 4) & 0xffff) & (1 << bit));
+  }
+
+  clockSerialMaster() {
+    if (
+      (this.serialControl & 0x81) !== 0x81
+      || this.serialBits <= 0
+    ) return;
+    const outgoing = (this.serialData >> 7) & 1;
+    const incoming = this.serialEndpoint?.(outgoing, this);
+    this.shiftSerialBit(incoming === 0 ? 0 : 1);
+  }
+
+  clockSerialExternal(inputBit = 1) {
+    if (
+      (this.serialControl & 0x81) !== 0x80
+      || this.serialBits <= 0
+    ) return null;
+    const outgoing = (this.serialData >> 7) & 1;
+    this.shiftSerialBit(inputBit === 0 ? 0 : 1);
+    return outgoing;
+  }
+
+  shiftSerialBit(inputBit) {
+    this.serialData = ((this.serialData << 1) | inputBit) & 0xff;
+    this.serialBits -= 1;
+    if (this.serialBits > 0) return;
+    this.serialOutput += String.fromCharCode(this.serialTransmitByte);
+    this.serialControl &= 0x7f;
+    this.serialCycles = 0;
+    this.requestInterrupt(3);
+  }
+
   incrementTima() {
-    if (this.timerReload) return;
+    if (this.timerReload || this.timerReloading) return;
     if (this.tima === 0xff) {
       this.tima = 0;
       this.timerReload = 4;
@@ -1011,30 +1363,88 @@ export class GameBoy {
   }
 
   tick(cycles) {
-    for (let i = 0; i < cycles; i += 1) {
-      if (!this.stopped) {
-        const before = this.timerSignal();
-        const apuBefore = this.apuDividerSignal();
-        this.divCounter = (this.divCounter + 1) & 0xffff;
-        if (before && !this.timerSignal()) this.incrementTima();
-        if (apuBefore && !this.apuDividerSignal()) this.clockAPUFrameSequencer();
+    if (
+      cycles > 0
+      && !this.stopped
+      && !this.timerReload
+      && !this.timerReloading
+      && this.dmaCycles <= 0
+      && this.dmaStartDelay <= 0
+      && ((this.serialControl & 0x81) !== 0x81 || this.serialBits <= 0)
+    ) {
+      const previousDivider = this.divCounter;
+      const apuPeriod = 2 << (this.doubleSpeed ? 13 : 12);
+      const firstApuEdge = apuPeriod - (previousDivider & (apuPeriod - 1));
+      const crossesApuEdge = cycles >= firstApuEdge;
+      let timerEdges = 0;
+      if (this.tac & 4) {
+        const timerPeriod = TIMER_MASKS[this.tac & 3] << 1;
+        const firstTimerEdge = timerPeriod - (previousDivider & (timerPeriod - 1));
+        if (cycles >= firstTimerEdge) {
+          timerEdges = 1 + Math.floor((cycles - firstTimerEdge) / timerPeriod);
+        }
       }
+      if (!crossesApuEdge && this.tima + timerEdges <= 0xff) {
+        this.divCounter = (previousDivider + cycles) & 0xffff;
+        this.tima += timerEdges;
+        const phaseTotal = this.speedSubcycle + cycles;
+        const ppuClocks = this.doubleSpeed ? phaseTotal >> 1 : cycles;
+        this.speedSubcycle = this.doubleSpeed ? phaseTotal & 1 : 0;
+        if (ppuClocks > 0) {
+          this.baseCycles += ppuClocks;
+          if (this.io[0x40] & 0x80) this.advancePPU(ppuClocks);
+          this.apuPendingClocks += ppuClocks;
+        }
+        this.cycles += cycles;
+        return;
+      }
+    }
+
+    let pendingPpuClocks = 0;
+    const requiresDotStepping = this.dmaCycles > 0 || this.dmaStartDelay > 0;
+    for (let i = 0; i < cycles; i += 1) {
+      // Keep the reload phase observable until the next T-cycle boundary.
+      // CPU writes occur between tick batches, so TIMA/TMA can reproduce the
+      // hardware's special write behavior on the exact reload cycle.
+      if (this.timerReloading) this.timerReloading = false;
+      // Advance a pending overflow before evaluating this T-cycle's falling
+      // edge. An overflow created below must retain the full four-cycle delay;
+      // decrementing it in the same cycle would reload one T-cycle too early.
       if (this.timerReload > 0) {
         this.timerReload -= 1;
         if (this.timerReload === 0) {
           this.timerReloading = true;
           this.tima = this.tma;
           this.requestInterrupt(2);
-          this.timerReloading = false;
         }
       }
-      if (this.serialCycles > 0) {
-        this.serialCycles -= 1;
-        if (this.serialCycles === 0) {
-          this.serialOutput += String.fromCharCode(this.serialData);
-          this.serialData = 0xff;
-          this.serialControl &= 0x7f;
-          this.requestInterrupt(3);
+      if (!this.stopped) {
+        const previousDivider = this.divCounter;
+        const nextDivider = (previousDivider + 1) & 0xffff;
+        this.divCounter = nextDivider;
+
+        // These are all divider falling-edge detectors. Keeping the bit tests
+        // together avoids six hot-path method calls per T-cycle without
+        // changing the order in which the timer, APU, and serial unit observe
+        // the edge.
+        if (this.tac & 4) {
+          const timerMask = TIMER_MASKS[this.tac & 3];
+          if ((previousDivider & timerMask) && !(nextDivider & timerMask)) {
+            this.incrementTima();
+          }
+        }
+        const apuMask = 1 << (this.doubleSpeed ? 13 : 12);
+        if ((previousDivider & apuMask) && !(nextDivider & apuMask)) {
+          this.flushAPU();
+          this.clockAPUFrameSequencer();
+        }
+        if ((this.serialControl & 0x81) === 0x81 && this.serialBits > 0) {
+          const serialMask = 1 << (this.cgbMode && (this.serialControl & 2) ? 3 : 8);
+          const previousSerial = (previousDivider + 4) & 0xffff;
+          const nextSerial = (nextDivider + 4) & 0xffff;
+          if ((previousSerial & serialMask) && !(nextSerial & serialMask)) {
+            this.clockSerialMaster();
+          }
         }
       }
       if (this.dmaCycles > 0) {
@@ -1043,9 +1453,18 @@ export class GameBoy {
         if (this.dmaSubcycle >= 4) {
           this.dmaSubcycle = 0;
           if (this.dmaIndex < 0xa0) {
-            this.oam[this.dmaIndex] = this.read8(this.dmaSource + this.dmaIndex, true);
+            this.oam[this.dmaIndex] = this.readDmaSource(this.dmaSource + this.dmaIndex);
             this.dmaIndex += 1;
           }
+        }
+      }
+      if (this.dmaStartDelay > 0) {
+        this.dmaStartDelay -= 1;
+        if (this.dmaStartDelay === 0) {
+          this.dmaSource = this.dmaPendingSource;
+          this.dmaCycles = 640;
+          this.dmaIndex = 0;
+          this.dmaSubcycle = 0;
         }
       }
       // In CGB double-speed mode the CPU, divider, serial unit, and OAM DMA
@@ -1053,41 +1472,143 @@ export class GameBoy {
       // separate fixes half-speed video and pitched-up audio after KEY1/STOP.
       this.speedSubcycle = (this.speedSubcycle + 1) & 1;
       if (!this.doubleSpeed || this.speedSubcycle === 0) {
-        this.tickPPU();
-        this.tickAPU();
+        this.baseCycles += 1;
+        if (this.io[0x40] & 0x80) {
+          if (requiresDotStepping) this.tickPPU();
+          else pendingPpuClocks += 1;
+        }
+        this.apuPendingClocks += 1;
       }
       this.cycles += 1;
     }
+    if (pendingPpuClocks > 0) this.advancePPU(pendingPpuClocks);
   }
 
   displayLy() {
     return this.ly === 153 && this.ppuDot >= 4 ? 0 : this.ly;
   }
 
+  cpuVisiblePPUMode() {
+    return this.ppuBusDot === this.ppuDot && this.ppuBusLine === this.ly
+      ? this.ppuBusMode
+      : this.ppuMode;
+  }
+
+  cpuAccessPPUMode(write = false) {
+    // At the first dot of a scanline STAT still reports mode 0, while the OAM
+    // read bus has already been claimed by mode 2. Writes at that same edge
+    // still land in HBlank. At steady-state transitions, writes see the new
+    // owner while reads retain the old owner only during the mode-3 release.
+    if (write) {
+      const atTransition = this.ppuBusDot === this.ppuDot
+        && this.ppuBusLine === this.ly
+        && this.ppuBusMode !== this.ppuMode;
+      return atTransition ? (this.ppuBusMode === 3 ? 3 : 0) : this.ppuMode;
+    }
+    if (this.ppuMode === 3 || this.ppuDot === 0) return this.ppuMode;
+    return this.cpuVisiblePPUMode();
+  }
+
+  rememberPPUBusMode(mode) {
+    this.ppuBusMode = mode;
+    this.ppuBusDot = this.ppuDot;
+    this.ppuBusLine = this.ly;
+  }
+
   tickPPU() {
     if (!(this.io[0x40] & 0x80)) return;
-    this.ppuDot += 1;
-    if (this.ly < 144 && this.ppuDot === 1) this.ppuMode3End = this.calculateMode3End(this.ly);
+    this.advancePPU(1);
+  }
+
+  advancePPU(clocks) {
+    if (!(this.io[0x40] & 0x80)) return;
+    while (clocks > 0) {
+      const lineEnd = this.lcdStartup && this.ly === 0 ? 452 : 456;
+      let nextEvent = lineEnd;
+      if (this.ppuDot < 1) nextEvent = 1;
+      if (this.ly < 144) {
+        if (this.lcdStartup && this.ly === 0) {
+          if (this.ppuDot < 79) nextEvent = Math.min(nextEvent, 79);
+          if (this.ppuDot < 251) nextEvent = Math.min(nextEvent, 251);
+        } else {
+          if (this.ppuDot < 80) nextEvent = Math.min(nextEvent, 80);
+          if (this.ppuDot < this.ppuMode3End) {
+            nextEvent = Math.min(nextEvent, this.ppuMode3End);
+          }
+        }
+      }
+      if (this.model === "cgb" && this.ly === 143 && this.ppuDot < 452) {
+        nextEvent = Math.min(nextEvent, 452);
+      }
+      if (this.ly === 153 && this.ppuDot < 4) nextEvent = Math.min(nextEvent, 4);
+
+      const distance = nextEvent - this.ppuDot;
+      if (distance > clocks) {
+        this.ppuDot += clocks;
+        return;
+      }
+      this.ppuDot = nextEvent;
+      clocks -= distance;
+      this.processPPUEvent();
+    }
+  }
+
+  processPPUEvent() {
+    if (this.ppuDot === 1) {
+      const match = this.displayLy() === this.io[0x45];
+      if (match !== this.lycMatch) {
+        this.lycMatch = match;
+        this.updateStat();
+      }
+    }
+    if (this.ly < 144 && this.ppuDot === 1 && !this.lcdStartup) {
+      this.ppuMode3End = this.calculateMode3End(this.ly);
+    }
 
     let newMode = this.ppuMode;
     if (this.ly >= 144) newMode = 1;
+    else if (this.lcdStartup && this.ly === 0) {
+      // LCD power-on begins two dots out of phase with an ordinary scanline.
+      // CPU bus reads at the mode boundary observe the post-transition startup
+      // mode, unlike steady-state scanlines where the old mode remains visible
+      // for that bus sample.
+      if (this.ppuDot < 79) newMode = 0;
+      else if (this.ppuDot < 251) newMode = 3;
+      else newMode = 0;
+    }
     else if (this.ppuDot < 80) newMode = 2;
     else if (this.ppuDot < this.ppuMode3End) newMode = 3;
     else newMode = 0;
 
     if (newMode !== this.ppuMode) {
       const previous = this.ppuMode;
+      this.rememberPPUBusMode(previous);
       this.ppuMode = newMode;
       if (previous === 3 && newMode === 0 && this.ly < 144) {
         this.renderLine(this.ly);
-        if (this.hdmaActive) this.transferHDMABlock();
+        if (this.hdmaActive && !this.halted && !this.stopped) this.startHDMABlock();
       }
       this.updateStat();
     }
 
-    if (this.ppuDot >= 456) {
+    if (
+      this.model === "cgb"
+      && this.ly === 143
+      && this.ppuDot === 452
+      && (this.io[0x41] & 0x20)
+    ) {
+      // CGB exposes the line-144 OAM STAT source one M-cycle before VBlank.
+      // This is an interrupt-line quirk only: the CPU-visible STAT mode does
+      // not become mode 2. DMG instead aliases the source after VBlank begins.
+      if (!this.statSignal) this.requestInterrupt(1);
+      this.statSignal = true;
+    }
+
+    if (this.ppuDot >= (this.lcdStartup && this.ly === 0 ? 452 : 456)) {
       this.ppuDot = 0;
       this.ly += 1;
+      this.lcdStartup = false;
+      const previous = this.ppuMode;
       if (this.ly === 144) {
         this.ppuMode = 1;
         this.requestInterrupt(0);
@@ -1101,21 +1622,26 @@ export class GameBoy {
       } else if (this.ly < 144) {
         this.ppuMode = 2;
       }
+      if (this.ppuMode !== previous) this.rememberPPUBusMode(previous);
+      // LY changes before the equality comparator has sampled the new line.
+      // Equality is therefore low for dot 0 and is latched at dot 1.
+      this.lycMatch = false;
       this.updateStat();
     } else if (this.ly === 153 && this.ppuDot === 4) {
+      this.lycMatch = this.io[0x45] === 0;
       this.updateStat();
     }
   }
 
   updateStat() {
     if (!(this.io[0x40] & 0x80)) {
-      this.statSignal = false;
       return;
     }
     const stat = this.io[0x41];
     const signal =
-      ((this.displayLy() === this.io[0x45]) && !!(stat & 0x40)) ||
-      (this.ppuMode === 2 && !!(stat & 0x20)) ||
+      (this.lycMatch && !!(stat & 0x40)) ||
+      ((this.ppuMode === 2 || (this.model === "dmg" && this.ppuMode === 1 && this.ly === 144))
+        && !!(stat & 0x20)) ||
       (this.ppuMode === 1 && !!(stat & 0x10)) ||
       (this.ppuMode === 0 && !!(stat & 0x08));
     if (signal && !this.statSignal) this.requestInterrupt(1);
@@ -1125,7 +1651,8 @@ export class GameBoy {
   calculateMode3End(line) {
     const lcdc = this.io[0x40];
     let selected = 0;
-    let visibleSprites = 0;
+    let spritePenalty = 0;
+    const spriteXGroups = new Set();
     if (lcdc & 0x02) {
       const spriteHeight = lcdc & 0x04 ? 16 : 8;
       for (let index = 0; index < 40 && selected < 10; index += 1) {
@@ -1133,7 +1660,16 @@ export class GameBoy {
         if (line < y || line >= y + spriteHeight) continue;
         selected += 1;
         const x = this.oam[index * 4 + 1];
-        if (x > 0 && x < 168) visibleSprites += 1;
+        if (x >= 168) continue;
+        // Every fetched object costs six dots. The first object at a given X
+        // also waits for the BG fetcher's 8-dot phase; coincident objects share
+        // that alignment stall. This is why ten objects at one X are much
+        // cheaper than ten objects spaced eight pixels apart.
+        spritePenalty += 6;
+        if (!spriteXGroups.has(x)) {
+          spriteXGroups.add(x);
+          spritePenalty += 5 - Math.min(5, (x + this.io[0x43]) & 7);
+        }
       }
     }
     const windowStarts = !!(lcdc & 0x20)
@@ -1142,7 +1678,7 @@ export class GameBoy {
     // The exact FIFO penalty depends on alignment and fetch collisions. This
     // bounded model preserves the documented 172-dot baseline, SCX discard,
     // window restart, and per-object stalls instead of the old fixed Mode 3.
-    return Math.min(369, 252 + (this.io[0x43] & 7) + visibleSprites * 6 + (windowStarts ? 6 : 0));
+    return Math.min(369, 252 + (this.io[0x43] & 7) + spritePenalty + (windowStarts ? 6 : 0));
   }
 
   renderLine(line) {
@@ -1313,13 +1849,35 @@ export class GameBoy {
       this.hdmaActive = false;
       return;
     }
+    if (this.hdmaActive) return;
     this.hdmaSource = ((this.io[0x51] << 8) | (this.io[0x52] & 0xf0)) & 0xfff0;
     this.hdmaDestination = 0x8000 | (((this.io[0x53] & 0x1f) << 8) | (this.io[0x54] & 0xf0));
     this.hdmaBlocks = (value & 0x7f) + 1;
-    if (value & 0x80) this.hdmaActive = true;
-    else {
+    if (value & 0x80) {
+      this.hdmaActive = true;
+      // Starting during HBlank begins immediately. With LCD off, hardware
+      // copies one block and then waits for a future visible HBlank.
+      if (
+        (!(this.io[0x40] & 0x80) || (this.ppuMode === 0 && this.ly < 144))
+        && !this.halted
+        && !this.stopped
+      ) this.startHDMABlock();
+    } else {
+      const blocks = this.hdmaBlocks;
       while (this.hdmaBlocks > 0) this.transferHDMABlock();
+      // General DMA halts the CPU for four setup clocks plus 32 dots per
+      // block. In double speed, each dot spans two CPU T-cycles.
+      const stall = 4 + blocks * 32 * (this.doubleSpeed ? 2 : 1);
+      this.tick(stall);
+      this.instructionTicks += stall;
     }
+  }
+
+  startHDMABlock() {
+    if (!this.hdmaActive || this.hdmaBlocks <= 0) return false;
+    this.transferHDMABlock();
+    this.hdmaStallCycles += 32 * (this.doubleSpeed ? 2 : 1);
+    return true;
   }
 
   transferHDMABlock() {
@@ -1333,9 +1891,12 @@ export class GameBoy {
       this.write8(destination, this.read8(source, true), true);
     }
     this.hdmaSource = (this.hdmaSource + 0x10) & 0xffff;
-    this.hdmaDestination = 0x8000 | ((this.hdmaDestination + 0x10 - 0x8000) & 0x1fff);
+    this.hdmaDestination += 0x10;
     this.hdmaBlocks -= 1;
-    if (this.hdmaBlocks <= 0) this.hdmaActive = false;
+    if (this.hdmaBlocks <= 0 || this.hdmaDestination >= 0xa000) {
+      this.hdmaBlocks = 0;
+      this.hdmaActive = false;
+    }
   }
 
   updateRTC() {
@@ -1365,18 +1926,18 @@ export class GameBoy {
   readRTC(register) {
     this.updateRTC();
     const rtc = this.latchedRTC || this.rtc;
-    if (register === 0x08) return rtc.seconds;
-    if (register === 0x09) return rtc.minutes;
-    if (register === 0x0a) return rtc.hours;
+    if (register === 0x08) return rtc.seconds & 0x3f;
+    if (register === 0x09) return rtc.minutes & 0x3f;
+    if (register === 0x0a) return rtc.hours & 0x1f;
     if (register === 0x0b) return rtc.days & 0xff;
     return ((rtc.days >> 8) & 1) | (rtc.halt ? 0x40 : 0) | (rtc.carry ? 0x80 : 0);
   }
 
   writeRTC(register, value) {
     this.updateRTC();
-    if (register === 0x08) this.rtc.seconds = value % 60;
-    else if (register === 0x09) this.rtc.minutes = value % 60;
-    else if (register === 0x0a) this.rtc.hours = value % 24;
+    if (register === 0x08) this.rtc.seconds = value;
+    else if (register === 0x09) this.rtc.minutes = value;
+    else if (register === 0x0a) this.rtc.hours = value;
     else if (register === 0x0b) this.rtc.days = (this.rtc.days & 0x100) | value;
     else {
       this.rtc.days = (this.rtc.days & 0xff) | ((value & 1) << 8);
@@ -1388,6 +1949,19 @@ export class GameBoy {
   }
 
   readAPU(register) {
+    this.flushAPU();
+    if (register >= 0x30 && register <= 0x3f) {
+      if (this.ch3.enabled) {
+        if (this.model === "dmg" && this.ch3.waveAccess <= 0) return 0xff;
+        return this.io[0x30 + (this.ch3.wavePosition >> 1)];
+      }
+      return this.io[register];
+    }
+    if (
+      register === 0x15
+      || register === 0x1f
+      || (register >= 0x27 && register <= 0x2f)
+    ) return 0xff;
     if (register === 0x26) {
       return (this.io[0x26] & 0x80) | 0x70 |
         (this.ch1.enabled ? 1 : 0) | (this.ch2.enabled ? 2 : 0) |
@@ -1403,10 +1977,16 @@ export class GameBoy {
   }
 
   writeAPU(register, value) {
+    this.flushAPU();
+    if (
+      register === 0x15
+      || register === 0x1f
+      || (register >= 0x27 && register <= 0x2f)
+    ) return;
     if (register === 0x26) {
       if (!(value & 0x80)) {
         for (let i = 0x10; i <= 0x25; i += 1) this.io[i] = 0;
-        this.apuReset();
+        this.apuReset(this.model === "dmg");
         this.io[0x26] = 0;
       } else {
         this.io[0x26] = 0x80;
@@ -1414,7 +1994,24 @@ export class GameBoy {
       }
       return;
     }
-    if (!(this.io[0x26] & 0x80) && register < 0x30) return;
+    if (register >= 0x30 && register <= 0x3f) {
+      if (this.ch3.enabled) {
+        if (this.model !== "dmg" || this.ch3.waveAccess > 0) {
+          this.io[0x30 + (this.ch3.wavePosition >> 1)] = value;
+        }
+      } else this.io[register] = value;
+      return;
+    }
+    if (!(this.io[0x26] & 0x80)) {
+      // DMG length counters remain writable and retain their value while the
+      // APU is powered down. Other sound-register writes are ignored.
+      if (this.model !== "dmg" || ![0x11, 0x16, 0x1b, 0x20].includes(register)) return;
+      if (register === 0x11) this.ch1.length = 64 - (value & 0x3f);
+      else if (register === 0x16) this.ch2.length = 64 - (value & 0x3f);
+      else if (register === 0x1b) this.ch3.length = 256 - value;
+      else this.ch4.length = 64 - (value & 0x3f);
+      return;
+    }
     const previous = this.io[register];
     if (
       register === 0x10
@@ -1442,22 +2039,42 @@ export class GameBoy {
     if (register === 0x1a && !(value & 0x80)) this.ch3.enabled = false;
     if (register === 0x21 && (value & 0xf8) === 0) this.ch4.enabled = false;
     if (register === 0x14) {
-      if (value & 0x80) this.triggerSquare(this.ch1, 0x12);
+      if (value & 0x80) {
+        this.prepareTriggeredLength(this.ch1, previous, value);
+        this.triggerSquare(this.ch1, 0x12);
+      }
       this.applyLengthControl(this.ch1, previous, value, 64, !!(value & 0x80));
     }
     if (register === 0x19) {
-      if (value & 0x80) this.triggerSquare(this.ch2, 0x17);
+      if (value & 0x80) {
+        this.prepareTriggeredLength(this.ch2, previous, value);
+        this.triggerSquare(this.ch2, 0x17);
+      }
       this.applyLengthControl(this.ch2, previous, value, 64, !!(value & 0x80));
     }
     if (register === 0x1e && (value & 0x80)) {
+      this.prepareTriggeredLength(this.ch3, previous, value);
+      if (this.model === "dmg" && this.ch3.enabled && this.ch3.timer <= 2) {
+        const source = ((this.ch3.wavePosition + 1) >> 1) & 0x0f;
+        if (source < 4) this.io[0x30] = this.io[0x30 + source];
+        else {
+          const base = source & ~3;
+          const block = this.io.slice(0x30 + base, 0x34 + base);
+          for (let index = 0; index < 4; index += 1) this.io[0x30 + index] = block[index];
+        }
+      }
       this.ch3.enabled = !!(this.io[0x1a] & 0x80);
       if (this.ch3.length === 0) this.ch3.length = 256;
       this.ch3.phase = 0;
+      this.ch3.wavePosition = 0;
+      this.ch3.waveAccess = 0;
+      this.ch3.timer = this.ch3.timerPeriod + 6;
     }
     if (register === 0x1e) {
       this.applyLengthControl(this.ch3, previous, value, 256, !!(value & 0x80));
     }
     if (register === 0x23 && (value & 0x80)) {
+      this.prepareTriggeredLength(this.ch4, previous, value);
       this.updateNoiseStep();
       this.ch4.enabled = (this.io[0x21] & 0xf8) !== 0;
       if (this.ch4.length === 0) this.ch4.length = 64;
@@ -1466,6 +2083,7 @@ export class GameBoy {
       this.ch4.envRunning = (this.io[0x21] & 7) !== 0;
       this.ch4.lfsr = 0x7fff;
       this.ch4.phase = 0;
+      this.ch4.timer = this.ch4.timerPeriod;
     }
     if (register === 0x23) {
       this.applyLengthControl(this.ch4, previous, value, 64, !!(value & 0x80));
@@ -1490,6 +2108,15 @@ export class GameBoy {
     }
   }
 
+  prepareTriggeredLength(channel, previous, value) {
+    const enablingLength = !(previous & 0x40) && !!(value & 0x40);
+    if (enablingLength && (this.audioFrameStep & 1) === 1 && channel.length === 1) {
+      // Length enable clocks first. A simultaneous trigger then reloads the
+      // counter and subjects that reload to the trigger-side extra clock.
+      channel.length = 0;
+    }
+  }
+
   triggerSquare(channel, envelopeRegister) {
     channel.enabled = (this.io[envelopeRegister] & 0xf8) !== 0;
     if (channel.length === 0) channel.length = 64;
@@ -1498,6 +2125,7 @@ export class GameBoy {
     channel.envRunning = (this.io[envelopeRegister] & 7) !== 0;
     // Trigger resets the period timer but not the duty step counter.
     channel.phase = Math.floor(channel.phase * 8) / 8;
+    channel.timer = channel.timerPeriod;
     if (channel === this.ch1) {
       channel.shadow = this.squareFrequency(0x13, 0x14);
       const pace = (this.io[0x10] >> 4) & 7;
@@ -1513,25 +2141,31 @@ export class GameBoy {
     return this.io[lowRegister] | ((this.io[highRegister] & 7) << 8);
   }
 
+  noiseTimerPeriod() {
+    const nr43 = this.io[0x22];
+    const shift = nr43 >> 4;
+    return shift >= 14 ? 0x7fffffff : NOISE_PERIODS[nr43 & 7] << shift;
+  }
+
   updateSquareStep(channel, lowRegister, highRegister) {
     if (!channel) return;
     const frequency = this.squareFrequency(lowRegister, highRegister);
+    channel.timerPeriod = Math.max(4, (2048 - frequency) * 4);
     channel.phaseStep = 131072 / Math.max(1, 2048 - frequency) / this.audioRate;
   }
 
   updateWaveStep() {
     if (!this.ch3) return;
     const frequency = this.squareFrequency(0x1d, 0x1e);
+    this.ch3.timerPeriod = Math.max(2, (2048 - frequency) * 2);
     this.ch3.phaseStep = 65536 / Math.max(1, 2048 - frequency) / this.audioRate;
   }
 
   updateNoiseStep() {
     if (!this.ch4) return;
-    const nr43 = this.io[0x22];
-    const shift = nr43 >> 4;
-    this.ch4.phaseStep = shift >= 14
-      ? 0
-      : 262144 / NOISE_DIVISORS[nr43 & 7] / (1 << shift) / this.audioRate;
+    const period = this.noiseTimerPeriod();
+    this.ch4.timerPeriod = period;
+    this.ch4.phaseStep = period >= 0x7fffffff ? 0 : CPU_CLOCK / period / this.audioRate;
   }
 
   refreshAudioSteps() {
@@ -1542,11 +2176,69 @@ export class GameBoy {
   }
 
   tickAPU() {
-    if (!(this.io[0x26] & 0x80)) return;
-    this.audioClock += this.audioRate;
-    if (this.audioClock >= CPU_CLOCK) {
-      this.audioClock -= CPU_CLOCK;
-      this.mixAudioSample();
+    this.apuPendingClocks += 1;
+    this.flushAPU();
+  }
+
+  flushAPU() {
+    const clocks = this.apuPendingClocks;
+    if (clocks <= 0) return;
+    this.apuPendingClocks = 0;
+    this.advanceAPU(clocks);
+  }
+
+  advanceAPU(clocks) {
+    // CPU bus operations advance in short T-cycle batches. Jump between the
+    // next waveform/sample event rather than touching four channel timers on
+    // every individual clock. Events are still resolved in hardware order:
+    // all channel timers first, then the DAC sample for that same T-cycle.
+    while (clocks > 0) {
+      const powered = !!(this.io[0x26] & 0x80);
+      const clocksToSample = Math.max(
+        1,
+        Math.ceil((CPU_CLOCK - this.audioClock) / this.audioRate),
+      );
+      let advance = Math.min(clocks, clocksToSample);
+      if (powered) {
+        advance = Math.min(
+          advance,
+          Math.max(1, this.ch1.timer),
+          Math.max(1, this.ch2.timer),
+          Math.max(1, this.ch3.timer),
+          Math.max(1, this.ch4.timer),
+        );
+        this.ch1.timer -= advance;
+        this.ch2.timer -= advance;
+        this.ch3.timer -= advance;
+        this.ch4.timer -= advance;
+        this.ch3.waveAccess = Math.max(0, this.ch3.waveAccess - advance);
+      }
+      this.integrateAudioLevel(advance);
+      clocks -= advance;
+
+      if (powered) {
+        if (this.ch1.timer <= 0) {
+          this.ch1.timer += this.ch1.timerPeriod;
+          this.ch1.dutyPosition = (this.ch1.dutyPosition + 1) & 7;
+        }
+        if (this.ch2.timer <= 0) {
+          this.ch2.timer += this.ch2.timerPeriod;
+          this.ch2.dutyPosition = (this.ch2.dutyPosition + 1) & 7;
+        }
+        if (this.ch3.timer <= 0) {
+          this.ch3.timer += this.ch3.timerPeriod;
+          this.ch3.wavePosition = (this.ch3.wavePosition + 1) & 31;
+          this.ch3.waveAccess = 1;
+        }
+        if (this.ch4.timer <= 0) {
+          this.ch4.timer += this.ch4.timerPeriod;
+          const bit = (this.ch4.lfsr & 1) ^ ((this.ch4.lfsr >> 1) & 1);
+          this.ch4.lfsr = (this.ch4.lfsr >> 1) | (bit << 14);
+          if (this.io[0x22] & 8) {
+            this.ch4.lfsr = (this.ch4.lfsr & ~(1 << 6)) | (bit << 6);
+          }
+        }
+      }
     }
   }
 
@@ -1621,7 +2313,7 @@ export class GameBoy {
     }
   }
 
-  mixAudioSample() {
+  calculateAudioLevel() {
     const outputs = this.audioMix;
     outputs[0] = 0;
     outputs[1] = 0;
@@ -1631,16 +2323,14 @@ export class GameBoy {
       const channel = index === 0 ? this.ch1 : this.ch2;
       const dutyRegister = index === 0 ? 0x11 : 0x16;
       if (!channel.enabled) continue;
-      channel.phase = (channel.phase + channel.phaseStep) % 1;
       const duty = this.io[dutyRegister] >> 6;
       outputs[index] = (
-        DUTY_PATTERNS[duty][Math.floor(channel.phase * 8)] ? 1 : -1
+        DUTY_PATTERNS[duty][channel.dutyPosition] ? 1 : -1
       ) * (channel.volume / 15);
     }
 
     if (this.ch3.enabled && (this.io[0x1a] & 0x80)) {
-      this.ch3.phase = (this.ch3.phase + this.ch3.phaseStep) % 1;
-      const wavePosition = Math.floor(this.ch3.phase * 32);
+      const wavePosition = this.ch3.wavePosition;
       const byte = this.io[0x30 + (wavePosition >> 1)];
       let sample = (wavePosition & 1) ? (byte & 0x0f) : (byte >> 4);
       const level = (this.io[0x1c] >> 5) & 3;
@@ -1649,22 +2339,6 @@ export class GameBoy {
     }
 
     if (this.ch4.enabled) {
-      const nr43 = this.io[0x22];
-      this.ch4.phase += this.ch4.phaseStep;
-      let clocks = Math.floor(this.ch4.phase);
-      this.ch4.phase -= clocks;
-      const shortMode = !!(nr43 & 8);
-      const step8 = shortMode ? NOISE_STEP_8_SHORT : NOISE_STEP_8_LONG;
-      while (clocks >= 8) {
-        this.ch4.lfsr = step8[this.ch4.lfsr];
-        clocks -= 8;
-      }
-      while (clocks > 0) {
-        const bit = (this.ch4.lfsr & 1) ^ ((this.ch4.lfsr >> 1) & 1);
-        this.ch4.lfsr = (this.ch4.lfsr >> 1) | (bit << 14);
-        if (shortMode) this.ch4.lfsr = (this.ch4.lfsr & ~(1 << 6)) | (bit << 6);
-        clocks -= 1;
-      }
       outputs[3] = ((~this.ch4.lfsr & 1) ? 1 : -1) * (this.ch4.volume / 15);
     }
 
@@ -1678,6 +2352,35 @@ export class GameBoy {
     }
     left *= (((volume >> 4) & 7) + 1) / 32;
     right *= ((volume & 7) + 1) / 32;
+    outputs[4] = left;
+    outputs[5] = right;
+    return outputs;
+  }
+
+  integrateAudioLevel(clocks) {
+    const outputs = this.calculateAudioLevel();
+    let phase = clocks * this.audioRate;
+    const untilSample = CPU_CLOCK - this.audioClock;
+    if (phase < untilSample) {
+      this.audioIntegralLeft += outputs[4] * phase;
+      this.audioIntegralRight += outputs[5] * phase;
+      this.audioClock += phase;
+      return;
+    }
+
+    this.audioIntegralLeft += outputs[4] * untilSample;
+    this.audioIntegralRight += outputs[5] * untilSample;
+    this.pushAudioSample(
+      this.audioIntegralLeft / CPU_CLOCK,
+      this.audioIntegralRight / CPU_CLOCK,
+    );
+    phase -= untilSample;
+    this.audioClock = phase;
+    this.audioIntegralLeft = outputs[4] * phase;
+    this.audioIntegralRight = outputs[5] * phase;
+  }
+
+  pushAudioSample(left, right) {
     if (this.audioSampleCount + 2 > this.audioSamples.length) {
       const maximum = this.audioRate * 4;
       if (this.audioSamples.length >= maximum) {
@@ -1700,6 +2403,7 @@ export class GameBoy {
   }
 
   drainAudio() {
+    this.flushAPU();
     if (this.audioSampleCount === 0) return new Float32Array(0);
     const samples = this.audioSamples.slice(0, this.audioSampleCount);
     this.audioSampleCount = 0;
@@ -1750,9 +2454,39 @@ export class GameBoy {
   }
 
   step() {
+    if (this.speedSwitchCycles > 0) {
+      const stall = this.speedSwitchCycles;
+      this.speedSwitchCycles = 0;
+      this.tick(stall);
+      this.doubleSpeed = !this.doubleSpeed;
+      this.speedSubcycle = 0;
+      this.stopped = false;
+      return stall;
+    }
+    if (this.hdmaStallCycles > 0) {
+      const stall = this.hdmaStallCycles;
+      this.hdmaStallCycles = 0;
+      this.tick(stall);
+      return stall;
+    }
+    if (this.locked) {
+      this.tick(4);
+      return 4;
+    }
     const pending = this.ie & this.iflag & 0x1f;
     if (this.halted) {
-      if (pending) this.halted = false;
+      if (pending) {
+        this.halted = false;
+        if (this.hdmaActive && this.ppuMode === 0 && this.ly < 144) {
+          this.startHDMABlock();
+          if (this.hdmaStallCycles > 0) {
+            const stall = this.hdmaStallCycles;
+            this.hdmaStallCycles = 0;
+            this.tick(stall);
+            return stall;
+          }
+        }
+      }
       else {
         this.tick(4);
         return 4;
@@ -1775,22 +2509,40 @@ export class GameBoy {
     return cycles;
   }
 
-  serviceInterrupt(pending) {
-    let bit = 0;
-    while (!(pending & (1 << bit))) bit += 1;
+  serviceInterrupt() {
     this.ime = false;
     this.imeDelay = 0;
-    this.iflag &= ~(1 << bit);
-    this.tick(8);
-    this.instructionTicks += 8;
-    this.push16(this.pc);
-    this.pc = 0x40 + bit * 8;
-    this.tick(4);
-    this.instructionTicks += 4;
+    // Each entry M-cycle remains observable on the bus. In particular, the
+    // high-byte stack push can write IE when SP=$0000, cancelling or
+    // reprioritising the dispatch. A change made by the low push is too late.
+    this.cpuRead(this.pc, true);
+    this.cpuInternalCycle(this.sp);
+    this.sp = (this.sp - 1) & 0xffff;
+    this.cpuWrite(this.sp, this.pc >> 8);
+    let queue = this.ie & 0x1f;
+    this.sp = (this.sp - 1) & 0xffff;
+    this.cpuWrite(this.sp, this.pc);
+    queue &= this.iflag & 0x1f;
+    if (queue) {
+      let bit = 0;
+      while (!(queue & (1 << bit))) bit += 1;
+      this.iflag &= ~(1 << bit);
+      this.pc = 0x40 + bit * 8;
+    } else {
+      this.pc = 0;
+    }
+    this.cpuInternalCycle();
     return 20;
   }
 
   execute(opcode) {
+    if (ILLEGAL_OPCODES[opcode]) {
+      // These unassigned SM83 opcodes permanently lock the CPU until reset.
+      // Interrupts cannot recover the processor, although the other hardware
+      // clock domains continue to run.
+      this.locked = true;
+      return 4;
+    }
     const x = opcode >> 6;
     const y = (opcode >> 3) & 7;
     const z = opcode & 7;
@@ -1811,22 +2563,26 @@ export class GameBoy {
         }
         if (y === 2) {
           this.fetch8();
+          this.writeIO(0x04, 0);
           if (this.cgbMode && this.speedSwitchArmed) {
-            this.doubleSpeed = !this.doubleSpeed;
             this.speedSwitchArmed = false;
-            this.divCounter = 0;
-            this.speedSubcycle = 0;
+            this.stopped = true;
+            this.speedSwitchCycles = 8200;
           } else this.stopped = true;
-          return 4;
+          return 8;
         }
         if (y === 3) {
           value = signed8(this.fetch8());
+          const oldPc = this.pc;
           this.pc = clamp16(this.pc + value);
+          this.cpuInternalCycle(oldPc);
           return 12;
         }
         value = signed8(this.fetch8());
         if (this.condition(y - 4)) {
+          const oldPc = this.pc;
           this.pc = clamp16(this.pc + value);
+          this.cpuInternalCycle(oldPc);
           return 12;
         }
         return 8;
@@ -1839,6 +2595,7 @@ export class GameBoy {
         const hl = this.getHL();
         value = this.getPair(p);
         result = hl + value;
+        this.cpuInternalCycle();
         this.f = (this.f & FLAG_Z) | (((hl & 0xfff) + (value & 0xfff) > 0xfff) ? FLAG_H : 0) | (result > 0xffff ? FLAG_C : 0);
         this.setHL(result);
         return 8;
@@ -1846,13 +2603,15 @@ export class GameBoy {
       if (z === 2) {
         address = p === 0 ? this.getBC() : p === 1 ? this.getDE() : this.getHL();
         if (!q) this.cpuWrite(address, this.a);
-        else this.a = this.cpuRead(address);
+        else this.a = this.cpuRead(address, p >= 2);
         if (p === 2) this.setHL(address + 1);
         if (p === 3) this.setHL(address - 1);
         return 8;
       }
       if (z === 3) {
-        this.setPair(p, this.getPair(p) + (q ? -1 : 1));
+        const pair = this.getPair(p);
+        this.cpuInternalCycle(pair);
+        this.setPair(p, pair + (q ? -1 : 1));
         return 8;
       }
       if (z === 4) {
@@ -1913,8 +2672,10 @@ export class GameBoy {
 
     if (z === 0) {
       if (y < 4) {
+        this.cpuInternalCycle();
         if (this.condition(y)) {
           this.pc = this.pop16();
+          this.cpuInternalCycle();
           return 20;
         }
         return 8;
@@ -1923,6 +2684,8 @@ export class GameBoy {
       if (y === 5) {
         value = signed8(this.fetch8());
         const old = this.sp;
+        this.cpuInternalCycle();
+        this.cpuInternalCycle();
         result = clamp16(old + value);
         this.f = (((old & 0xf) + (value & 0xf) > 0xf) ? FLAG_H : 0) | (((old & 0xff) + (value & 0xff) > 0xff) ? FLAG_C : 0);
         this.sp = result;
@@ -1930,6 +2693,7 @@ export class GameBoy {
       }
       if (y === 6) { this.a = this.cpuRead(0xff00 | this.fetch8()); return 12; }
       value = signed8(this.fetch8());
+      this.cpuInternalCycle();
       result = clamp16(this.sp + value);
       this.f = (((this.sp & 0xf) + (value & 0xf) > 0xf) ? FLAG_H : 0) | (((this.sp & 0xff) + (value & 0xff) > 0xff) ? FLAG_C : 0);
       this.setHL(result);
@@ -1941,9 +2705,20 @@ export class GameBoy {
         this.setStackPair(p, this.pop16());
         return 12;
       }
-      if (p === 0) { this.pc = this.pop16(); return 16; }
-      if (p === 1) { this.pc = this.pop16(); this.ime = true; this.imeDelay = 0; return 16; }
+      if (p === 0) {
+        this.pc = this.pop16();
+        this.cpuInternalCycle();
+        return 16;
+      }
+      if (p === 1) {
+        this.pc = this.pop16();
+        this.cpuInternalCycle();
+        this.ime = true;
+        this.imeDelay = 0;
+        return 16;
+      }
       if (p === 2) { this.pc = this.getHL(); return 4; }
+      this.cpuInternalCycle(this.getHL());
       this.sp = this.getHL();
       return 8;
     }
@@ -1951,7 +2726,11 @@ export class GameBoy {
     if (z === 2) {
       if (y < 4) {
         address = this.fetch16();
-        if (this.condition(y)) { this.pc = address; return 16; }
+        if (this.condition(y)) {
+          this.pc = address;
+          this.cpuInternalCycle();
+          return 16;
+        }
         return 12;
       }
       if (y === 4) { this.cpuWrite(0xff00 | this.c, this.a); return 8; }
@@ -1962,10 +2741,19 @@ export class GameBoy {
     }
 
     if (z === 3) {
-      if (y === 0) { this.pc = this.fetch16(); return 16; }
+      if (y === 0) {
+        this.pc = this.fetch16();
+        this.cpuInternalCycle();
+        return 16;
+      }
       if (y === 1) return this.executeCB(this.fetch8());
       if (y === 6) { this.ime = false; this.imeDelay = 0; return 4; }
-      if (y === 7) { this.imeDelay = 2; return 4; }
+      if (y === 7) {
+        // Repeated EI instructions do not continually postpone the enable.
+        // Once scheduled, IME becomes active after the following instruction.
+        if (!this.ime && this.imeDelay === 0) this.imeDelay = 2;
+        return 4;
+      }
       return 4;
     }
 
@@ -1973,6 +2761,7 @@ export class GameBoy {
       if (y < 4) {
         address = this.fetch16();
         if (this.condition(y)) {
+          this.cpuInternalCycle(this.sp);
           this.push16(this.pc);
           this.pc = address;
           return 24;
@@ -1984,11 +2773,13 @@ export class GameBoy {
 
     if (z === 5) {
       if (!q) {
+        this.cpuInternalCycle(this.sp);
         this.push16(this.getStackPair(p));
         return 16;
       }
       if (p === 0) {
         address = this.fetch16();
+        this.cpuInternalCycle(this.sp);
         this.push16(this.pc);
         this.pc = address;
         return 24;
@@ -2001,6 +2792,7 @@ export class GameBoy {
       return 8;
     }
 
+    this.cpuInternalCycle(this.sp);
     this.push16(this.pc);
     this.pc = y * 8;
     return 16;
@@ -2056,8 +2848,17 @@ export class GameBoy {
     this.runFrameCalls += 1;
     this.frameReady = false;
     const start = this.cycles;
-    const budget = maxCycles ?? FRAME_CYCLES * 2 + 32;
-    while (!this.frameReady && this.cycles - start < budget) this.step();
+    const startBase = this.baseCycles;
+    if (maxCycles !== null) {
+      while (!this.frameReady && this.cycles - start < maxCycles) this.step();
+    } else {
+      // VBlank normally supplies the host-frame boundary. With LCDC disabled
+      // there is no VBlank, so fall back to one base-clock frame rather than
+      // the old fixed two-frame CPU budget. This keeps menus, fades, and games
+      // that deliberately blank the LCD at the real 59.7275 Hz cadence in
+      // both normal and double-speed modes.
+      while (!this.frameReady && this.baseCycles - startBase < FRAME_CYCLES) this.step();
+    }
     return this.frameReady;
   }
 
@@ -2109,6 +2910,7 @@ export class GameBoy {
 
   exportState() {
     if (!this.hasROM) return null;
+    this.flushAPU();
     const scalars = {};
     for (const key of STATE_SCALARS) scalars[key] = this[key];
     return {

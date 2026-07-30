@@ -380,11 +380,20 @@ function waitForVisualStability(element, {
 }
 
 const AUDIO_LATENCY_PRESETS = {
-  low: { label: "Low", target: 768, buffer: 1024, maximum: 2816 },
-  balanced: { label: "Balanced", target: 1280, buffer: 2048, maximum: 3328 },
-  stable: { label: "Stable", target: 2560, buffer: 4096, maximum: 5120 },
-  deep: { label: "Deep", target: 4096, buffer: 4096, maximum: 8192 },
+  low: { label: "Low", target: 768, maximum: 2816 },
+  balanced: { label: "Balanced", target: 1280, maximum: 3328 },
+  stable: { label: "Stable", target: 2560, maximum: 5120 },
+  deep: { label: "Deep", target: 4096, maximum: 8192 },
 };
+
+function audioPresetAtRate(preset, sampleRate = 48000) {
+  const scale = Math.max(8000, sampleRate) / 48000;
+  return {
+    ...preset,
+    target: Math.max(128, Math.round(preset.target * scale)),
+    maximum: Math.max(640, Math.round(preset.maximum * scale)),
+  };
+}
 
 const CATCH_UP_BUDGETS = {
   cool: { label: "Cool", milliseconds: 4 },
@@ -400,6 +409,11 @@ const FRAME_SKIP_PRESETS = {
 };
 
 const MINIMUM_BUTTON_PRESS_MS = 50;
+const APU_CLOCK_RATE = 4194304;
+
+function audioHighPassCoefficient(sampleRate) {
+  return Math.pow(0.999958, APU_CLOCK_RATE / Math.max(1, sampleRate));
+}
 
 const AUDIO_WORKLET_SOURCE = `
 class GbLabAudioProcessor extends AudioWorkletProcessor {
@@ -413,13 +427,24 @@ class GbLabAudioProcessor extends AudioWorkletProcessor {
     this.maximum = 3328;
     this.started = false;
     this.ramp = 0;
+    this.tail = 0;
     this.gain = .7;
     this.filter = true;
+    this.filterCoefficient = .99634;
     this.previousInputLeft = 0;
     this.previousInputRight = 0;
     this.previousOutputLeft = 0;
     this.previousOutputRight = 0;
-    this.correction = 0;
+    this.playbackRate = 1;
+    this.playbackPhase = 0;
+    this.currentLeft = 0;
+    this.currentRight = 0;
+    this.nextLeft = 0;
+    this.nextRight = 0;
+    this.pulledLeft = 0;
+    this.pulledRight = 0;
+    this.tailLeft = 0;
+    this.tailRight = 0;
     this.callbacks = 0;
     this.underruns = 0;
     this.overruns = 0;
@@ -433,7 +458,6 @@ class GbLabAudioProcessor extends AudioWorkletProcessor {
           if (this.buffered > this.maximum) {
             this.trimFrames(this.buffered - this.maximum);
             this.overruns += 1;
-            this.ramp = 0;
           }
         }
       } else if (data.type === "settings") {
@@ -441,6 +465,7 @@ class GbLabAudioProcessor extends AudioWorkletProcessor {
         this.maximum = Math.max(data.maximum, data.target + 512);
         this.gain = data.gain;
         this.filter = data.filter;
+        this.filterCoefficient = data.filterCoefficient;
         if (this.buffered > this.maximum) {
           this.trimFrames(this.buffered - this.maximum);
         }
@@ -451,7 +476,15 @@ class GbLabAudioProcessor extends AudioWorkletProcessor {
         this.buffered = 0;
         this.started = false;
         this.ramp = 0;
-        this.correction = 0;
+        this.tail = 0;
+        this.playbackRate = 1;
+        this.playbackPhase = 0;
+        this.currentLeft = 0;
+        this.currentRight = 0;
+        this.nextLeft = 0;
+        this.nextRight = 0;
+        this.tailLeft = 0;
+        this.tailRight = 0;
         this.underruns = 0;
         this.overruns = 0;
         this.peak = 0;
@@ -484,48 +517,88 @@ class GbLabAudioProcessor extends AudioWorkletProcessor {
     }
     this.compactChunks();
   }
+  pullFrame() {
+    if (this.buffered <= 0 || this.chunkIndex >= this.chunks.length) return false;
+    const chunk = this.chunks[this.chunkIndex];
+    this.pulledLeft = chunk[this.offset] || 0;
+    this.pulledRight = chunk[this.offset + 1] || 0;
+    this.offset += 2;
+    this.buffered -= 1;
+    if (this.offset >= chunk.length) {
+      this.chunkIndex += 1;
+      this.offset = 0;
+      this.compactChunks();
+    }
+    return true;
+  }
+  primePlayback() {
+    if (!this.pullFrame()) return false;
+    this.currentLeft = this.pulledLeft;
+    this.currentRight = this.pulledRight;
+    if (this.pullFrame()) {
+      this.nextLeft = this.pulledLeft;
+      this.nextRight = this.pulledRight;
+    } else {
+      this.nextLeft = this.currentLeft;
+      this.nextRight = this.currentRight;
+    }
+    this.playbackPhase = 0;
+    this.started = true;
+    this.ramp = 0;
+    this.tail = 0;
+    return true;
+  }
   process(inputs, outputs) {
     const output = outputs[0];
     const left = output[0];
     const right = output[1] || output[0];
     if (!this.started && this.buffered >= this.target) {
-      this.started = true;
-      this.ramp = 0;
+      this.primePlayback();
     }
-    const highWater = this.target + 1024;
-    const correctionRate = this.buffered > highWater
-      ? Math.min(.02, .002 + (this.buffered - highWater) / Math.max(1, this.maximum) * .018)
-      : 0;
+    const queueDepth = this.buffered + (this.started ? 2 : 0);
+    const queueError = (queueDepth - this.target) / Math.max(1, this.target);
+    const desiredRate = Math.max(.996, Math.min(1.008, 1 + queueError * .004));
+    this.playbackRate += (desiredRate - this.playbackRate) * .08;
     let peak = 0;
     for (let index = 0; index < left.length; index += 1) {
       let leftSample = 0;
       let rightSample = 0;
-      if (this.started && this.buffered > 0 && this.chunkIndex < this.chunks.length) {
-        const chunk = this.chunks[this.chunkIndex];
-        leftSample = chunk[this.offset] || 0;
-        rightSample = chunk[this.offset + 1] || 0;
-        this.offset += 2;
-        this.buffered -= 1;
-        if (this.offset >= chunk.length) {
-          this.chunkIndex += 1;
-          this.offset = 0;
-          this.compactChunks();
+      let tailing = false;
+      if (this.started) {
+        leftSample = this.currentLeft
+          + (this.nextLeft - this.currentLeft) * this.playbackPhase;
+        rightSample = this.currentRight
+          + (this.nextRight - this.currentRight) * this.playbackPhase;
+        this.playbackPhase += this.playbackRate;
+        while (this.playbackPhase >= 1 && this.started) {
+          this.currentLeft = this.nextLeft;
+          this.currentRight = this.nextRight;
+          this.playbackPhase -= 1;
+          if (this.pullFrame()) {
+            this.nextLeft = this.pulledLeft;
+            this.nextRight = this.pulledRight;
+          } else {
+            this.started = false;
+            this.playbackPhase = 0;
+            this.tail = 64;
+            this.tailLeft = leftSample;
+            this.tailRight = rightSample;
+            this.underruns += 1;
+          }
         }
-      } else if (this.started) {
-        this.started = false;
-        this.ramp = 0;
-        this.underruns += 1;
-      }
-      if (correctionRate && this.buffered > this.target) {
-        this.correction += correctionRate;
-        if (this.correction >= 1) {
-          this.trimFrames(1);
-          this.correction -= 1;
-        }
+      } else if (this.tail > 0) {
+        const tailGain = this.tail / 64;
+        leftSample = this.tailLeft * tailGain;
+        rightSample = this.tailRight * tailGain;
+        this.tail -= 1;
+        tailing = true;
+        if (this.tail === 0) this.ramp = 0;
       }
       if (this.filter) {
-        const filteredLeft = leftSample - this.previousInputLeft + .995 * this.previousOutputLeft;
-        const filteredRight = rightSample - this.previousInputRight + .995 * this.previousOutputRight;
+        const filteredLeft = leftSample - this.previousInputLeft
+          + this.filterCoefficient * this.previousOutputLeft;
+        const filteredRight = rightSample - this.previousInputRight
+          + this.filterCoefficient * this.previousOutputRight;
         this.previousInputLeft = leftSample;
         this.previousInputRight = rightSample;
         this.previousOutputLeft = filteredLeft;
@@ -533,9 +606,10 @@ class GbLabAudioProcessor extends AudioWorkletProcessor {
         leftSample = filteredLeft;
         rightSample = filteredRight;
       }
-      this.ramp = Math.min(1, this.ramp + 1 / 128);
-      left[index] = leftSample * this.gain * this.ramp;
-      right[index] = rightSample * this.gain * this.ramp;
+      if (this.started) this.ramp = Math.min(1, this.ramp + 1 / 128);
+      const envelope = tailing ? 1 : this.ramp;
+      left[index] = leftSample * this.gain * envelope;
+      right[index] = rightSample * this.gain * envelope;
       peak = Math.max(peak, Math.abs(left[index]), Math.abs(right[index]));
     }
     this.peak = Math.max(this.peak, peak);
@@ -546,6 +620,7 @@ class GbLabAudioProcessor extends AudioWorkletProcessor {
         underruns: this.underruns,
         overruns: this.overruns,
         peak: this.peak,
+        playbackRate: this.playbackRate,
       });
       this.peak = 0;
     }
@@ -1777,8 +1852,8 @@ function TechnicalReadout({
   running,
   visible,
 }) {
-  const audioPreset = AUDIO_LATENCY_PRESETS[audioLatency];
   const sampleRate = diagnostics.audioSampleRate || 48000;
+  const audioPreset = audioPresetAtRate(AUDIO_LATENCY_PRESETS[audioLatency], sampleRate);
   const bufferedMilliseconds = Math.round(
     diagnostics.audioBuffered / sampleRate * 1000,
   );
@@ -1806,6 +1881,7 @@ function TechnicalReadout({
       data-audio-overruns={diagnostics.audioOverruns}
       data-audio-enqueued={diagnostics.audioEnqueued}
       data-audio-mode={diagnostics.audioMode}
+      data-audio-playback-rate={diagnostics.audioPlaybackRate}
     >
       <header>
         <strong>DIAGNOSTICS</strong>
@@ -1838,7 +1914,10 @@ function TechnicalReadout({
           <ReadoutMetric label="TARGET" value={`${targetMilliseconds} MS`} />
           <ReadoutMetric label="UNDERRUN" value={diagnostics.audioUnderruns} />
           <ReadoutMetric label="TRIM" value={diagnostics.audioOverruns} />
-          <ReadoutMetric label="RATE" value={`${Math.round(sampleRate / 100) / 10} KHZ`} />
+          <ReadoutMetric
+            label="RATE / CLOCK"
+            value={`${Math.round(sampleRate / 100) / 10}K · ${(diagnostics.audioPlaybackRate * 100).toFixed(2)}%`}
+          />
         </dl>
       </section>
 
@@ -1917,6 +1996,9 @@ export default function Emulator() {
     enqueued: 0,
     peak: 0,
     maxPeak: 0,
+    playbackPhase: 0,
+    playbackRate: 1,
+    ramp: 0,
   });
   const audioStartPromiseRef = useRef(null);
   const audioFilterRef = useRef(true);
@@ -2040,6 +2122,7 @@ export default function Emulator() {
     audioEnqueued: 0,
     audioMode: "off",
     audioSampleRate: 48000,
+    audioPlaybackRate: 1,
   });
   const [, setMessage] = useState("Open the game library or drop a legally obtained ROM.");
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -2277,6 +2360,9 @@ export default function Emulator() {
     audio.enqueued = 0;
     audio.peak = 0;
     audio.maxPeak = 0;
+    audio.playbackPhase = 0;
+    audio.playbackRate = 1;
+    audio.ramp = 0;
     audio.previousInputLeft = 0;
     audio.previousInputRight = 0;
     audio.previousOutputLeft = 0;
@@ -2507,7 +2593,10 @@ export default function Emulator() {
     const initialize = async () => {
       const context = new AudioContext({ latencyHint: "interactive", sampleRate: 48000 });
       emulatorRef.current.setAudioSampleRate(context.sampleRate);
-      const preset = AUDIO_LATENCY_PRESETS[audioLatencyRef.current];
+      const preset = audioPresetAtRate(
+        AUDIO_LATENCY_PRESETS[audioLatencyRef.current],
+        context.sampleRate,
+      );
       let node;
       let mode = "fallback";
       if (context.audioWorklet && window.AudioWorkletNode) {
@@ -2543,6 +2632,10 @@ export default function Emulator() {
         enqueued: 0,
         peak: 0,
         maxPeak: 0,
+        playbackPhase: 0,
+        playbackRate: 1,
+        ramp: 0,
+        filterCoefficient: audioHighPassCoefficient(context.sampleRate),
         previousInputLeft: 0,
         previousInputRight: 0,
         previousOutputLeft: 0,
@@ -2555,10 +2648,14 @@ export default function Emulator() {
           audioRef.current.underruns = data.underruns;
           audioRef.current.overruns = data.overruns;
           audioRef.current.peak = data.peak;
+          audioRef.current.playbackRate = data.playbackRate;
           audioRef.current.maxPeak = Math.max(audioRef.current.maxPeak, data.peak);
         };
       } else {
-        node = context.createScriptProcessor(preset.buffer, 0, 2);
+        // Keep the legacy main-thread fallback responsive. The old preset
+        // quantum was larger than its own startup target, which guaranteed an
+        // underrun on the first callback in Low, Balanced, and Stable modes.
+        node = context.createScriptProcessor(512, 0, 2);
         audioState.node = node;
         audioState.ring = new Float32Array(preset.maximum * 2);
         node.onaudioprocess = (event) => {
@@ -2567,25 +2664,48 @@ export default function Emulator() {
           const audio = audioRef.current;
           const gain = mutedRef.current ? 0 : volumeRef.current / 100;
           let peak = 0;
-          if (!audio.started && audio.available >= audio.target * 2) audio.started = true;
+          const bufferedFrames = audio.available >> 1;
+          if (
+            !audio.started
+            && bufferedFrames >= Math.max(audio.target, left.length + 2)
+          ) {
+            audio.started = true;
+            audio.playbackPhase = 0;
+            audio.ramp = 0;
+          }
+          const queueError = (bufferedFrames - audio.target) / Math.max(1, audio.target);
+          const desiredRate = Math.max(.996, Math.min(1.008, 1 + queueError * .004));
+          audio.playbackRate += (desiredRate - audio.playbackRate) * .08;
           for (let index = 0; index < left.length; index += 1) {
             let leftSample = 0;
             let rightSample = 0;
-            if (audio.started && audio.available >= 2) {
-              leftSample = audio.ring[audio.readIndex];
-              audio.readIndex = (audio.readIndex + 1) % audio.ring.length;
-              rightSample = audio.ring[audio.readIndex];
-              audio.readIndex = (audio.readIndex + 1) % audio.ring.length;
-              audio.available -= 2;
+            if (audio.started && audio.available >= 4) {
+              const nextIndex = (audio.readIndex + 2) % audio.ring.length;
+              const currentRightIndex = (audio.readIndex + 1) % audio.ring.length;
+              const nextRightIndex = (nextIndex + 1) % audio.ring.length;
+              leftSample = audio.ring[audio.readIndex]
+                + (audio.ring[nextIndex] - audio.ring[audio.readIndex])
+                  * audio.playbackPhase;
+              rightSample = audio.ring[currentRightIndex]
+                + (audio.ring[nextRightIndex] - audio.ring[currentRightIndex])
+                  * audio.playbackPhase;
+              audio.playbackPhase += audio.playbackRate;
+              while (audio.playbackPhase >= 1 && audio.available >= 4) {
+                audio.readIndex = (audio.readIndex + 2) % audio.ring.length;
+                audio.available -= 2;
+                audio.playbackPhase -= 1;
+              }
             } else if (audio.started) {
               audio.started = false;
+              audio.playbackPhase = 0;
+              audio.ramp = 0;
               audio.underruns += 1;
             }
             if (audioFilterRef.current) {
               const filteredLeft = leftSample - audio.previousInputLeft
-                + 0.995 * audio.previousOutputLeft;
+                + audio.filterCoefficient * audio.previousOutputLeft;
               const filteredRight = rightSample - audio.previousInputRight
-                + 0.995 * audio.previousOutputRight;
+                + audio.filterCoefficient * audio.previousOutputRight;
               audio.previousInputLeft = leftSample;
               audio.previousInputRight = rightSample;
               audio.previousOutputLeft = filteredLeft;
@@ -2593,8 +2713,9 @@ export default function Emulator() {
               leftSample = filteredLeft;
               rightSample = filteredRight;
             }
-            left[index] = leftSample * gain;
-            right[index] = rightSample * gain;
+            if (audio.started) audio.ramp = Math.min(1, audio.ramp + 1 / 128);
+            left[index] = leftSample * gain * audio.ramp;
+            right[index] = rightSample * gain * audio.ramp;
             peak = Math.max(peak, Math.abs(left[index]), Math.abs(right[index]));
           }
           audio.buffered = audio.available >> 1;
@@ -2611,6 +2732,7 @@ export default function Emulator() {
           maximum: preset.maximum,
           gain: mutedRef.current ? 0 : volumeRef.current / 100,
           filter: audioFilterRef.current,
+          filterCoefficient: audioState.filterCoefficient,
         });
       }
       context.onstatechange = () => {
@@ -2642,12 +2764,18 @@ export default function Emulator() {
       return;
     }
     if (!audio.ring) return;
+    const incomingFrames = samples.length >> 1;
+    const capacityFrames = audio.ring.length >> 1;
+    const overflowFrames = Math.max(
+      0,
+      (audio.available >> 1) + incomingFrames - capacityFrames,
+    );
+    if (overflowFrames > 0) {
+      audio.readIndex = (audio.readIndex + overflowFrames * 2) % audio.ring.length;
+      audio.available -= overflowFrames * 2;
+      audio.overruns += 1;
+    }
     for (let index = 0; index + 1 < samples.length; index += 2) {
-      if (audio.available + 2 > audio.ring.length) {
-        audio.readIndex = (audio.readIndex + 2) % audio.ring.length;
-        audio.available -= 2;
-        audio.overruns += 1;
-      }
       audio.ring[audio.writeIndex] = samples[index];
       audio.writeIndex = (audio.writeIndex + 1) % audio.ring.length;
       audio.ring[audio.writeIndex] = samples[index + 1];
@@ -4709,6 +4837,7 @@ export default function Emulator() {
             audioOverruns: audioRef.current.overruns,
             audioEnqueued: audioRef.current.enqueued,
             audioMode: audioRef.current.mode ?? "off",
+            audioPlaybackRate: audioRef.current.playbackRate ?? 1,
             audioSampleRate: audioRef.current.context?.sampleRate
               ?? emulator.audioRate
               ?? 48000,
@@ -4778,7 +4907,10 @@ export default function Emulator() {
     audioLatencyRef.current = audioLatency;
     const context = audioRef.current.context;
     if (!context) return;
-    const preset = AUDIO_LATENCY_PRESETS[audioLatency];
+    const preset = audioPresetAtRate(
+      AUDIO_LATENCY_PRESETS[audioLatency],
+      context.sampleRate,
+    );
     audioRef.current.target = preset.target;
     if (
       audioRef.current.mode === "fallback"
@@ -4789,6 +4921,9 @@ export default function Emulator() {
       audioRef.current.writeIndex = 0;
       audioRef.current.available = 0;
       audioRef.current.started = false;
+      audioRef.current.playbackPhase = 0;
+      audioRef.current.playbackRate = 1;
+      audioRef.current.ramp = 0;
     }
     if (audioRef.current.mode === "worklet") {
       audioRef.current.node.port.postMessage({
@@ -4797,6 +4932,7 @@ export default function Emulator() {
         maximum: preset.maximum,
         gain: muted ? 0 : volume / 100,
         filter: audioFilter,
+        filterCoefficient: audioRef.current.filterCoefficient,
       });
     }
     if (paused) {
@@ -4816,10 +4952,17 @@ export default function Emulator() {
     if (audio.mode === "worklet") {
       audio.node.port.postMessage({
         type: "settings",
-        target: AUDIO_LATENCY_PRESETS[audioLatencyRef.current].target,
-        maximum: AUDIO_LATENCY_PRESETS[audioLatencyRef.current].maximum,
+        target: audioPresetAtRate(
+          AUDIO_LATENCY_PRESETS[audioLatencyRef.current],
+          audio.context?.sampleRate,
+        ).target,
+        maximum: audioPresetAtRate(
+          AUDIO_LATENCY_PRESETS[audioLatencyRef.current],
+          audio.context?.sampleRate,
+        ).maximum,
         gain: mutedRef.current ? 0 : volumeRef.current / 100,
         filter: audioFilter,
+        filterCoefficient: audio.filterCoefficient,
       });
     }
   }, [audioFilter]);
@@ -5672,8 +5815,9 @@ export default function Emulator() {
                   <p>
                     Low reacts fastest but has the least protection from a busy main thread.
                     Stable and Deep absorb longer scheduling stalls. The queue now has a strict
-                    ceiling and gently sheds excess timing debt instead of growing to several
-                    times the target and then deleting an entire sound-effect chunk.
+                    ceiling, while a narrow interpolated clock correction continuously follows
+                    the selected target. This repays small scheduling errors without abruptly
+                    deleting samples or changing the emulated APU&apos;s clock.
                   </p>
                   <p>
                     An underrun means the audio thread ran out of samples and had to restart after
@@ -5808,6 +5952,8 @@ export default function Emulator() {
                     coupling capacitors. The filter removes constant speaker offset and slow
                     baseline drift from the four-channel mix, which reduces power-on and register
                     transition clicks without muting legitimate square, wave, or noise content.
+                    Its coefficient is recalculated from the browser&apos;s actual sample rate,
+                    keeping the analog time constant consistent from 44.1 to 192 kHz.
                   </p>
                   <p>
                     It runs after NR50/NR51 volume and stereo routing, so duty timing, envelope,

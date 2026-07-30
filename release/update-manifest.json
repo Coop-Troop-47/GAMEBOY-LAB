@@ -1,13 +1,13 @@
 {
-  "version": "1.3.0",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v1.3.0/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v1.3.0",
+  "version": "2.0.0",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.0.0/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.0.0",
   "changes": [
-    "Cartridge changes now form one physical sequence: the LCD fades to its neutral substrate, console power lights turn off, the new cart inserts, and power returns for BIOS startup.",
-    "Opening a drawer during startup now queues its pause for the first safe BIOS frame, eliminating white or stale frames without locking menus or console switching.",
-    "Library detail cards now show battery-save availability and data status plus a clear three-slot save-state occupancy indicator.",
-    "Portrait sticky layers and tabletop controls no longer clip, overlap, or allow scrolled library content to bleed through.",
-    "Segmented choices, App Behaviour, App Data, expandable explanations, badges, and save indicators now animate within the existing GAMEBOY LAB style.",
-    "LCD zoom, bezel layering, cartridge motion, timer cleanup, and transition ownership received a full flicker and race-condition audit."
+    "Applicable Mooneye acceptance doubled from 33/66 in v1.3.0 to 66/66: +50 percentage points and +100% more passing tests.",
+    "Measured median core throughput improved 33.25% for DMG and 17.83% for GBC in the frozen seven-trial, 1,000-frame release benchmark.",
+    "CPU bus cycles, interrupts, timers, serial, OAM DMA corruption, HDMA, PPU mode timing, STOP, speed switching, and CGB registers now model many more hardware edge cases.",
+    "The APU now has hardware-timed channel state, length/envelope/sweep quirks, wave RAM behavior, exact sample integration, and sample-rate-correct analog coupling.",
+    "Audio playback now uses bounded interpolated clock correction, clean underrun recovery, four real latency targets, and a repaired low-latency fallback path.",
+    "MBC1 multicarts, MBC2, MBC3 RTC-only carts, MBC5 rumble banking, save-state compatibility, serial-link hooks, infrared hooks, and conformance tooling were expanded."
   ]
 }

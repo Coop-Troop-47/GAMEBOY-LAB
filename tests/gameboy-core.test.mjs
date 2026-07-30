@@ -86,6 +86,40 @@ test("reproduces the HALT bug when IME is clear and an interrupt is pending", ()
   assert.equal(gb.b, 2);
 });
 
+test("locks the CPU on unassigned SM83 opcodes while peripherals keep running", () => {
+  const gb = new GameBoy("dmg");
+  gb.loadROM(makeRom([0xd3, 0x04]));
+  gb.pc = 0x150;
+  const startCycles = gb.cycles;
+  assert.equal(gb.step(), 4);
+  assert.equal(gb.locked, true);
+  assert.equal(gb.pc, 0x151);
+  gb.ie = 1;
+  gb.iflag = 1;
+  gb.ime = true;
+  assert.equal(gb.step(), 4);
+  assert.equal(gb.pc, 0x151);
+  assert.equal(gb.b, 0);
+  assert.equal(gb.iflag & 1, 1, "interrupts cannot unlock the CPU");
+  assert.equal(gb.cycles, startCycles + 8);
+});
+
+test("keeps interrupt-entry bus cycles observable and permits IE-push cancellation", () => {
+  const gb = new GameBoy("dmg");
+  gb.loadROM(makeRom());
+  gb.pc = 0x0200;
+  gb.sp = 0x0000;
+  gb.ie = 0x04;
+  gb.iflag = 0x04;
+  gb.ime = true;
+
+  assert.equal(gb.serviceInterrupt(), 20);
+  assert.equal(gb.ie, 0x02, "high PC byte is written through SP=$FFFF");
+  assert.equal(gb.iflag & 0x1f, 0x04, "cancelled interrupt is not acknowledged");
+  assert.equal(gb.pc, 0x0000, "cancelled dispatch uses the hardware cancellation vector");
+  assert.equal(gb.sp, 0xfffe);
+});
+
 test("models timer falling edges, DIV-write glitches, and delayed TIMA reload", () => {
   const gb = new GameBoy("dmg");
   gb.loadROM(makeRom());
@@ -111,6 +145,41 @@ test("models timer falling edges, DIV-write glitches, and delayed TIMA reload", 
   assert.equal(gb.iflag & 4, 4);
 });
 
+test("clocks serial transfers bit-by-bit from the free-running divider phase", () => {
+  const gb = new GameBoy("dmg");
+  gb.loadROM(makeRom());
+  gb.divCounter = 0;
+  gb.writeIO(0x01, 0xa5);
+  gb.writeIO(0x02, 0x81);
+
+  gb.tick(507);
+  assert.equal(gb.serialData, 0xa5);
+  gb.tick(1);
+  assert.equal(gb.serialData, 0x4b, "first disconnected-link bit is pulled high");
+  gb.tick(7 * 512);
+  assert.equal(gb.serialData, 0xff);
+  assert.equal(gb.serialControl & 0x80, 0);
+  assert.equal(gb.iflag & 0x08, 0x08);
+  assert.equal(gb.serialOutput, String.fromCharCode(0xa5));
+});
+
+test("aliases DMG DMA sources above DFFF and gates joypad IRQs by selected lines", () => {
+  const gb = new GameBoy("dmg");
+  gb.loadROM(makeRom());
+  gb.wram[0x1e00] = 0x5a;
+  gb.wram[0x1f00] = 0xa5;
+  assert.equal(gb.readDmaSource(0xfe00), 0x5a);
+  assert.equal(gb.readDmaSource(0xff00), 0xa5);
+
+  gb.iflag = 0;
+  gb.setButton("a", true);
+  assert.equal(gb.iflag & 0x10, 0, "unselected action line does not request JOYP");
+  gb.setButton("a", false);
+  gb.writeIO(0x00, 0x10);
+  gb.setButton("a", true);
+  assert.equal(gb.iflag & 0x10, 0x10);
+});
+
 test("handles MBC1 ROM-bank selection without exposing bank zero in the switch window", () => {
   const rom = makeRom([], { banks: 4, type: 1 });
   rom[0x4000] = 0x11;
@@ -123,6 +192,22 @@ test("handles MBC1 ROM-bank selection without exposing bank zero in the switch w
   assert.equal(gb.read8(0x4000), 0x22);
   gb.write8(0x2000, 0);
   assert.equal(gb.read8(0x4000), 0x11);
+});
+
+test("preserves mapper-specific bank-zero behavior and direct cartridge RAM", () => {
+  const mbc5Rom = makeRom([], { banks: 4, type: 0x1b, ram: 2 });
+  mbc5Rom[0x0000] = 0x55;
+  mbc5Rom[0x4000] = 0x11;
+  const mbc5 = new GameBoy("dmg");
+  mbc5.loadROM(mbc5Rom);
+  assert.equal(mbc5.read8(0x4000), 0x11);
+  mbc5.write8(0x2000, 0);
+  assert.equal(mbc5.read8(0x4000), 0x55, "MBC5 may map bank zero in the switch window");
+
+  const directRam = new GameBoy("dmg");
+  directRam.loadROM(makeRom([], { type: 0x09, ram: 2 }));
+  directRam.write8(0xa000, 0x7b);
+  assert.equal(directRam.read8(0xa000), 0x7b);
 });
 
 test("round-trips complete save states without confusing them with cartridge saves", () => {
@@ -223,6 +308,29 @@ test("advances, latches, halts, and overflows the MBC3 real-time clock", () => {
   }
 });
 
+test("maps timer-only MBC3 cartridges and rejects invalid RTC bank selections", () => {
+  const timerOnly = new GameBoy("dmg");
+  timerOnly.loadROM(makeRom([], { type: 0x0f }));
+  timerOnly.write8(0x0000, 0x0a);
+  timerOnly.write8(0x4000, 0x08);
+  timerOnly.write8(0xa000, 42);
+  timerOnly.write8(0x6000, 0);
+  timerOnly.write8(0x6000, 1);
+  assert.equal(timerOnly.read8(0xa000), 42);
+  assert.equal(timerOnly.batteryDirty, true);
+
+  const withRam = new GameBoy("dmg");
+  withRam.loadROM(makeRom([], { type: 0x10, ram: 2 }));
+  withRam.write8(0x0000, 0x0a);
+  withRam.write8(0x4000, 0);
+  withRam.write8(0xa000, 0x66);
+  withRam.write8(0x4000, 0x07);
+  withRam.write8(0xa000, 0x99);
+  assert.equal(withRam.read8(0xa000), 0xff);
+  withRam.write8(0x4000, 0);
+  assert.equal(withRam.read8(0xa000), 0x66, "invalid RTC selections do not alias RAM bank zero");
+});
+
 test("keeps PPU and APU at base clock in GBC double-speed mode", () => {
   const gb = new GameBoy("cgb");
   gb.loadROM(makeRom([0x18, 0xfe], { cgb: 0x80 }));
@@ -233,6 +341,88 @@ test("keeps PPU and APU at base clock in GBC double-speed mode", () => {
   assert.equal(gb.frameNumber, 1);
   const audio = gb.drainAudio();
   assert.ok(audio.length > 1200 && audio.length < 1800);
+});
+
+test("advances one hardware frame when LCDC is disabled instead of running twice as fast", () => {
+  for (const doubleSpeed of [false, true]) {
+    const gb = new GameBoy("cgb");
+    gb.loadROM(makeRom([0x18, 0xfe], { cgb: 0x80 }));
+    gb.io[0x40] = 0;
+    gb.doubleSpeed = doubleSpeed;
+    gb.speedSubcycle = 0;
+    const startCpu = gb.cycles;
+    const startBase = gb.baseCycles;
+    assert.equal(gb.runFrame(), false, "an LCD-off interval has no VBlank");
+    const baseElapsed = gb.baseCycles - startBase;
+    const cpuElapsed = gb.cycles - startCpu;
+    assert.ok(baseElapsed >= 70224 && baseElapsed <= 70244);
+    if (doubleSpeed) {
+      assert.ok(cpuElapsed >= 140448 && cpuElapsed <= 140488);
+    } else {
+      assert.ok(cpuElapsed >= 70224 && cpuElapsed <= 70244);
+    }
+  }
+});
+
+test("stalls the GBC CPU for general and HBlank VRAM DMA transfers", () => {
+  const gdma = new GameBoy("cgb");
+  gdma.loadROM(makeRom([], { cgb: 0x80 }));
+  gdma.io[0x40] = 0;
+  for (let index = 0; index < 0x20; index += 1) gdma.wram[index] = 0x80 + index;
+  gdma.writeIO(0x51, 0xc0);
+  gdma.writeIO(0x52, 0x00);
+  gdma.writeIO(0x53, 0x00);
+  gdma.writeIO(0x54, 0x00);
+  const startCycles = gdma.cycles;
+  gdma.writeIO(0x55, 0x01);
+  assert.deepEqual(Array.from(gdma.vram.subarray(0, 0x20)), Array.from(gdma.wram.subarray(0, 0x20)));
+  assert.equal(gdma.cycles - startCycles, 68, "four setup clocks plus 32 dots per block");
+  assert.equal(gdma.readIO(0x55), 0xff);
+
+  const hdma = new GameBoy("cgb");
+  hdma.loadROM(makeRom([], { cgb: 0x80 }));
+  for (let index = 0; index < 0x10; index += 1) hdma.wram[index] = 0x40 + index;
+  hdma.writeIO(0x51, 0xc0);
+  hdma.writeIO(0x52, 0x00);
+  hdma.writeIO(0x53, 0x00);
+  hdma.writeIO(0x54, 0x00);
+  hdma.writeIO(0x55, 0x80);
+  hdma.ppuMode = 3;
+  hdma.ppuDot = hdma.ppuMode3End - 1;
+  hdma.tickPPU();
+  assert.deepEqual(Array.from(hdma.vram.subarray(0, 0x10)), Array.from(hdma.wram.subarray(0, 0x10)));
+  assert.equal(hdma.hdmaStallCycles, 32);
+  const beforeStall = hdma.cycles;
+  assert.equal(hdma.step(), 32);
+  assert.equal(hdma.cycles - beforeStall, 32);
+  assert.equal(hdma.readIO(0x55), 0xff);
+});
+
+test("holds the GBC CPU and divider for the hardware speed-switch interval", () => {
+  const gb = new GameBoy("cgb");
+  gb.loadROM(makeRom([0x10, 0x00, 0x04], { cgb: 0x80 }));
+  gb.pc = 0x150;
+  gb.speedSwitchArmed = true;
+  gb.divCounter = 0x1234;
+  const startDot = gb.ppuDot;
+  const startLine = gb.ly;
+  assert.equal(gb.step(), 8);
+  assert.equal(gb.stopped, true);
+  assert.equal(gb.doubleSpeed, false);
+  assert.equal(gb.divCounter, 0);
+  const beforeStall = gb.cycles;
+  assert.equal(gb.step(), 8200);
+  assert.equal(gb.cycles - beforeStall, 8200);
+  assert.equal(gb.divCounter, 0, "DIV remains frozen during the switch");
+  assert.equal(gb.doubleSpeed, true);
+  assert.equal(gb.stopped, false);
+  assert.notDeepEqual(
+    [gb.ly, gb.ppuDot],
+    [startLine, startDot],
+    "the PPU continues at its base clock",
+  );
+  gb.step();
+  assert.equal(gb.b, 1);
 });
 
 test("matches audio generation to the host sample rate without per-sample mixer allocation", () => {
@@ -259,13 +449,14 @@ test("clocks the noise channel at the hardware NR43 rate used by impact effects"
   gb.writeAPU(0x22, 0x00);
   gb.writeAPU(0x23, 0x80);
   const initialLfsr = gb.ch4.lfsr;
-  gb.mixAudioSample();
+  for (let cycle = 0; cycle < 8; cycle += 1) gb.tickAPU();
   assert.notEqual(gb.ch4.lfsr, initialLfsr);
-  assert.ok(gb.ch4.phase > 0.9 && gb.ch4.phase < 1);
+  assert.equal(gb.ch4.timer, 8);
 
   gb.writeAPU(0x22, 0xe0);
+  gb.writeAPU(0x23, 0x80);
   const lockedLfsr = gb.ch4.lfsr;
-  gb.mixAudioSample();
+  for (let cycle = 0; cycle < 128; cycle += 1) gb.tickAPU();
   assert.equal(gb.ch4.lfsr, lockedLfsr);
 });
 
@@ -302,6 +493,110 @@ test("renders a complete 160×144 frame and raises VBlank", () => {
   assert.equal(gb.framebuffer.length, 160 * 144 * 4);
   assert.equal(gb.iflag & 1, 1);
   assert.ok(gb.frameNumber >= 1);
+});
+
+test("raises the GBC line-144 OAM STAT source one M-cycle before VBlank", () => {
+  const cgb = new GameBoy("cgb");
+  cgb.loadROM(makeRom([], { cgb: 0x80 }));
+  cgb.io[0x40] = 0x80;
+  cgb.io[0x41] = 0xa0;
+  cgb.ly = 143;
+  cgb.ppuDot = 451;
+  cgb.ppuMode = 0;
+  cgb.statSignal = false;
+  cgb.iflag = 0;
+  cgb.tickPPU();
+  assert.equal(cgb.ppuDot, 452);
+  assert.equal(cgb.iflag & 0x02, 0x02);
+  assert.equal(cgb.ppuMode, 0, "the quirk does not expose mode 2 through STAT");
+
+  const dmg = new GameBoy("dmg");
+  dmg.loadROM(makeRom());
+  dmg.io[0x40] = 0x80;
+  dmg.io[0x41] = 0xa0;
+  dmg.ly = 143;
+  dmg.ppuDot = 451;
+  dmg.ppuMode = 0;
+  dmg.statSignal = false;
+  dmg.iflag = 0;
+  dmg.tickPPU();
+  assert.equal(dmg.iflag & 0x02, 0);
+});
+
+test("implements GBC undocumented hardware registers and compatibility-mode masks", () => {
+  const native = new GameBoy("cgb");
+  native.loadROM(makeRom([], { cgb: 0x80 }));
+  native.writeIO(0x72, 0x12);
+  native.writeIO(0x73, 0x34);
+  native.writeIO(0x75, 0xff);
+  assert.equal(native.readIO(0x72), 0x12);
+  assert.equal(native.readIO(0x73), 0x34);
+  assert.equal(native.readIO(0x75), 0xff);
+  native.writeIO(0x75, 0);
+  assert.equal(native.readIO(0x75), 0x8f);
+
+  const compatibility = new GameBoy("cgb");
+  compatibility.loadROM(makeRom());
+  compatibility.writeIO(0x4d, 1);
+  compatibility.writeIO(0x02, 0x83);
+  assert.equal(compatibility.readIO(0x4d), 0xff, "KEY1 is hidden in compatibility mode");
+  assert.equal(compatibility.readIO(0x02), 0xff, "fast serial is hidden in compatibility mode");
+  assert.equal(compatibility.readIO(0x4f), 0xfe, "VBK remains a physical GBC register");
+  assert.equal(compatibility.readIO(0x68), 0x40, "palette indices remain readable");
+  assert.equal(compatibility.readIO(0x69), 0xff, "palette RAM data is locked");
+});
+
+test("clocks serial transfers from either clock owner and supports a link endpoint", () => {
+  const master = new GameBoy("dmg");
+  master.loadROM(makeRom());
+  const incoming = 0x3c;
+  const outgoingBits = [];
+  let bit = 7;
+  master.setSerialEndpoint((outgoing) => {
+    outgoingBits.push(outgoing);
+    const result = (incoming >> bit) & 1;
+    bit -= 1;
+    return result;
+  });
+  master.writeIO(0x01, 0xa5);
+  master.writeIO(0x02, 0x81);
+  for (let index = 0; index < 8; index += 1) master.clockSerialMaster();
+  assert.equal(master.serialData, incoming);
+  assert.deepEqual(outgoingBits, [1, 0, 1, 0, 0, 1, 0, 1]);
+  assert.equal(master.serialControl & 0x80, 0);
+  assert.equal(master.iflag & 0x08, 0x08);
+
+  const external = new GameBoy("dmg");
+  external.loadROM(makeRom());
+  external.writeIO(0x01, 0x96);
+  external.writeIO(0x02, 0x80);
+  const externalOutgoing = [];
+  for (let index = 7; index >= 0; index -= 1) {
+    externalOutgoing.push(external.clockSerialExternal((0x69 >> index) & 1));
+  }
+  assert.deepEqual(externalOutgoing, [1, 0, 0, 1, 0, 1, 1, 0]);
+  assert.equal(external.serialData, 0x69);
+  assert.equal(external.clockSerialExternal(), null, "completed transfers ignore extra clocks");
+});
+
+test("models the GBC infrared port without exposing it on DMG hardware", () => {
+  const cgb = new GameBoy("cgb");
+  cgb.loadROM(makeRom([], { cgb: 0x80 }));
+  const outputs = [];
+  cgb.setInfraredOutputHandler((active) => outputs.push(active));
+  cgb.writeIO(0x56, 0xc1);
+  assert.deepEqual(outputs, [true]);
+  assert.equal(cgb.readIO(0x56), 0xfd, "enabled sensor sees the local emitter");
+  cgb.writeIO(0x56, 0xc0);
+  assert.deepEqual(outputs, [true, false]);
+  assert.equal(cgb.readIO(0x56), 0xfe);
+  cgb.setInfraredInput(true);
+  assert.equal(cgb.readIO(0x56), 0xfc, "external IR activity pulls the sensor bit low");
+
+  const dmg = new GameBoy("dmg");
+  dmg.loadROM(makeRom());
+  dmg.writeIO(0x56, 0xc1);
+  assert.equal(dmg.readIO(0x56), 0xff);
 });
 
 test("packs framebuffer pixels without changing their RGBA bytes", () => {
