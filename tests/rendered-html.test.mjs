@@ -180,8 +180,14 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.doesNotMatch(css, /::view-transition|@keyframes view-mode-zoom/);
   assert.match(css, /\.console-wrap\.view-zoom-in \.cartridge-visual-rig,[\s\S]*\.console-wrap\.view-zoom-out \.cartridge-hover-rig\s*\{[^}]*visibility:\s*hidden/s);
   assert.match(source, /prefers-reduced-motion: reduce[\s\S]*\? 1[\s\S]*: 420/);
-  assert.match(source, /const scaleAnimationLocked = Boolean\([\s\S]*viewModeTransition[\s\S]*cartridgePreflight[\s\S]*cartridgeInserting && cartridgeAnimationEnabled/s);
+  assert.match(source, /const presentationAnimationLocked = Boolean\([\s\S]*viewModeTransition[\s\S]*cartridgePreflight[\s\S]*cartridgeInserting && cartridgeAnimationEnabled[\s\S]*showSaveTooltip[\s\S]*saveTooltipFading/s);
+  assert.match(source, /const scaleAnimationLocked = presentationAnimationLocked/);
   assert.match(source, /if \(scaleAnimationLocked\)[\s\S]*CAN’T CHANGE SCALE DURING ANIMATION/s);
+  assert.match(source, /switchViewMode = useCallback[\s\S]*presentationAnimationLocked\) return/s);
+  assert.match(source, /switchModel = useCallback[\s\S]*presentationAnimationLocked\) return/s);
+  assert.match(source, /aria-pressed=\{viewMode === "screen"\}[\s\S]*disabled=\{presentationAnimationLocked\}/s);
+  assert.match(source, /aria-pressed=\{model === "cgb"\}[\s\S]*disabled=\{presentationAnimationLocked\}/s);
+  assert.match(source, /aria-pressed=\{integerScaling\}[\s\S]*disabled=\{scaleAnimationLocked\}/s);
   assert.match(source, /value=\{manualScale\}[\s\S]*disabled=\{scaleAnimationLocked\}/s);
   assert.match(source, /--screen-only-scale/);
   assert.match(source, /availableHeight[\s\S]*- insertedTipHeight[\s\S]*- verticalOutline[\s\S]*- SCREEN_ONLY_EDGE_GUARD/);
@@ -302,6 +308,8 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /window\.setTimeout\(resolve, 560\)/);
   assert.match(source, /setShowSaveTooltip\(true\)/);
   assert.match(source, /SAVE_TOOLTIP_DURATION = 1500/);
+  assert.match(source, /SAVE_TOOLTIP_FADE_DURATION = 300/);
+  assert.match(source, /setShowSaveTooltip\(false\)[\s\S]*setSaveTooltipFading\(true\)[\s\S]*SAVE_TOOLTIP_FADE_DURATION/s);
   const replayStart = source.indexOf("const replayCartridgeInsertion");
   const replayEnd = source.indexOf("const flushAudio", replayStart);
   assert.ok(replayStart >= 0 && replayEnd > replayStart);

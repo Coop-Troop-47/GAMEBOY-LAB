@@ -800,6 +800,11 @@ kbd {
   background: var(--ink);
 }
 
+.segmented button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
 .model-switch {
   grid-template-columns: 1fr 1fr;
 }

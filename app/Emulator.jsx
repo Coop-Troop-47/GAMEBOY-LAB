@@ -51,6 +51,7 @@ const SCREEN_ONLY_CARTRIDGE_CENTER_OFFSET = (
 ) / 2;
 const SCREEN_ONLY_EDGE_GUARD = 1;
 const SAVE_TOOLTIP_DURATION = 1500;
+const SAVE_TOOLTIP_FADE_DURATION = 300;
 const TECHNICAL_READOUT_MEDIA = "(min-width: 1180px)";
 
 function BrandMark() {
@@ -1815,6 +1816,7 @@ export default function Emulator() {
   const consoleOffsetYRef = useRef(0);
   const scaleToastTimerRef = useRef(0);
   const saveTooltipTimerRef = useRef(0);
+  const saveTooltipFadeTimerRef = useRef(0);
   const cartridgeAnimationTimerRef = useRef(0);
   const cartridgeAnimationRunRef = useRef(0);
   const transitionFrameTimerRef = useRef(0);
@@ -1915,12 +1917,16 @@ export default function Emulator() {
   const [cartridgeArtwork, setCartridgeArtwork] = useState("");
   const [cartridgeAnimationKey, setCartridgeAnimationKey] = useState(0);
   const [showSaveTooltip, setShowSaveTooltip] = useState(false);
+  const [saveTooltipFading, setSaveTooltipFading] = useState(false);
   const [cartridgePreflight, setCartridgePreflight] = useState(false);
-  const scaleAnimationLocked = Boolean(
+  const presentationAnimationLocked = Boolean(
     viewModeTransition
     || cartridgePreflight
     || (cartridgeInserting && cartridgeAnimationEnabled)
+    || showSaveTooltip
+    || saveTooltipFading
   );
+  const scaleAnimationLocked = presentationAnimationLocked;
   const [cartridgeHovered, setCartridgeHovered] = useState(false);
   const [consoleOffsetY, setConsoleOffsetY] = useState(0);
   const [scaleToast, setScaleToast] = useState("");
@@ -2011,6 +2017,7 @@ export default function Emulator() {
     catalogueRunRef.current += 1;
     window.clearTimeout(scaleToastTimerRef.current);
     window.clearTimeout(saveTooltipTimerRef.current);
+    window.clearTimeout(saveTooltipFadeTimerRef.current);
     window.clearTimeout(cartridgeAnimationTimerRef.current);
     window.clearTimeout(viewTransitionTimerRef.current);
     viewTransitionRunRef.current += 1;
@@ -2063,7 +2070,9 @@ export default function Emulator() {
     cartridgeAnimationRunRef.current = run;
     window.clearTimeout(cartridgeAnimationTimerRef.current);
     window.clearTimeout(saveTooltipTimerRef.current);
+    window.clearTimeout(saveTooltipFadeTimerRef.current);
     setShowSaveTooltip(false);
+    setSaveTooltipFading(false);
     setCartridgeInserting(false);
     // View/model switches are batched with this call. Preflight waits until the
     // new geometry has painted, reserves the prompt clearance, and lets the
@@ -2199,7 +2208,9 @@ export default function Emulator() {
   const openSaveDrawer = useCallback(() => {
     if (!romRef.current) return;
     window.clearTimeout(saveTooltipTimerRef.current);
+    window.clearTimeout(saveTooltipFadeTimerRef.current);
     setShowSaveTooltip(false);
+    setSaveTooltipFading(false);
     if (pauseOnMenu) pauseGame("menu");
     setDrawerOpen(false);
     setEmulationDrawerOpen(false);
@@ -2512,7 +2523,9 @@ export default function Emulator() {
       cartridgeAnimationRunRef.current += 1;
       window.clearTimeout(cartridgeAnimationTimerRef.current);
       window.clearTimeout(saveTooltipTimerRef.current);
+      window.clearTimeout(saveTooltipFadeTimerRef.current);
       setShowSaveTooltip(false);
+      setSaveTooltipFading(false);
       setCartridgePreflight(false);
       setStatus("Cataloguing cartridge");
       setMessage(cachedEntry?.artwork
@@ -2551,15 +2564,25 @@ export default function Emulator() {
         await waitForVisualStability(deviceRigRef.current);
         setCartridgeInserting(true);
         await new Promise((resolve) => window.setTimeout(resolve, 560));
+        setSaveTooltipFading(false);
         setShowSaveTooltip(true);
         setCartridgePreflight(false);
         setCartridgeInserting(false);
       } else {
         setCartridgeInserting(false);
+        setSaveTooltipFading(false);
         setShowSaveTooltip(true);
       }
       saveTooltipTimerRef.current = window.setTimeout(
-        () => setShowSaveTooltip(false),
+        () => {
+          setShowSaveTooltip(false);
+          setSaveTooltipFading(true);
+          window.clearTimeout(saveTooltipFadeTimerRef.current);
+          saveTooltipFadeTimerRef.current = window.setTimeout(
+            () => setSaveTooltipFading(false),
+            SAVE_TOOLTIP_FADE_DURATION,
+          );
+        },
         SAVE_TOOLTIP_DURATION,
       );
 
@@ -3034,14 +3057,14 @@ export default function Emulator() {
   ]);
 
   const switchModel = useCallback((nextModel) => {
-    if (nextModel === model) return;
+    if (nextModel === model || presentationAnimationLocked) return;
     if (romRef.current && runningRef.current) {
       pauseGame("safety");
       setPendingModel(nextModel);
       return;
     }
     performModelSwitch(nextModel);
-  }, [model, pauseGame, performModelSwitch]);
+  }, [model, pauseGame, performModelSwitch, presentationAnimationLocked]);
 
   const cancelModelSwitch = useCallback(() => {
     setPendingModel(null);
@@ -3049,11 +3072,11 @@ export default function Emulator() {
   }, [resumeGame]);
 
   const confirmModelSwitch = useCallback(() => {
-    if (!pendingModel) return;
+    if (!pendingModel || presentationAnimationLocked) return;
     const nextModel = pendingModel;
     setPendingModel(null);
     performModelSwitch(nextModel);
-  }, [pendingModel, performModelSwitch]);
+  }, [pendingModel, performModelSwitch, presentationAnimationLocked]);
 
   const completeViewModeTransition = useCallback((run = viewTransitionRunRef.current) => {
     const pending = viewTransitionPendingRef.current;
@@ -3088,7 +3111,7 @@ export default function Emulator() {
   }, [replayCartridgeInsertion]);
 
   const switchViewMode = useCallback((nextViewMode) => {
-    if (nextViewMode === viewMode || viewModeTransition) return;
+    if (nextViewMode === viewMode || presentationAnimationLocked) return;
     const sourceFrame = screenFrameRef.current;
     const sourceBounds = sourceFrame?.getBoundingClientRect();
     if (!sourceFrame || !sourceBounds?.width || !sourceBounds.height) {
@@ -3196,8 +3219,8 @@ export default function Emulator() {
   }, [
     completeViewModeTransition,
     replayCartridgeInsertion,
+    presentationAnimationLocked,
     viewMode,
-    viewModeTransition,
   ]);
 
   const reset = useCallback(() => {
@@ -4799,11 +4822,21 @@ export default function Emulator() {
               </div>
             </div>
             <div className="segmented model-switch" aria-label="Console model">
-              <button className={model === "dmg" ? "active" : ""} onClick={() => switchModel("dmg")} aria-pressed={model === "dmg"}>
+              <button
+                className={model === "dmg" ? "active" : ""}
+                onClick={() => switchModel("dmg")}
+                aria-pressed={model === "dmg"}
+                disabled={presentationAnimationLocked}
+              >
                 <ConsoleIcon model="dmg" />
                 <span><b>DMG</b><small>1989</small></span>
               </button>
-              <button className={model === "cgb" ? "active" : ""} onClick={() => switchModel("cgb")} aria-pressed={model === "cgb"}>
+              <button
+                className={model === "cgb" ? "active" : ""}
+                onClick={() => switchModel("cgb")}
+                aria-pressed={model === "cgb"}
+                disabled={presentationAnimationLocked}
+              >
                 <ConsoleIcon model="cgb" />
                 <span><b>GBC</b><small>1998</small></span>
               </button>
@@ -4849,8 +4882,22 @@ export default function Emulator() {
               <div>
                 <span className="option-label">View</span>
                 <div className="segmented two-way" aria-label="Presentation mode">
-                  <button className={viewMode === "console" ? "active" : ""} onClick={() => switchViewMode("console")} aria-pressed={viewMode === "console"}>Console</button>
-                  <button className={viewMode === "screen" ? "active" : ""} onClick={() => switchViewMode("screen")} aria-pressed={viewMode === "screen"}>Screen only</button>
+                  <button
+                    className={viewMode === "console" ? "active" : ""}
+                    onClick={() => switchViewMode("console")}
+                    aria-pressed={viewMode === "console"}
+                    disabled={presentationAnimationLocked}
+                  >
+                    Console
+                  </button>
+                  <button
+                    className={viewMode === "screen" ? "active" : ""}
+                    onClick={() => switchViewMode("screen")}
+                    aria-pressed={viewMode === "screen"}
+                    disabled={presentationAnimationLocked}
+                  >
+                    Screen only
+                  </button>
                 </div>
               </div>
               <div>
@@ -5197,6 +5244,7 @@ export default function Emulator() {
                   className={`preference-toggle ${integerScaling ? "active" : ""}`}
                   onClick={() => setIntegerScaling((value) => !value)}
                   aria-pressed={integerScaling}
+                  disabled={scaleAnimationLocked}
                 >
                   <span>Integer display scaling</span>
                   <b>{integerScaling ? "ON" : "OFF"}</b>
