@@ -327,9 +327,11 @@ test("keeps every hardware input and new option accessible", async () => {
   const replayStart = source.indexOf("const replayCartridgeInsertion");
   const replayEnd = source.indexOf("const flushAudio", replayStart);
   assert.ok(replayStart >= 0 && replayEnd > replayStart);
-  assert.doesNotMatch(
-    source.slice(replayStart, replayEnd),
-    /setShowSaveTooltip\(true\)/,
+  const replaySource = source.slice(replayStart, replayEnd);
+  assert.doesNotMatch(replaySource, /setShowSaveTooltip\(true\)/);
+  assert.match(
+    replaySource,
+    /setCartridgeInserting\(true\)[\s\S]*window\.setTimeout\([\s\S]*setCartridgeInserting\(false\)[\s\S]*setCartridgePreflight\(false\)/,
   );
   assert.match(source, /setCartridgePreflight\(true\)[\s\S]*afterNextPaint\(\)[\s\S]*waitForVisualStability\(deviceRigRef\.current\)[\s\S]*setCartridgeInserting\(true\)/);
   assert.match(css, /\.screen-only \.console-wrap\s*\{[^}]*--cartridge-width:\s*64%/s);

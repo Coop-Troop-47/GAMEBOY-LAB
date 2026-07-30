@@ -2099,12 +2099,15 @@ export default function Emulator() {
     }
 
     setCartridgeAnimationKey((value) => value + 1);
-    setCartridgePreflight(false);
     setCartridgeInserting(true);
     cartridgeAnimationTimerRef.current = window.setTimeout(
       () => {
         if (cartridgeAnimationRunRef.current !== run) return;
         setCartridgeInserting(false);
+        // Hold the calculated duck through the complete slide and shell
+        // knockback. Releasing preflight at animation start made model-switch
+        // insertions rise behind the cartridge while initial loads stayed put.
+        setCartridgePreflight(false);
       },
       560,
     );
