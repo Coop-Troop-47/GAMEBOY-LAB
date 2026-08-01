@@ -227,6 +227,12 @@ export class GameBoy {
     this.io = new Uint8Array(0x80);
     this.bgPalette = new Uint8Array(0x40);
     this.objPalette = new Uint8Array(0x40);
+    // CGB palette RAM is byte-addressed, but the renderer consumes complete
+    // RGB555 colours. Keep a packed four-colour view per palette so live
+    // pixel transfer does not repeat the same byte assembly and LUT lookup
+    // for every pixel. Entries are refreshed only when palette RAM changes.
+    this.bgPalettePacked = new Uint32Array(32);
+    this.objPalettePacked = new Uint32Array(32);
     this.framebuffer = new Uint8ClampedArray(SCREEN_WIDTH * SCREEN_HEIGHT * 4);
     this.framebuffer32 = new Uint32Array(this.framebuffer.buffer);
     this.lineBgColors = new Uint8Array(SCREEN_WIDTH);
@@ -510,6 +516,7 @@ export class GameBoy {
     this.hram.fill(0);
     this.bgPalette.fill(0xff);
     this.objPalette.fill(0xff);
+    this.refreshPackedCgbPalettes();
     this.framebuffer.fill(0xff);
     if (this.model === "cgb" && !this.cgbCartridge) this.applyCompatibilityPalette();
     this.io[0x40] = 0x91;
@@ -603,6 +610,26 @@ export class GameBoy {
     this.dmgPalettePacked = this.dmgBgPalettePacked;
   }
 
+  refreshPackedCgbPalettes() {
+    for (let palette = 0; palette < 8; palette += 1) {
+      for (let color = 0; color < 4; color += 1) {
+        const offset = palette * 8 + color * 2;
+        const value = (this.bgPalette[offset] | (this.bgPalette[offset + 1] << 8)) & 0x7fff;
+        this.bgPalettePacked[(palette * 4) + color] = CGB_COLOR_LUT_PACKED[value];
+        const objectValue = (this.objPalette[offset] | (this.objPalette[offset + 1] << 8)) & 0x7fff;
+        this.objPalettePacked[(palette * 4) + color] = CGB_COLOR_LUT_PACKED[objectValue];
+      }
+    }
+  }
+
+  refreshPackedCgbPaletteEntry(memory, packed, byteIndex) {
+    const palette = (byteIndex >> 3) & 7;
+    const color = (byteIndex & 7) >> 1;
+    const offset = (palette * 8) + (color * 2);
+    const value = (memory[offset] | (memory[offset + 1] << 8)) & 0x7fff;
+    packed[(palette * 4) + color] = CGB_COLOR_LUT_PACKED[value];
+  }
+
   applyCompatibilityPalette() {
     if (
       this.compatibilityPaletteId === "auto" &&
@@ -617,6 +644,7 @@ export class GameBoy {
       this.writeCompatibilityPalette(this.objPalette.subarray(0, 8), obj0);
       this.writeCompatibilityPalette(this.objPalette.subarray(8, 16), obj1);
     }
+    this.refreshPackedCgbPalettes();
     this.updateCompatibilityPaletteAliases();
   }
 
@@ -1339,7 +1367,11 @@ export class GameBoy {
     if (register === 0x68) { if (this.model === "cgb") this.bgPaletteIndex = value & 0xbf; return; }
     if (register === 0x69) {
       if (this.cgbRegistersAvailable()) {
-        if (this.ppuMode !== 3) this.bgPalette[this.bgPaletteIndex & 0x3f] = value;
+        if (this.ppuMode !== 3) {
+          const paletteIndex = this.bgPaletteIndex & 0x3f;
+          this.bgPalette[paletteIndex] = value;
+          this.refreshPackedCgbPaletteEntry(this.bgPalette, this.bgPalettePacked, paletteIndex);
+        }
         // The data write is blocked during pixel transfer, but the address
         // latch's auto-increment still occurs.
         if (this.bgPaletteIndex & 0x80) {
@@ -1351,7 +1383,11 @@ export class GameBoy {
     if (register === 0x6a) { if (this.model === "cgb") this.objPaletteIndex = value & 0xbf; return; }
     if (register === 0x6b) {
       if (this.cgbRegistersAvailable()) {
-        if (this.ppuMode !== 3) this.objPalette[this.objPaletteIndex & 0x3f] = value;
+        if (this.ppuMode !== 3) {
+          const paletteIndex = this.objPaletteIndex & 0x3f;
+          this.objPalette[paletteIndex] = value;
+          this.refreshPackedCgbPaletteEntry(this.objPalette, this.objPalettePacked, paletteIndex);
+        }
         if (this.objPaletteIndex & 0x80) {
           this.objPaletteIndex = 0x80 | ((this.objPaletteIndex + 1) & 0x3f);
         }
@@ -2027,7 +2063,6 @@ export class GameBoy {
     const framebufferOffset = line * SCREEN_WIDTH;
     const vram = this.vram;
     const decodedTileRows = this.decodedTileRows;
-    const bgPalette = this.bgPalette;
     let cachedTileKey = -1;
     let cachedTileRow = 0;
     let cachedTileAttr = 0;
@@ -2073,16 +2108,9 @@ export class GameBoy {
       bgColors[x] = colorIndex;
       bgPriority[x] = priority;
       const packedColor = cgbRendering
-        ? CGB_COLOR_LUT_PACKED[
-            (bgPalette[(palette * 8) + (colorIndex * 2)]
-              | (bgPalette[(palette * 8) + (colorIndex * 2) + 1] << 8)) & 0x7fff
-          ]
+        ? this.bgPalettePacked[(palette * 4) + colorIndex]
         : cgbCompatibility
-          ? CGB_COLOR_LUT_PACKED[
-              (bgPalette[((this.ppuLineBgp >> (colorIndex * 2)) & 3) * 2]
-                | (bgPalette[((this.ppuLineBgp >> (colorIndex * 2)) & 3) * 2 + 1]
-                  << 8)) & 0x7fff
-            ]
+          ? this.bgPalettePacked[(this.ppuLineBgp >> (colorIndex * 2)) & 3]
           : this.dmgBgPalettePacked[(this.ppuLineBgp >> (colorIndex * 2)) & 3];
       framebuffer32[framebufferOffset + x] = packedColor;
     }
@@ -2123,13 +2151,9 @@ export class GameBoy {
             ? this.ppuLineObp1
             : this.ppuLineObp0;
           const spritePackedColor = cgbRendering
-            ? CGB_COLOR_LUT_PACKED[
-                (objPalette[((sprite.attr & 7) * 8) + (spriteColor * 2)]
-                  | (objPalette[((sprite.attr & 7) * 8) + (spriteColor * 2) + 1]
-                    << 8)) & 0x7fff
-              ]
+            ? this.objPalettePacked[((sprite.attr & 7) * 4) + spriteColor]
             : cgbCompatibility
-              ? this.cgbCompatibilityPackedColor(
+              ? this.cgbCachedCompatibilityPackedColor(
                   objPalette,
                   objectPalette,
                   objectRegister,
@@ -2211,9 +2235,9 @@ export class GameBoy {
     this.lineBgColors[x] = colorIndex;
     this.lineBgPriority[x] = priority;
     const packedColor = cgbRendering
-      ? this.cgbPackedColor(this.bgPalette, palette, colorIndex)
+      ? this.cgbCachedPackedColor(this.bgPalette, palette, colorIndex)
       : cgbCompatibility
-        ? this.cgbCompatibilityPackedColor(this.bgPalette, 0, this.io[0x47], colorIndex)
+        ? this.cgbCachedCompatibilityPackedColor(this.bgPalette, 0, this.io[0x47], colorIndex)
         : this.dmgBgPalettePacked[(this.io[0x47] >> (colorIndex * 2)) & 3];
     this.setPackedPixel(x, line, packedColor);
     if (!(lcdc & 0x02)) return;
@@ -2244,9 +2268,9 @@ export class GameBoy {
         const objectPalette = (sprite.attr & 0x10) ? 1 : 0;
         const objectRegister = this.io[objectPalette ? 0x49 : 0x48];
         const spritePackedColor = cgbRendering
-          ? this.cgbPackedColor(this.objPalette, sprite.attr & 7, spriteColor)
+          ? this.cgbCachedPackedColor(this.objPalette, sprite.attr & 7, spriteColor)
           : cgbCompatibility
-            ? this.cgbCompatibilityPackedColor(
+            ? this.cgbCachedCompatibilityPackedColor(
                 this.objPalette,
                 objectPalette,
                 objectRegister,
@@ -2279,6 +2303,11 @@ export class GameBoy {
     return this.cgbPackedColor(memory, palette, mappedColor);
   }
 
+  cgbCachedCompatibilityPackedColor(memory, palette, register, colorIndex) {
+    const mappedColor = (register >> (colorIndex * 2)) & 3;
+    return this.cgbCachedPackedColor(memory, palette, mappedColor);
+  }
+
   cgbColor(memory, palette, colorIndex) {
     const offset = palette * 8 + colorIndex * 2;
     const value = memory[offset] | (memory[offset + 1] << 8);
@@ -2294,6 +2323,13 @@ export class GameBoy {
     return CGB_COLOR_LUT_PACKED[
       (memory[offset] | (memory[offset + 1] << 8)) & 0x7fff
     ];
+  }
+
+  cgbCachedPackedColor(memory, palette, colorIndex) {
+    const packed = memory === this.objPalette
+      ? this.objPalettePacked
+      : this.bgPalettePacked;
+    return packed[(palette * 4) + colorIndex];
   }
 
   setPixel(x, y, rgb) {
@@ -3666,7 +3702,8 @@ export class GameBoy {
           obj0: new Uint8Array(snapshot.capturedCompatibilityPalette.obj0),
           obj1: new Uint8Array(snapshot.capturedCompatibilityPalette.obj1),
         }
-      : null;
+        : null;
+    this.refreshPackedCgbPalettes();
     if (this.model === "cgb" && !this.cgbMode) this.updateCompatibilityPaletteAliases();
     this.audioSampleCount = 0;
     this.batteryDirty = this.hasBattery;

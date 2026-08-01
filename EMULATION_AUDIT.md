@@ -1,10 +1,51 @@
-# GAMEBOY LAB v2.2.1 Emulation Audit
+# GAMEBOY LAB v2.2.2 Emulation Audit
 
-This audit compares the v2.2.1 candidate with the tagged v2.2.0 core and keeps
-the older v2.1.0 results below as historical release baselines. It keeps
+This audit compares the v2.2.2 candidate with the tagged v2.2.1 core and keeps
+the older v2.2.1, v2.2.0, and v2.1.0 results below as historical release
+baselines. It keeps
 measured results separate from ambition: a finite collection of ROMs cannot
 prove equivalence to every Game Boy silicon revision, cartridge peripheral,
 browser, or audio device.
+
+## v2.2.2 delta
+
+### Practical CGB rendering throughput
+
+Native CGB and CGB-compatible rendering now keeps a write-coherent packed
+palette cache: eight background and eight object palettes, four packed colours
+per palette. The cache is refreshed at the same point palette RAM accepts a
+write, while mode-3 access blocking and indexed auto-increment remain intact.
+Both the ordinary whole-line renderer and the live renderer used after
+mid-scanline writes consume the cache. In games, this reduces repeated RGB555
+byte assembly and colour-LUT work in colour-heavy battle effects, scrolling
+playfields, text/status panels, and sprite-rich scenes. The resulting CPU
+headroom is available to the LCD shader, audio queue, input, and browser UI;
+the emulated machine still runs at its fixed hardware cadence.
+
+Five fresh-process trials used 120 warm-up frames and 600 measured frames per
+cartridge. Framebuffer/CPU checksums matched v2.2.1 in every paired run:
+
+| Cartridge/model | v2.2.1 median | v2.2.2 median | Change |
+| --- | ---: | ---: | ---: |
+| Super Mario Land, DMG | 1,034.57 fps | 1,055.22 fps | +2.00% |
+| Link's Awakening, DMG | 1,133.54 fps | 1,180.28 fps | +4.12% |
+| Pokémon Blue, DMG | 1,494.00 fps | 1,538.71 fps | +2.99% |
+| Wario Land 3, GBC | 715.53 fps | 730.24 fps | +2.06% |
+| Shantae, GBC | 688.37 fps | 710.97 fps | +3.28% |
+| Pokémon Crystal, GBC | 819.26 fps | 854.28 fps | +4.27% |
+
+### Accuracy and regression gates
+
+| Test group | v2.2.1 | v2.2.2 | Change |
+| --- | ---: | ---: | ---: |
+| Mealybug Tearoom structural image match | 88.7153% | 88.7153% | held |
+| SameSuite APU | 47/70 | 47/70 | held |
+| Project core/unit suite | 37/37 | 38/38 | +1 cache-coherence test |
+
+The release deliberately does not include two tempting WX timing shortcuts:
+both reduced the complete Mealybug score in isolated experiments. The next
+accuracy target remains a revision-aware PPU FIFO/fetcher, followed by the 23
+remaining SameSuite APU cases.
 
 ## v2.2.1 delta
 
@@ -236,7 +277,7 @@ The external ROM suites are not distributed in GAMEBOY LAB. The audit used
 
 ## Distance from the stated goal
 
-v2.2.1 is materially more accurate than v2.1.0 and exceptionally fast for a
+v2.2.2 is materially more accurate than v2.1.0 and exceptionally fast for a
 from-scratch JavaScript core, but the evidence does **not** establish “the most
 accurate browser emulator in the world.” The largest measured gap is still PPU
 behavior: 88.7153% Mealybug structural similarity and 1/24 pixel-exact cases.

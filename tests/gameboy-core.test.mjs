@@ -758,6 +758,25 @@ test("packs framebuffer pixels without changing their RGBA bytes", () => {
   );
 });
 
+test("keeps the live CGB palette cache coherent across indexed writes", () => {
+  const cgb = new GameBoy("cgb");
+  cgb.loadROM(makeRom([], { cgb: 0x80 }));
+  cgb.writeIO(0x68, 0x80);
+  cgb.writeIO(0x69, 0x1f);
+  cgb.writeIO(0x69, 0x00);
+  assert.equal(
+    cgb.bgPalettePacked[0],
+    cgb.cgbPackedColor(cgb.bgPalette, 0, 0),
+  );
+  cgb.writeIO(0x6a, 0x88);
+  cgb.writeIO(0x6b, 0x00);
+  cgb.writeIO(0x6b, 0x7c);
+  assert.equal(
+    cgb.objPalettePacked[4],
+    cgb.cgbPackedColor(cgb.objPalette, 1, 0),
+  );
+});
+
 test("distinguishes native GBC mode and the GBC compatibility palette", () => {
   const native = new GameBoy("cgb");
   native.loadROM(makeRom([], { cgb: 0x80 }));

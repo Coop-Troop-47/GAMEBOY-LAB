@@ -1,12 +1,12 @@
 {
-  "version": "2.2.1",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.2.1/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.2.1",
+  "version": "2.2.2",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.2.2/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.2.2",
   "changes": [
-    "DMG pixel and sprite palette conversion now uses direct packed-table indexing in both whole-line and live scanline rendering, reducing per-pixel dispatch while preserving the exact colour mapping.",
-    "In real games this gives the CPU more headroom for scrolling playfields, text-heavy HUDs, sprite compositing, LCD shaders, audio and input work; the emulated cadence remains fixed at 59.7275 Hz.",
-    "Fresh-process paired benchmarks matched framebuffer/CPU checksums and measured +1.76% Super Mario Land, +7.46% Link's Awakening, +2.27% Pokémon Blue, +2.42% Wario Land 3, −0.30% Shantae (run variance), and +1.97% Pokémon Crystal.",
-    "No PPU, CPU, APU, mapper, RTC, save-state, or BIOS behavior was intentionally changed; Mealybug remains 88.7153% structural match with the v2.2.0 core.",
-    "The offline single-file build, v2.2 window-fetch work, and prior audio, DMA, mapper, RTC, save, and input improvements remain intact; remaining accuracy gaps stay documented rather than hidden behind a performance claim."
+    "Colourful scenes now need less processing, leaving more headroom for the LCD shader, audio, controls and interface without changing game timing.",
+    "The improvement is most useful in Pokémon battles, Wario Land scrolling areas, Shantae's sprite-heavy scenes and Pokémon Crystal menus.",
+    "Fresh-process measurements were +2.00% Super Mario Land, +4.12% Link's Awakening, +2.99% Pokémon Blue, +2.06% Wario Land 3, +3.28% Shantae and +4.27% Pokémon Crystal versus v2.2.1.",
+    "The measured frames and CPU state matched the previous release, and all 57 project tests still pass.",
+    "This is a performance release; the next major v3.0.0 milestone is reserved for broad PPU/APU accuracy gains with the same performance standard."
   ]
 }
