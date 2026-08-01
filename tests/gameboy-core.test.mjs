@@ -269,6 +269,45 @@ test("round-trips complete save states without confusing them with cartridge sav
   assert.equal(other.importState(state), false);
 });
 
+test("round-trips the dot-timed window FIFO alongside an in-flight frame", () => {
+  const gb = new GameBoy("dmg");
+  gb.loadROM(makeRom([0x18, 0xfe]));
+  gb.ppuFifoEnabled = true;
+  gb.ppuFifoHead = 3;
+  gb.ppuFifoLength = 11;
+  gb.ppuFetcherState = 2;
+  gb.ppuFetcherDots = 1;
+  gb.ppuFetcherWindow = true;
+  gb.ppuFetcherPosition = 0x36;
+  gb.ppuWxJustChanged = true;
+  gb.ppuFifoColor.set([0, 1, 2, 3, 2, 1, 0, 3, 1, 2, 3, 0, 1, 2, 3, 0]);
+  gb.ppuFifoPalette.set([7, 6, 5, 4, 3, 2, 1, 0, 7, 6, 5, 4, 3, 2, 1, 0]);
+  gb.ppuFifoPriority.set([1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]);
+  gb.ppuFifoWindow.set([1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0]);
+  const state = gb.exportState();
+
+  gb.ppuFifoEnabled = false;
+  gb.ppuFifoHead = 0;
+  gb.ppuFifoLength = 0;
+  gb.ppuFetcherPosition = 0;
+  gb.ppuWxJustChanged = false;
+  gb.ppuFifoColor.fill(0);
+  gb.ppuFifoPalette.fill(0);
+  gb.ppuFifoPriority.fill(0);
+  gb.ppuFifoWindow.fill(0);
+
+  assert.equal(gb.importState(state), true);
+  assert.equal(gb.ppuFifoEnabled, true);
+  assert.equal(gb.ppuFifoHead, 3);
+  assert.equal(gb.ppuFifoLength, 11);
+  assert.equal(gb.ppuFetcherPosition, 0x36);
+  assert.equal(gb.ppuWxJustChanged, true);
+  assert.deepEqual(Array.from(gb.ppuFifoColor), [0, 1, 2, 3, 2, 1, 0, 3, 1, 2, 3, 0, 1, 2, 3, 0]);
+  assert.deepEqual(Array.from(gb.ppuFifoPalette), [7, 6, 5, 4, 3, 2, 1, 0, 7, 6, 5, 4, 3, 2, 1, 0]);
+  assert.deepEqual(Array.from(gb.ppuFifoPriority), [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]);
+  assert.deepEqual(Array.from(gb.ppuFifoWindow), [1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0]);
+});
+
 test("restores an in-flight pixel transfer without replaying sprite stalls", () => {
   const gb = new GameBoy("dmg");
   gb.loadROM(makeRom([0x00, 0x18, 0xfd]));

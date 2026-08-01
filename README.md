@@ -86,7 +86,7 @@ database, or cloud configuration. Cartridge files, preferences, and battery
 saves remain local to the browser and are never uploaded.
 
 The external conformance runners in `scripts/` accept locally sourced test-ROM
-  directories. See `EMULATION_AUDIT.md` for the v2.2.2 methodology, measured
+  directories. See `EMULATION_AUDIT.md` for the v2.3.0 methodology, measured
 results, hardware-revision exclusions, and deliberately unclaimed areas.
 
 ## Releases

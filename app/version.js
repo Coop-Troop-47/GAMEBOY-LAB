@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.2.2";
+export const APP_VERSION = "2.3.0";
 export const UPDATE_REPOSITORY = "Coop-Troop-47/GAMEBOY-LAB";
 export const UPDATE_ASSET_NAME = "gbc-lab.html";
 export const UPDATE_MANIFEST_URL = (

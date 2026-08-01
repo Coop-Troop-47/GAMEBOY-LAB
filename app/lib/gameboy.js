@@ -4,6 +4,10 @@ const FRAME_CYCLES = 70224;
 const CPU_CLOCK = 4194304;
 const AUDIO_RATE = 48000;
 const STATE_VERSION = 1;
+const PPU_FETCH_TILE = 0;
+const PPU_FETCH_LOW = 1;
+const PPU_FETCH_HIGH = 2;
+const PPU_FETCH_PUSH = 3;
 
 const DUTY_PATTERNS = [
   new Uint8Array([0, 0, 0, 0, 0, 0, 0, 1]),
@@ -97,6 +101,10 @@ const STATE_SCALARS = [
   "ppuLineLcdc", "ppuLineScy", "ppuLineScx", "ppuLineBgp", "ppuLineObp0",
   "ppuLineObp1", "ppuLineWy", "ppuLineWx", "ppuLineWindowLine",
   "ppuLineCgbRendering", "ppuFetchScx", "ppuFetchLcdc", "ppuFetchWindowMap",
+  "ppuFifoEnabled", "ppuFifoHead", "ppuFifoLength", "ppuFetcherState",
+  "ppuFetcherDots", "ppuFetcherWindow", "ppuFetcherTileCount", "ppuFetcherTileX", "ppuFetcherPosition", "ppuFetcherBgY",
+  "ppuFetcherTileNumber", "ppuFetcherAttr", "ppuFetcherTileAddress", "ppuWxJustChanged",
+  "ppuFetcherLow", "ppuFetcherHigh",
   "lcdStartup", "lycMatch", "statSignal", "windowLine", "frameReady",
   "frameNumber", "cycles", "bootEnabled", "doubleSpeed", "speedSwitchArmed",
   "baseCycles",
@@ -249,6 +257,10 @@ export class GameBoy {
     this.lineSpriteStalls = new Uint16Array(SCREEN_WIDTH);
     this.lineSpriteClaimed = new Uint8Array(SCREEN_WIDTH);
     this.lineSpriteXGroups = new Uint8Array(168);
+    this.ppuFifoColor = new Uint8Array(16);
+    this.ppuFifoPalette = new Uint8Array(16);
+    this.ppuFifoPriority = new Uint8Array(16);
+    this.ppuFifoWindow = new Uint8Array(16);
     this.colorScratch = new Uint8Array(3);
     this.audioMix = new Float64Array(6);
     this.audioSamples = new Float32Array(4096);
@@ -498,6 +510,26 @@ export class GameBoy {
     this.ppuFetchScx = 0;
     this.ppuFetchLcdc = 0;
     this.ppuFetchWindowMap = 0;
+    this.ppuFifoEnabled = false;
+    this.ppuFifoHead = 0;
+    this.ppuFifoLength = 0;
+    this.ppuFetcherState = 0;
+    this.ppuFetcherDots = 2;
+    this.ppuFetcherWindow = false;
+    this.ppuFetcherTileCount = 0;
+    this.ppuFetcherTileX = 0;
+    this.ppuFetcherPosition = 0xf0;
+    this.ppuFetcherBgY = 0;
+    this.ppuFetcherTileNumber = 0;
+    this.ppuFetcherAttr = 0;
+    this.ppuFetcherTileAddress = 0;
+    this.ppuFetcherLow = 0;
+    this.ppuFetcherHigh = 0;
+    this.ppuWxJustChanged = false;
+    this.ppuFifoColor.fill(0);
+    this.ppuFifoPalette.fill(0);
+    this.ppuFifoPriority.fill(0);
+    this.ppuFifoWindow.fill(0);
     this.lcdStartup = false;
     this.lycMatch = true;
     this.statSignal = false;
@@ -1269,7 +1301,7 @@ export class GameBoy {
     }
     if (register === 0x40) {
       const wasEnabled = !!(this.io[0x40] & 0x80);
-      this.activateLivePixelTransfer();
+      this.activateLivePixelTransfer(register);
       this.io[0x40] = value;
       const enabled = !!(value & 0x80);
       if (wasEnabled && !enabled) {
@@ -1337,7 +1369,7 @@ export class GameBoy {
       return;
     }
     if (register === 0x50) {
-      this.activateLivePixelTransfer();
+      this.activateLivePixelTransfer(register);
       if (value !== 0 && this.bootEnabled) {
         if (this.model === "cgb" && !this.cgbCartridge) this.captureCompatibilityPalettes();
         this.bootEnabled = false;
@@ -1410,7 +1442,8 @@ export class GameBoy {
       || register === 0x43
       || (register >= 0x47 && register <= 0x4b)
     ) {
-      this.activateLivePixelTransfer();
+      this.activateLivePixelTransfer(register);
+      if (register === 0x4b && this.ppuMode === 3) this.ppuWxJustChanged = true;
       this.io[register] = value;
     }
   }
@@ -1900,6 +1933,7 @@ export class GameBoy {
     this.ppuWindowRow = this.windowLine;
     this.ppuWindowLineCursor = this.windowLine;
     this.ppuTransferLive = false;
+    this.ppuWxJustChanged = false;
     this.ppuLineLcdc = this.io[0x40];
     this.ppuLineScy = this.io[0x42];
     this.ppuLineScx = this.io[0x43];
@@ -1914,6 +1948,8 @@ export class GameBoy {
     this.ppuFetchScx = this.io[0x43];
     this.ppuFetchLcdc = this.io[0x40];
     this.ppuFetchWindowMap = this.io[0x40] & 0x40;
+    this.ppuFifoEnabled = false;
+    this.resetPixelFetcher(false);
     this.lineBgColors.fill(0);
     this.lineBgPriority.fill(0);
     // Mode-2 writes can change object size or visibility after the initial
@@ -1944,15 +1980,271 @@ export class GameBoy {
     this.ppuTransferDot = this.ppuDot;
   }
 
-  activateLivePixelTransfer() {
+  activateLivePixelTransfer(register = null) {
     if (
       this.ppuTransferLive
       || this.ppuMode !== 3
       || this.ly >= SCREEN_HEIGHT
     ) return;
+    // The first mode-3 register write is the point at which the old fast
+    // renderer must hand ownership to the dot-timed fetcher. Replaying from
+    // the transfer edge seeds the FIFO at the exact phase of that write while
+    // keeping ordinary, write-free lines on the allocation-free fast path.
+    // The fetcher hand-off is deliberately conservative: only late Mode-3
+    // writes that can move a left-edge window are routed through the new
+    // dot-timed path. Early writes still use the established renderer while
+    // the fetcher is in its bootstrapping phase.
+    this.ppuFifoEnabled = this.model === "dmg"
+      && register === 0x4b
+      && this.ppuDot >= 96
+      && this.io[0x4b] <= 6;
+    if (this.ppuFifoEnabled) {
+      this.ppuTransferWarmup = register === 0x4b && this.io[0x4b] >= 6 ? 12 : 0;
+      this.ppuTransferDiscard = 0;
+    }
     this.catchUpPixelTransfer();
     this.renderStaticTransferRange(this.ly, 0, this.ppuTransferX);
     this.ppuTransferLive = true;
+  }
+
+  resetPixelFetcher(windowMode = false, backgroundPixelX = 0, position = null) {
+    this.ppuFifoHead = 0;
+    this.ppuFifoLength = windowMode ? 0 : 8;
+    this.ppuFetcherState = PPU_FETCH_TILE;
+    this.ppuFetcherDots = 2;
+    this.ppuFetcherWindow = !!windowMode;
+    this.ppuFetcherTileCount = 0;
+    this.ppuFetcherTileX = windowMode
+      ? 0
+      : ((backgroundPixelX + (this.io[0x43] & 0xf8)) >> 3) & 31;
+    this.ppuFetcherPosition = position === null
+      ? windowMode ? this.ppuFetcherPosition : 0xf0
+      : position & 0xff;
+    this.ppuFetcherBgY = windowMode
+      ? this.ppuWindowRow
+      : (this.ly + this.io[0x42]) & 0xff;
+    this.ppuFetcherTileNumber = 0;
+    this.ppuFetcherAttr = 0;
+    this.ppuFetcherTileAddress = 0;
+    this.ppuFetcherLow = 0;
+    this.ppuFetcherHigh = 0;
+  }
+
+  fetcherReadTile() {
+    const lcdc = this.io[0x40];
+    const cgbRendering = this.cgbMode || (this.model === "cgb" && this.bootEnabled);
+    const row = this.ppuFetcherWindow
+      ? this.ppuWindowRow
+      : (this.ly + this.io[0x42]) & 0xff;
+    this.ppuFetcherBgY = row;
+    const mapBase = this.ppuFetcherWindow
+      ? ((lcdc & 0x40) ? 0x1c00 : 0x1800)
+      : ((lcdc & 0x08) ? 0x1c00 : 0x1800);
+    const signedPosition = this.ppuFetcherPosition < 128
+      ? this.ppuFetcherPosition
+      : this.ppuFetcherPosition - 256;
+    const tileX = this.ppuFetcherWindow
+      ? this.ppuFetcherTileX
+      : (signedPosition < -8
+        ? (this.io[0x43] >> 3)
+        : ((this.io[0x43] + signedPosition + 8) >> 3)) & 31;
+    this.ppuFetcherTileX = tileX;
+    const mapOffset = mapBase + ((row >> 3) * 32) + tileX;
+    this.ppuFetcherTileNumber = this.vram[mapOffset];
+    this.ppuFetcherAttr = cgbRendering ? this.vram[0x2000 + mapOffset] : 0;
+  }
+
+  fetcherReadLow() {
+    const lcdc = this.io[0x40];
+    const cgbRendering = this.cgbMode || (this.model === "cgb" && this.bootEnabled);
+    let tileY = this.ppuFetcherBgY & 7;
+    if (this.ppuFetcherAttr & 0x40) tileY = 7 - tileY;
+    const tileAddress = lcdc & 0x10
+      ? this.ppuFetcherTileNumber * 16
+      : 0x1000 + signed8(this.ppuFetcherTileNumber) * 16;
+    const bank = cgbRendering && (this.ppuFetcherAttr & 0x08) ? 0x2000 : 0;
+    this.ppuFetcherTileAddress = bank + tileAddress + tileY * 2;
+    this.ppuFetcherLow = this.vram[this.ppuFetcherTileAddress & 0x3fff];
+  }
+
+  fetcherReadHigh() {
+    const lcdc = this.io[0x40];
+    const cgbRendering = this.cgbMode || (this.model === "cgb" && this.bootEnabled);
+    let tileY = this.ppuFetcherBgY & 7;
+    if (this.ppuFetcherAttr & 0x40) tileY = 7 - tileY;
+    const tileAddress = lcdc & 0x10
+      ? this.ppuFetcherTileNumber * 16
+      : 0x1000 + signed8(this.ppuFetcherTileNumber) * 16;
+    const bank = cgbRendering && (this.ppuFetcherAttr & 0x08) ? 0x2000 : 0;
+    this.ppuFetcherTileAddress = bank + tileAddress + tileY * 2;
+    this.ppuFetcherHigh = this.vram[(this.ppuFetcherTileAddress + 1) & 0x3fff];
+  }
+
+  fetcherPushTile() {
+    if (this.ppuFifoLength > 8) return false;
+    const flipX = !!(this.ppuFetcherAttr & 0x20);
+    const tail = (this.ppuFifoHead + this.ppuFifoLength) & 15;
+    for (let pixel = 0; pixel < 8; pixel += 1) {
+      const tilePixel = flipX ? 7 - pixel : pixel;
+      const bit = 7 - tilePixel;
+      const color = (((this.ppuFetcherHigh >> bit) & 1) << 1)
+        | ((this.ppuFetcherLow >> bit) & 1);
+      const index = (tail + pixel) & 15;
+      this.ppuFifoColor[index] = color;
+      this.ppuFifoPalette[index] = this.ppuFetcherAttr & 7;
+      this.ppuFifoPriority[index] = (this.ppuFetcherAttr >> 7) & 1;
+      this.ppuFifoWindow[index] = this.ppuFetcherWindow ? 1 : 0;
+    }
+    this.ppuFifoLength += 8;
+    if (this.ppuFetcherWindow) {
+      this.ppuFetcherTileX = (this.ppuFetcherTileX + 1) & 31;
+    } else {
+      this.ppuFetcherTileCount += 1;
+    }
+    return true;
+  }
+
+  advancePixelFetcherDot() {
+    if (this.ppuFetcherState !== PPU_FETCH_PUSH) {
+      this.ppuFetcherDots -= 1;
+      if (this.ppuFetcherDots > 0) return;
+    }
+    if (this.ppuFetcherState === PPU_FETCH_TILE) {
+      this.fetcherReadTile();
+      this.ppuFetcherState = PPU_FETCH_LOW;
+      this.ppuFetcherDots = 2;
+    } else if (this.ppuFetcherState === PPU_FETCH_LOW) {
+      this.fetcherReadLow();
+      this.ppuFetcherState = PPU_FETCH_HIGH;
+      this.ppuFetcherDots = 2;
+    } else if (this.ppuFetcherState === PPU_FETCH_HIGH) {
+      this.fetcherReadHigh();
+      this.ppuFetcherState = PPU_FETCH_PUSH;
+      this.ppuFetcherDots = 0;
+    } else if (this.fetcherPushTile()) {
+      this.ppuFetcherState = PPU_FETCH_TILE;
+      this.ppuFetcherDots = 2;
+    }
+  }
+
+  popPixelFifo() {
+    if (this.ppuFifoLength <= 0) return false;
+    this.ppuFifoHead = (this.ppuFifoHead + 1) & 15;
+    this.ppuFifoLength -= 1;
+    return true;
+  }
+
+  advanceFifoPixelTransfer(dots) {
+    while (dots > 0) {
+      if (this.ppuTransferWarmup > 0) {
+        this.advancePixelFetcherDot();
+        this.ppuTransferWarmup -= 1;
+        dots -= 1;
+        continue;
+      }
+      if (this.ppuTransferStall > 0) {
+        this.advancePixelFetcherDot();
+        this.ppuTransferStall -= 1;
+        dots -= 1;
+        continue;
+      }
+      if (this.ppuTransferDiscard > 0) {
+        this.advancePixelFetcherDot();
+        this.popPixelFifo();
+        this.ppuTransferDiscard -= 1;
+        dots -= 1;
+        continue;
+      }
+      const x = this.ppuTransferX;
+      if (x >= SCREEN_WIDTH) {
+        this.advancePixelFetcherDot();
+        dots -= 1;
+        continue;
+      }
+      if (!this.ppuWindowActive && this.windowCanStartFifo(this.ly)) {
+        const windowPosition = this.ppuFetcherPosition;
+        const horizontalDesync = this.model === "dmg"
+          && !this.ppuWxJustChanged
+          && this.io[0x4b] === ((windowPosition + 6) & 0xff);
+        if (horizontalDesync && this.ppuTransferX > 0) {
+          // DMG horizontal desync exposes one fewer LCD pixel when the
+          // early WX trigger wins. SameBoy models this as lcd_x--.
+          this.ppuTransferX -= 1;
+        }
+        if (!this.ppuWindowPenaltyBudgeted) {
+          this.ppuMode3End = Math.min(369, this.ppuMode3End + 6);
+          this.ppuWindowPenaltyBudgeted = true;
+        }
+        this.ppuWindowActive = true;
+        this.ppuWindowDrawn = true;
+        this.ppuWindowPixelX = 0;
+        this.ppuWindowRow = this.ppuWindowLineCursor;
+        this.ppuWindowLineCursor += 1;
+        this.ppuFetchLcdc = this.io[0x40];
+        this.ppuFetchWindowMap = this.io[0x40] & 0x40;
+        this.resetPixelFetcher(true);
+        // A window activation clears the BG FIFO. The fetcher must finish a
+        // complete tile before the LCD can pop a visible pixel again.
+        this.ppuTransferStall = 7;
+        dots -= 1;
+        continue;
+      }
+      const spriteStall = this.lineSpriteStalls[x];
+      if (spriteStall > 0) {
+        this.lineSpriteStalls[x] = 0;
+        this.ppuTransferStall = spriteStall - 1;
+        this.advancePixelFetcherDot();
+        dots -= 1;
+        continue;
+      }
+
+      this.advancePixelFetcherDot();
+      if (this.ppuFifoLength <= 0) {
+        // A real FIFO stall does not advance the visible pixel position. It
+        // extends Mode 3 instead of manufacturing a zero-colour pixel.
+        dots -= 1;
+        continue;
+      }
+      const fifoIndex = this.ppuFifoHead;
+      const colorIndex = this.ppuFifoLength > 0 ? this.ppuFifoColor[fifoIndex] : 0;
+      const palette = this.ppuFifoLength > 0 ? this.ppuFifoPalette[fifoIndex] : 0;
+      const priority = this.ppuFifoLength > 0 ? this.ppuFifoPriority[fifoIndex] : 0;
+      const sourceWindow = this.ppuFifoLength > 0 && !!this.ppuFifoWindow[fifoIndex];
+      this.popPixelFifo();
+      let position = this.ppuFetcherPosition;
+      if (((position + 16) & 0xff) < 8) {
+        if (position === 0xef) {
+          position = 0xf0;
+        } else if ((position & 7) === (this.io[0x43] & 7)) {
+          position = 0xf8;
+        } else if (position === 0xf7) {
+          this.ppuFetcherPosition = 0xf0;
+          dots -= 1;
+          continue;
+        }
+      }
+      const visible = position < 0xa0;
+      this.ppuFetcherPosition = (position + 1) & 0xff;
+      if (visible) {
+        if (this.ppuTransferLive) {
+          this.renderTransferPixel(this.ly, x, colorIndex, palette, priority, sourceWindow);
+        }
+        this.ppuTransferX = x + 1;
+        if (sourceWindow) {
+          this.ppuWindowPixelX += 1;
+          if (!(this.io[0x40] & 0x20) && this.ppuWindowPixelX > 0
+            && (this.ppuWindowPixelX & 7) === 0) {
+            this.ppuWindowActive = false;
+            this.resetPixelFetcher(false, x + 1, this.ppuFetcherPosition);
+          }
+        }
+      }
+      dots -= 1;
+      // SameBoy's wx_just_changed guard lasts for one T-cycle after the
+      // write. Do not let a stale flag suppress every later early trigger on
+      // the scanline.
+      this.ppuWxJustChanged = false;
+    }
   }
 
   windowCanStart(line, x) {
@@ -1968,7 +2260,35 @@ export class GameBoy {
     return x === (trigger <= 0 ? earlyWindowPixels : trigger);
   }
 
+  windowCanStartFifo(line) {
+    const lcdc = this.io[0x40];
+    if (
+      this.ppuFetcherWindow
+      || !(lcdc & 0x20)
+      || line < this.io[0x4a]
+      || this.io[0x4b] >= 166
+    ) return false;
+    const position = this.ppuFetcherPosition;
+    const wx = this.io[0x4b];
+    if (wx === 0) {
+      return position === 249
+        || (position === 240 && (this.io[0x43] & 7) !== 0)
+        || (position >= 241 && position <= 248);
+    }
+    const trigger = (position + 7) & 0xff;
+    if (wx === trigger) return true;
+    // DMG revisions commonly trigger one dot earlier unless WX was written
+    // during this transfer. This is the documented horizontal desync edge.
+    return this.model === "dmg"
+      && !this.ppuWxJustChanged
+      && wx === ((position + 6) & 0xff);
+  }
+
   advancePixelTransfer(dots) {
+    if (this.ppuFifoEnabled) {
+      this.advanceFifoPixelTransfer(dots);
+      return;
+    }
     while (dots > 0) {
       if (this.ppuTransferWarmup > 0) {
         const consumed = Math.min(dots, this.ppuTransferWarmup);
@@ -2168,16 +2488,24 @@ export class GameBoy {
     }
   }
 
-  renderTransferPixel(line, x) {
+  renderTransferPixel(
+    line,
+    x,
+    fifoColorIndex = -1,
+    fifoPalette = 0,
+    fifoPriority = 0,
+    fifoWindow = false,
+  ) {
     const lcdc = this.io[0x40];
     const cgbRendering = this.cgbMode || (this.model === "cgb" && this.bootEnabled);
     const cgbCompatibility = this.model === "cgb" && !cgbRendering;
     const bgEnabled = cgbRendering || !!(lcdc & 1);
-    let useWindow = bgEnabled && this.ppuWindowActive;
+    const fifoPixel = fifoColorIndex >= 0;
+    let useWindow = fifoPixel ? fifoWindow : bgEnabled && this.ppuWindowActive;
     // Disabling WIN_EN is sampled at the end of the in-flight window tile.
     // Keep the FIFO's final tile visible, then allow background fetches to
     // resume on the next tile boundary.
-    if (useWindow && !(lcdc & 0x20) && (this.ppuWindowPixelX & 7) === 0) {
+    if (!fifoPixel && useWindow && !(lcdc & 0x20) && (this.ppuWindowPixelX & 7) === 0) {
       this.ppuWindowActive = false;
       useWindow = false;
     }
@@ -2185,7 +2513,11 @@ export class GameBoy {
     let palette = 0;
     let priority = 0;
 
-    if (bgEnabled) {
+    if (fifoPixel) {
+      colorIndex = bgEnabled ? fifoColorIndex : 0;
+      palette = bgEnabled ? fifoPalette : 0;
+      priority = bgEnabled ? fifoPriority : 0;
+    } else if (bgEnabled) {
       // The upper five SCX bits are sampled by the background fetcher, not
       // continuously by the LCD. Refresh that latch at each eight-pixel
       // source-tile boundary; the fine SCX discard remains the transfer-start
@@ -2226,7 +2558,7 @@ export class GameBoy {
       palette = attr & 7;
       priority = (attr >> 7) & 1;
     }
-    if (useWindow) {
+    if (!fifoPixel && useWindow) {
       this.ppuWindowPixelX += 1;
       if (!(lcdc & 0x20) && (this.ppuWindowPixelX & 7) === 0) {
         this.ppuWindowActive = false;
@@ -3607,6 +3939,10 @@ export class GameBoy {
         framebuffer: this.framebuffer.slice(),
         lineSprites: this.lineSprites.map((sprite) => ({ ...sprite })),
         lineSpriteStalls: this.lineSpriteStalls.slice(),
+        ppuFifoColor: this.ppuFifoColor.slice(),
+        ppuFifoPalette: this.ppuFifoPalette.slice(),
+        ppuFifoPriority: this.ppuFifoPriority.slice(),
+        ppuFifoWindow: this.ppuFifoWindow.slice(),
       },
       rtc: { ...this.rtc },
       latchedRTC: this.latchedRTC ? { ...this.latchedRTC } : null,
@@ -3656,6 +3992,21 @@ export class GameBoy {
       || !restore(this.framebuffer, memory.framebuffer)
     ) return false;
     this.rebuildDecodedTiles();
+    if (
+      memory.ppuFifoColor?.length === this.ppuFifoColor.length
+      && memory.ppuFifoPalette?.length === this.ppuFifoPalette.length
+      && memory.ppuFifoPriority?.length === this.ppuFifoPriority.length
+      && memory.ppuFifoWindow?.length === this.ppuFifoWindow.length
+    ) {
+      this.ppuFifoColor.set(memory.ppuFifoColor);
+      this.ppuFifoPalette.set(memory.ppuFifoPalette);
+      this.ppuFifoPriority.set(memory.ppuFifoPriority);
+      this.ppuFifoWindow.set(memory.ppuFifoWindow);
+    } else {
+      this.ppuFifoEnabled = false;
+      this.ppuFifoHead = 0;
+      this.ppuFifoLength = 0;
+    }
     if (this.ppuMode === 3 && this.ly < SCREEN_HEIGHT) {
       const savedSprites = Array.isArray(memory.lineSprites)
         ? memory.lineSprites

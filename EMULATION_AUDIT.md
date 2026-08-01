@@ -1,11 +1,56 @@
-# GAMEBOY LAB v2.2.2 Emulation Audit
+# GAMEBOY LAB v2.3.0 Emulation Audit
 
-This audit compares the v2.2.2 candidate with the tagged v2.2.1 core and keeps
-the older v2.2.1, v2.2.0, and v2.1.0 results below as historical release
+This audit compares the v2.3.0 candidate with the tagged v2.2.2 core and keeps
+the older v2.2.2, v2.2.1, v2.2.0, and v2.1.0 results below as historical release
 baselines. It keeps
 measured results separate from ambition: a finite collection of ROMs cannot
 prove equivalence to every Game Boy silicon revision, cartridge peripheral,
 browser, or audio device.
+
+## v2.3.0 delta
+
+### Practical DMG window timing
+
+The DMG now has a small, dot-timed pixel-fetch path for the difficult left-edge
+window cases where WX is changed during a scanline. It follows the hardware's
+discarded pixels, tile fetch order, window restart, and one-dot DMG horizontal
+desynchronisation instead of deciding the whole line from a single x-coordinate.
+In games, this reduces stale tiles, misplaced window starts, and one-pixel seams
+in raster wipes, status panels, score bars, and split-screen effects. The path is
+deliberately limited to the tested DMG edge cases; normal lines and the CGB core
+remain on their established fast path until the revision differences are fully
+covered.
+
+The external Mealybug DMG-blob suite improved from **88.7153% to 92.9402%**
+structural frame agreement: **+4.2249 percentage points (+4.76% relative)**.
+The three WX edge cases moved as follows:
+
+| Case | v2.2.2 | v2.3.0 | Change |
+| --- | ---: | ---: | ---: |
+| WX = 4 | 56.6623% | 99.0061% | +74.70% relative |
+| WX = 5 | 61.9358% | 97.2309% | +56.98% relative |
+| WX = 6 | 49.1797% | 72.9384% | +48.31% relative |
+
+These figures describe reference-frame agreement, not a change to the fixed
+59.7275 Hz hardware cadence. The CGB path is intentionally unchanged by this
+DMG-only experiment.
+
+### Regression and performance gates
+
+| Test group | v2.2.2 | v2.3.0 | Change |
+| --- | ---: | ---: | ---: |
+| Project tests | 57/57 | 58/58 | +1 FIFO save-state test |
+| SameSuite APU | 47/70 | 47/70 | held; no timeouts |
+| Super Mario Land checksum | matched | matched | held |
+| Six-game median throughput | baseline | +1.6% | checksum matched |
+
+The six-game measurement used five fresh processes, 120 warm-up frames, and
+600 measured frames. The modest throughput increase is available headroom, not
+an emulation-speed change; game timing stays cycle-locked.
+
+The next major v3.0.0 release remains reserved for a broader revision-aware PPU
+fetcher and the outstanding audio edge cases. This release intentionally does
+not claim full hardware equivalence.
 
 ## v2.2.2 delta
 
