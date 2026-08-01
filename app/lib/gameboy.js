@@ -2083,11 +2083,7 @@ export class GameBoy {
                 | (bgPalette[((this.ppuLineBgp >> (colorIndex * 2)) & 3) * 2 + 1]
                   << 8)) & 0x7fff
             ]
-          : this.dmgPackedColor(
-              this.ppuLineBgp,
-              colorIndex,
-              this.dmgBgPalettePacked,
-            );
+          : this.dmgBgPalettePacked[(this.ppuLineBgp >> (colorIndex * 2)) & 3];
       framebuffer32[framebufferOffset + x] = packedColor;
     }
 
@@ -2139,13 +2135,9 @@ export class GameBoy {
                   objectRegister,
                   spriteColor,
                 )
-              : this.dmgPackedColor(
-                  objectRegister,
-                  spriteColor,
-                  objectPalette
-                    ? this.dmgObj1PalettePacked
-                    : this.dmgObj0PalettePacked,
-                );
+              : (objectPalette ? this.dmgObj1PalettePacked : this.dmgObj0PalettePacked)[
+                  (objectRegister >> (spriteColor * 2)) & 3
+                ];
           framebuffer32[framebufferOffset + x] = spritePackedColor;
         }
       }
@@ -2222,7 +2214,7 @@ export class GameBoy {
       ? this.cgbPackedColor(this.bgPalette, palette, colorIndex)
       : cgbCompatibility
         ? this.cgbCompatibilityPackedColor(this.bgPalette, 0, this.io[0x47], colorIndex)
-        : this.dmgPackedColor(this.io[0x47], colorIndex, this.dmgBgPalettePacked);
+        : this.dmgBgPalettePacked[(this.io[0x47] >> (colorIndex * 2)) & 3];
     this.setPackedPixel(x, line, packedColor);
     if (!(lcdc & 0x02)) return;
 
@@ -2260,11 +2252,9 @@ export class GameBoy {
                 objectRegister,
                 spriteColor,
               )
-            : this.dmgPackedColor(
-                objectRegister,
-                spriteColor,
-                objectPalette ? this.dmgObj1PalettePacked : this.dmgObj0PalettePacked,
-              );
+            : (objectPalette ? this.dmgObj1PalettePacked : this.dmgObj0PalettePacked)[
+                (objectRegister >> (spriteColor * 2)) & 3
+              ];
         this.setPackedPixel(x, line, spritePackedColor);
       }
       break;

@@ -1,13 +1,12 @@
 {
-  "version": "2.2.0",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.2.0/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.2.0",
+  "version": "2.2.1",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.2.1/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.2.1",
   "changes": [
-    "Window fetch timing now handles mid-line WX/WY/LCDC/map changes at tile boundaries, reducing stale tiles and seams in masks, panels, and split-screen effects.",
-    "Mealybug DMG structural match rose from 86.6361% to 88.7153% (+2.0792 points); key window-register cases improved by up to 17.34 points.",
-    "Window-line state, fetch latches, and active transfer phase now restore consistently in save states, preventing a mismatched line after loading.",
-    "Fresh-process paired benchmarks improved all six audited cartridges by +1.60% to +4.42%, adding headroom for shaders, audio, input, and UI without changing the 59.7275 Hz emulated cadence.",
-    "Benchmark reports now include isolated-trial metadata; checksums match the prior core so performance numbers cannot hide skipped work or different execution.",
-    "The offline single-file build and the v2.1 audio, RTC, DMA, mapper, save, and input improvements remain intact; remaining accuracy gaps are documented in the full release notes."
+    "DMG pixel and sprite palette conversion now uses direct packed-table indexing in both whole-line and live scanline rendering, reducing per-pixel dispatch while preserving the exact colour mapping.",
+    "In real games this gives the CPU more headroom for scrolling playfields, text-heavy HUDs, sprite compositing, LCD shaders, audio and input work; the emulated cadence remains fixed at 59.7275 Hz.",
+    "Fresh-process paired benchmarks matched framebuffer/CPU checksums and measured +1.76% Super Mario Land, +7.46% Link's Awakening, +2.27% Pokémon Blue, +2.42% Wario Land 3, −0.30% Shantae (run variance), and +1.97% Pokémon Crystal.",
+    "No PPU, CPU, APU, mapper, RTC, save-state, or BIOS behavior was intentionally changed; Mealybug remains 88.7153% structural match with the v2.2.0 core.",
+    "The offline single-file build, v2.2 window-fetch work, and prior audio, DMA, mapper, RTC, save, and input improvements remain intact; remaining accuracy gaps stay documented rather than hidden behind a performance claim."
   ]
 }

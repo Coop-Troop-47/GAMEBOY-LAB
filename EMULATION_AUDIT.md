@@ -1,10 +1,47 @@
-# GAMEBOY LAB v2.2.0 Emulation Audit
+# GAMEBOY LAB v2.2.1 Emulation Audit
 
-This audit compares the v2.2.0 candidate with the tagged v2.1.0 core. The
-v2.1.0 results remain below as the historical release baseline. It keeps
+This audit compares the v2.2.1 candidate with the tagged v2.2.0 core and keeps
+the older v2.1.0 results below as historical release baselines. It keeps
 measured results separate from ambition: a finite collection of ROMs cannot
 prove equivalence to every Game Boy silicon revision, cartridge peripheral,
 browser, or audio device.
+
+## v2.2.1 delta
+
+### Practical rendering throughput
+
+The DMG background and sprite paths now index the prebuilt packed-colour table
+directly. This removes a helper dispatch for every rendered DMG pixel while
+leaving the palette register mapping, framebuffer bytes, CPU timing, and CGB
+path unchanged. In games, the saved processing time is most useful on
+scrolling tile layers, text-heavy HUDs, and sprite-rich scenes: it leaves more
+main-thread headroom for LCD shader work, audio delivery, input, and UI
+compositing without changing the 59.7275 Hz machine cadence.
+
+The paired benchmark used five fresh Node processes per cartridge, 120 warm-up
+frames, and 600 measured frames. Checksums matched v2.2.0 in every case:
+
+| Cartridge/model | v2.2.0 median | v2.2.1 median | Change |
+| --- | ---: | ---: | ---: |
+| Super Mario Land, DMG | 960.27 fps | 977.13 fps | +1.76% |
+| Link's Awakening, DMG | 1,026.88 fps | 1,103.50 fps | +7.46% |
+| Pokémon Blue, DMG | 1,436.81 fps | 1,469.39 fps | +2.27% |
+| Wario Land 3, GBC | 703.17 fps | 720.21 fps | +2.42% |
+| Shantae, GBC | 682.30 fps | 680.22 fps | −0.30% |
+| Pokémon Crystal, GBC | 819.24 fps | 835.35 fps | +1.97% |
+
+The small Shantae decrease is within run variance and is not a CGB rendering
+regression; the optimization does not enter its native CGB palette path.
+
+### Accuracy and safety gates
+
+| Test group | v2.2.0 | v2.2.1 | Change |
+| --- | ---: | ---: | ---: |
+| Mealybug Tearoom structural image match | 88.7153% | 88.7153% | held |
+| Mooneye production-model acceptance | 66/66 | 66/66 | held |
+| Selected Blargg CPU/APU/memory ROMs | 41/41 | 41/41 | held |
+| SameSuite APU | 47/70 | 47/70 | held |
+| Project test suite | 56/56 | 56/56 | held |
 
 ## v2.2.0 delta
 
@@ -199,7 +236,7 @@ The external ROM suites are not distributed in GAMEBOY LAB. The audit used
 
 ## Distance from the stated goal
 
-v2.2.0 is materially more accurate than v2.1.0 and exceptionally fast for a
+v2.2.1 is materially more accurate than v2.1.0 and exceptionally fast for a
 from-scratch JavaScript core, but the evidence does **not** establish “the most
 accurate browser emulator in the world.” The largest measured gap is still PPU
 behavior: 88.7153% Mealybug structural similarity and 1/24 pixel-exact cases.
