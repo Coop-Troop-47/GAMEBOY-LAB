@@ -1,11 +1,62 @@
-# GAMEBOY LAB v2.1.0 Emulation Audit
+# GAMEBOY LAB v2.2.0 Emulation Audit
 
-This audit compares the v2.1.0 candidate with the tagged v2.0.0 core. It keeps
+This audit compares the v2.2.0 candidate with the tagged v2.1.0 core. The
+v2.1.0 results remain below as the historical release baseline. It keeps
 measured results separate from ambition: a finite collection of ROMs cannot
 prove equivalence to every Game Boy silicon revision, cartridge peripheral,
 browser, or audio device.
 
-## Measured results
+## v2.2.0 delta
+
+### Accuracy
+
+| Test group | v2.1.0 | v2.2.0 | Absolute gain | Relative gain |
+| --- | ---: | ---: | ---: | ---: |
+| Mealybug Tearoom structural image match | 86.6361% | 88.7153% | +2.0792 points | +2.40% |
+| `m3_lcdc_win_en_change_multiple` | 65.8594% | 83.1944% | +17.3350 points | +26.32% |
+| `m3_lcdc_win_en_change_multiple_wx` | 75.412% | 95.4036% | +19.9916 points | +26.51% |
+| Mooneye production-model acceptance | 66/66 | 66/66 | held | held |
+| Selected Blargg CPU/APU/memory ROMs | 41/41 | 41/41 | held | held |
+| SameSuite APU | 47/70 | 47/70 | held | held |
+
+The practical accuracy improvement is concentrated in the LCD fetch phase:
+window enable/WX/WY/map changes are resolved at the source-tile boundary, the
+window row advances only after a visible window line, and background fetch
+latches persist through the fine-scroll discard. Games using status-panel
+windows, raster wipes, split-screen playfields, and mid-line scroll changes
+therefore receive fewer stale tiles, wrong map halves, and one-pixel seams.
+
+### Fresh-process throughput
+
+The v2.2 benchmark uses five trials of 600 measured frames after 120 warm-up
+frames, with each trial in a new `node --expose-gc` process. This removes the
+same-process last-cartridge artifact that previously made a long mixed run
+unreliable. Median frame throughput changed as follows:
+
+| Cartridge/model | v2.1.0 | v2.2.0 | Change |
+| --- | ---: | ---: | ---: |
+| Super Mario Land, DMG | 1,035.41 | 1,052.55 | +1.66% |
+| Link's Awakening, DMG | 1,128.53 | 1,164.90 | +3.22% |
+| Pokémon Blue, DMG | 1,418.51 | 1,481.26 | +4.42% |
+| Wario Land 3, GBC | 703.56 | 717.61 | +2.00% |
+| Shantae, GBC | 672.46 | 683.24 | +1.60% |
+| Pokémon Crystal, GBC | 817.44 | 840.61 | +2.83% |
+
+All six paired checksums matched. These numbers are core headroom, not a new
+emulation speed: presentation remains locked to the hardware's approximately
+59.7275 Hz cadence. The extra headroom reduces contention with the LCD shader,
+AudioWorklet, input, and library animations, lowering the chance of a missed
+browser frame on busy scenes.
+
+### State and regression safety
+
+The new `ppuWindowRow`, `ppuWindowLineCursor`, `ppuFetchScx`, `ppuFetchLcdc`,
+and `ppuFetchWindowMap` values are serialized with save states. The full unit,
+build, and lint gates remain green; Mooneye, Blargg, SameSuite, mapper, RTC,
+audio, BIOS, save-state, and standalone checks were re-run after the PPU
+change.
+
+## Historical v2.1.0 results (retained for comparison)
 
 ### Accuracy
 
@@ -148,10 +199,10 @@ The external ROM suites are not distributed in GAMEBOY LAB. The audit used
 
 ## Distance from the stated goal
 
-v2.1.0 is materially more accurate than v2.0.0 and exceptionally fast for a
+v2.2.0 is materially more accurate than v2.1.0 and exceptionally fast for a
 from-scratch JavaScript core, but the evidence does **not** establish “the most
-accurate browser emulator in the world.” The largest measured gap is PPU
-behavior: 86.6361% Mealybug structural similarity and 1/24 pixel-exact cases.
+accurate browser emulator in the world.” The largest measured gap is still PPU
+behavior: 88.7153% Mealybug structural similarity and 1/24 pixel-exact cases.
 SameSuite APU at 47/70 also leaves 23 revision-sensitive or unimplemented cases.
 
 High-value remaining work includes a true fetcher/FIFO PPU verified per model,

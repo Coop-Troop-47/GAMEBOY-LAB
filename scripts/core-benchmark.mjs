@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { basename, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 function parseArguments(argv) {
   const options = {
@@ -12,6 +12,11 @@ function parseArguments(argv) {
     frames: 600,
     trials: 5,
     warmup: 120,
+    isolate: true,
+    worker: false,
+    coreReference: null,
+    workerRom: null,
+    workerModel: null,
     roms: [],
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -20,6 +25,11 @@ function parseArguments(argv) {
     else if (argument === "--frames") options.frames = Number(argv[++index]);
     else if (argument === "--trials") options.trials = Number(argv[++index]);
     else if (argument === "--warmup") options.warmup = Number(argv[++index]);
+    else if (argument === "--no-isolate") options.isolate = false;
+    else if (argument === "--worker") options.worker = true;
+    else if (argument === "--core-reference") options.coreReference = argv[++index] || null;
+    else if (argument === "--rom") options.workerRom = resolve(argv[++index]);
+    else if (argument === "--model") options.workerModel = argv[++index] || null;
     else options.roms.push(resolve(argument));
   }
   if (!options.roms.length) {
@@ -49,6 +59,24 @@ async function importCore(reference = null) {
     { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
   );
   return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+}
+
+function runIsolatedTrial(cartridge, options, coreReference = null) {
+  const workerArgs = [
+    "--expose-gc",
+    fileURLToPath(import.meta.url),
+    "--worker",
+    "--rom", cartridge.path,
+    "--model", cartridge.model,
+    "--warmup", String(options.warmup),
+    "--frames", String(options.frames),
+  ];
+  if (coreReference) workerArgs.push("--core-reference", coreReference);
+  const output = execFileSync(process.execPath, workerArgs, {
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+  });
+  return JSON.parse(output.trim());
 }
 
 function median(values) {
@@ -103,13 +131,15 @@ async function benchmarkCore(label, core, options, cartridges) {
   for (const cartridge of cartridges) {
     const values = [];
     for (let trial = 0; trial < options.trials; trial += 1) {
-      values.push(runTrial(
-        core.GameBoy,
-        cartridge.rom,
-        cartridge.model,
-        options.warmup,
-        options.frames,
-      ));
+      values.push(options.isolate
+        ? runIsolatedTrial(cartridge, options)
+        : runTrial(
+          core.GameBoy,
+          cartridge.rom,
+          cartridge.model,
+          options.warmup,
+          options.frames,
+        ));
     }
     cases.push({
       cartridge: cartridge.name,
@@ -151,13 +181,16 @@ async function benchmarkPaired(baselineLabel, baselineCore, currentCore, options
         ? [[currentCore, currentValues], [baselineCore, baselineValues]]
         : [[baselineCore, baselineValues], [currentCore, currentValues]];
       for (const [core, values] of order) {
-        values.push(runTrial(
-          core.GameBoy,
-          cartridge.rom,
-          cartridge.model,
-          options.warmup,
-          options.frames,
-        ));
+        const reference = core === baselineCore ? baselineLabel : null;
+        values.push(options.isolate
+          ? runIsolatedTrial(cartridge, options, reference)
+          : runTrial(
+            core.GameBoy,
+            cartridge.rom,
+            cartridge.model,
+            options.warmup,
+            options.frames,
+          ));
       }
     }
     baselineCases.push(summarizeCase(cartridge, baselineValues));
@@ -170,9 +203,27 @@ async function benchmarkPaired(baselineLabel, baselineCore, currentCore, options
 }
 
 const options = parseArguments(process.argv.slice(2));
+
+if (options.worker) {
+  if (!options.workerRom || !options.workerModel) {
+    throw new Error("Worker mode requires --rom and --model.");
+  }
+  const core = await importCore(options.coreReference);
+  const rom = new Uint8Array(readFileSync(options.workerRom));
+  console.log(JSON.stringify(runTrial(
+    core.GameBoy,
+    rom,
+    options.workerModel,
+    options.warmup,
+    options.frames,
+  )));
+  process.exit(0);
+}
+
 const cartridges = options.roms.map((path) => {
   const rom = new Uint8Array(readFileSync(path));
   return {
+    path,
     name: basename(path),
     model: (rom[0x143] & 0x80) ? "cgb" : "dmg",
     rom,
@@ -198,6 +249,7 @@ const report = {
   frames: options.frames,
   warmup: options.warmup,
   trials: options.trials,
+  isolatedTrials: options.isolate,
   results,
 };
 if (results.length === 2) {

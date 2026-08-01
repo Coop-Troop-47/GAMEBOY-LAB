@@ -1,13 +1,13 @@
 {
-  "version": "2.1.0",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.1.0/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.1.0",
+  "version": "2.2.0",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.2.0/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.2.0",
   "changes": [
-    "SameSuite APU rose from 11/70 to 47/70: +51.43 percentage points and +327.27% more passing cases.",
-    "Mealybug DMG pixel-structure similarity rose from 82.7421% to 86.6361%: +3.894 points and +4.71% relative.",
-    "A dot-sensitive PPU now handles mid-line register effects, window activation, sprite-fetch stalls, HDMA state, and save-state restoration.",
-    "Pulse, wave, noise, envelope, trigger, frame-sequencer, RTC sub-second, EI/HALT, palette-access, and DMA edge cases were corrected.",
-    "Minimal audio buffering halves the former lowest queue target to 8 ms; maximum clock correction is 68.75% smaller and console-specific analog curves are used.",
-    "Paired throughput improved in five of six audited games by 2.61% to 31.26%; the accuracy-heavy Wario Land 3 path is 9.99% slower but remains over 11× real time."
+    "Window fetch timing now handles mid-line WX/WY/LCDC/map changes at tile boundaries, reducing stale tiles and seams in masks, panels, and split-screen effects.",
+    "Mealybug DMG structural match rose from 86.6361% to 88.7153% (+2.0792 points); key window-register cases improved by up to 17.34 points.",
+    "Window-line state, fetch latches, and active transfer phase now restore consistently in save states, preventing a mismatched line after loading.",
+    "Fresh-process paired benchmarks improved all six audited cartridges by +1.60% to +4.42%, adding headroom for shaders, audio, input, and UI without changing the 59.7275 Hz emulated cadence.",
+    "Benchmark reports now include isolated-trial metadata; checksums match the prior core so performance numbers cannot hide skipped work or different execution.",
+    "The offline single-file build and the v2.1 audio, RTC, DMA, mapper, save, and input improvements remain intact; remaining accuracy gaps are documented in the full release notes."
   ]
 }

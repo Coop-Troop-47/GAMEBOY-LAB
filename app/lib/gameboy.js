@@ -92,10 +92,11 @@ const STATE_SCALARS = [
   "ppuTransferWarmup", "ppuTransferDiscard", "ppuTransferX", "ppuTransferStall",
   "ppuTransferDot",
   "ppuInitialScxLow", "ppuWindowActive", "ppuWindowDrawn", "ppuWindowPixelX",
+  "ppuWindowRow", "ppuWindowLineCursor",
   "ppuWindowPenaltyBudgeted", "ppuTransferLive",
   "ppuLineLcdc", "ppuLineScy", "ppuLineScx", "ppuLineBgp", "ppuLineObp0",
   "ppuLineObp1", "ppuLineWy", "ppuLineWx", "ppuLineWindowLine",
-  "ppuLineCgbRendering",
+  "ppuLineCgbRendering", "ppuFetchScx", "ppuFetchLcdc", "ppuFetchWindowMap",
   "lcdStartup", "lycMatch", "statSignal", "windowLine", "frameReady",
   "frameNumber", "cycles", "bootEnabled", "doubleSpeed", "speedSwitchArmed",
   "baseCycles",
@@ -474,6 +475,8 @@ export class GameBoy {
     this.ppuWindowActive = false;
     this.ppuWindowDrawn = false;
     this.ppuWindowPixelX = 0;
+    this.ppuWindowRow = 0;
+    this.ppuWindowLineCursor = 0;
     this.ppuWindowPenaltyBudgeted = false;
     this.ppuTransferLive = false;
     this.ppuLineLcdc = 0;
@@ -486,6 +489,9 @@ export class GameBoy {
     this.ppuLineWx = 0;
     this.ppuLineWindowLine = 0;
     this.ppuLineCgbRendering = false;
+    this.ppuFetchScx = 0;
+    this.ppuFetchLcdc = 0;
+    this.ppuFetchWindowMap = 0;
     this.lcdStartup = false;
     this.lycMatch = true;
     this.statSignal = false;
@@ -1855,6 +1861,8 @@ export class GameBoy {
     this.ppuWindowActive = false;
     this.ppuWindowDrawn = false;
     this.ppuWindowPixelX = 0;
+    this.ppuWindowRow = this.windowLine;
+    this.ppuWindowLineCursor = this.windowLine;
     this.ppuTransferLive = false;
     this.ppuLineLcdc = this.io[0x40];
     this.ppuLineScy = this.io[0x42];
@@ -1867,6 +1875,9 @@ export class GameBoy {
     this.ppuLineWindowLine = this.windowLine;
     this.ppuLineCgbRendering = this.cgbMode
       || (this.model === "cgb" && this.bootEnabled);
+    this.ppuFetchScx = this.io[0x43];
+    this.ppuFetchLcdc = this.io[0x40];
+    this.ppuFetchWindowMap = this.io[0x40] & 0x40;
     this.lineBgColors.fill(0);
     this.lineBgPriority.fill(0);
     // Mode-2 writes can change object size or visibility after the initial
@@ -1884,8 +1895,9 @@ export class GameBoy {
         && this.ly >= this.ppuLineWy
         && this.ppuLineWx <= 166;
       this.renderStaticTransferRange(this.ly, 0, SCREEN_WIDTH);
+      if (this.ppuWindowDrawn) this.ppuWindowLineCursor = this.windowLine + 1;
     }
-    if (this.ppuWindowDrawn) this.windowLine += 1;
+    if (this.ppuWindowDrawn) this.windowLine = this.ppuWindowLineCursor;
   }
 
   catchUpPixelTransfer() {
@@ -1910,8 +1922,14 @@ export class GameBoy {
   windowCanStart(line, x) {
     const lcdc = this.io[0x40];
     if (!(lcdc & 0x20) || line < this.io[0x4a] || this.io[0x4b] > 166) return false;
-    const trigger = this.io[0x4b] - 7;
-    return trigger <= 0 ? x === 0 : x === trigger;
+    const wx = this.io[0x4b];
+    const trigger = wx - 7;
+    // WX values 0–6 request the window before the visible pixel counter has
+    // reached zero. For the visible edge values 4–6 the fetcher still emits
+    // the remaining left-edge pixels from the old FIFO; preserving that phase
+    // is observable in mid-mode-3 WX changes. Values 0–3 begin off-screen.
+    const earlyWindowPixels = wx >= 4 ? Math.min(2, 7 - wx) : 0;
+    return x === (trigger <= 0 ? earlyWindowPixels : trigger);
   }
 
   advancePixelTransfer(dots) {
@@ -1945,6 +1963,10 @@ export class GameBoy {
         this.ppuWindowActive = true;
         this.ppuWindowDrawn = true;
         this.ppuWindowPixelX = 0;
+        this.ppuWindowRow = this.ppuWindowLineCursor;
+        this.ppuWindowLineCursor += 1;
+        this.ppuFetchLcdc = this.io[0x40];
+        this.ppuFetchWindowMap = this.io[0x40] & 0x40;
         this.ppuTransferStall = 5;
         dots -= 1;
         continue;
@@ -2135,22 +2157,43 @@ export class GameBoy {
     const cgbRendering = this.cgbMode || (this.model === "cgb" && this.bootEnabled);
     const cgbCompatibility = this.model === "cgb" && !cgbRendering;
     const bgEnabled = cgbRendering || !!(lcdc & 1);
-    const useWindow = bgEnabled && this.ppuWindowActive && !!(lcdc & 0x20);
+    let useWindow = bgEnabled && this.ppuWindowActive;
+    // Disabling WIN_EN is sampled at the end of the in-flight window tile.
+    // Keep the FIFO's final tile visible, then allow background fetches to
+    // resume on the next tile boundary.
+    if (useWindow && !(lcdc & 0x20) && (this.ppuWindowPixelX & 7) === 0) {
+      this.ppuWindowActive = false;
+      useWindow = false;
+    }
     let colorIndex = 0;
     let palette = 0;
     let priority = 0;
 
     if (bgEnabled) {
-      const scrollX = (this.io[0x43] & 0xf8) | this.ppuInitialScxLow;
+      // The upper five SCX bits are sampled by the background fetcher, not
+      // continuously by the LCD. Refresh that latch at each eight-pixel
+      // source-tile boundary; the fine SCX discard remains the transfer-start
+      // phase. DMG SCY writes remain live here because the production DMG
+      // exposes their immediate row-selection effect.
+      const fetchTileBoundary = useWindow
+        ? this.ppuWindowPixelX > 0 && (this.ppuWindowPixelX & 7) === 0
+        : x > 0 && (((x + this.ppuInitialScxLow) & 7) === 0);
+      if (fetchTileBoundary) {
+        this.ppuFetchScx = this.io[0x43];
+        this.ppuFetchLcdc = this.io[0x40];
+        this.ppuFetchWindowMap = this.io[0x40] & 0x40;
+      }
+      const scrollX = (this.ppuFetchScx & 0xf8) | this.ppuInitialScxLow;
       const pixelX = useWindow
         ? this.ppuWindowPixelX
         : (x + scrollX) & 0xff;
       const pixelY = useWindow
-        ? this.windowLine
+        ? this.ppuWindowRow
         : (line + this.io[0x42]) & 0xff;
+      const tileLcdc = useWindow ? lcdc : this.ppuFetchLcdc;
       const mapBase = useWindow
-        ? ((lcdc & 0x40) ? 0x1c00 : 0x1800)
-        : ((lcdc & 0x08) ? 0x1c00 : 0x1800);
+        ? (this.ppuFetchWindowMap ? 0x1c00 : 0x1800)
+        : ((tileLcdc & 0x08) ? 0x1c00 : 0x1800);
       const mapOffset = mapBase + ((pixelY >> 3) * 32) + (pixelX >> 3);
       const tileNumber = this.vram[mapOffset];
       const attr = cgbRendering ? this.vram[0x2000 + mapOffset] : 0;
@@ -2158,7 +2201,7 @@ export class GameBoy {
       let tileY = pixelY & 7;
       if (attr & 0x20) tileX = 7 - tileX;
       if (attr & 0x40) tileY = 7 - tileY;
-      const tileAddress = lcdc & 0x10
+      const tileAddress = tileLcdc & 0x10
         ? tileNumber * 16
         : 0x1000 + signed8(tileNumber) * 16;
       const bank = cgbRendering && (attr & 0x08) ? 0x2000 : 0;
@@ -2167,7 +2210,12 @@ export class GameBoy {
       palette = attr & 7;
       priority = (attr >> 7) & 1;
     }
-    if (useWindow) this.ppuWindowPixelX += 1;
+    if (useWindow) {
+      this.ppuWindowPixelX += 1;
+      if (!(lcdc & 0x20) && (this.ppuWindowPixelX & 7) === 0) {
+        this.ppuWindowActive = false;
+      }
+    }
     this.lineBgColors[x] = colorIndex;
     this.lineBgPriority[x] = priority;
     const packedColor = cgbRendering

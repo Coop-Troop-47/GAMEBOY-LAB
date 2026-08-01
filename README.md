@@ -69,6 +69,12 @@ npm test
 npm run benchmark:core -- --baseline-ref v1.3.0
 ```
 
+Core benchmark trials run in fresh Node processes by default, so JIT warm-up,
+heap growth, and the previous cartridge cannot bias a later cartridge. Use
+`--no-isolate` only for a quick same-process profile; release figures should
+use the default isolated mode and report the exact frames, warm-up, and trial
+count.
+
 `npm run sync:artwork` refreshes the local cover-art cache in
 `SELECT_ROMS/artwork/` from the matching Libretro Game Boy and Game Boy Color
 thumbnail repositories. Normal builds use only those local PNGs and make no
@@ -80,7 +86,7 @@ database, or cloud configuration. Cartridge files, preferences, and battery
 saves remain local to the browser and are never uploaded.
 
 The external conformance runners in `scripts/` accept locally sourced test-ROM
-  directories. See `EMULATION_AUDIT.md` for the v2.1.0 methodology, measured
+  directories. See `EMULATION_AUDIT.md` for the v2.2.0 methodology, measured
 results, hardware-revision exclusions, and deliberately unclaimed areas.
 
 ## Releases
