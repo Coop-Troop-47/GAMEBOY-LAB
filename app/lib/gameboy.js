@@ -8,6 +8,11 @@ const PPU_FETCH_TILE = 0;
 const PPU_FETCH_LOW = 1;
 const PPU_FETCH_HIGH = 2;
 const PPU_FETCH_PUSH = 3;
+// A DMG LCDC background-enable write does not reach the visible pixel stream
+// immediately. The in-flight fetch remains on the LCD for roughly two tile
+// fetches (16 output pixels) before the new bit is observed. Keep this as a
+// small explicit pipeline latch rather than making the whole renderer live.
+const DMG_BG_ENABLE_PIPELINE_PIXELS = 16;
 
 const DUTY_PATTERNS = [
   new Uint8Array([0, 0, 0, 0, 0, 0, 0, 1]),
@@ -100,6 +105,7 @@ const STATE_SCALARS = [
   "ppuWindowPenaltyBudgeted", "ppuTransferLive",
   "ppuLineLcdc", "ppuLineScy", "ppuLineScx", "ppuLineBgp", "ppuLineObp0",
   "ppuScyApplied", "ppuScyPending", "ppuScyDelay",
+  "ppuBgEnableApplied", "ppuBgEnablePending", "ppuBgEnableDelay",
   "ppuLineObp1", "ppuLineWy", "ppuLineWx", "ppuLineWindowLine",
   "ppuLineCgbRendering", "ppuFetchScx", "ppuFetchLcdc", "ppuFetchWindowMap",
   "ppuFifoEnabled", "ppuFifoHead", "ppuFifoLength", "ppuFetcherState",
@@ -510,6 +516,9 @@ export class GameBoy {
     this.ppuScyApplied = 0;
     this.ppuScyPending = 0;
     this.ppuScyDelay = 0;
+    this.ppuBgEnableApplied = 1;
+    this.ppuBgEnablePending = 1;
+    this.ppuBgEnableDelay = 0;
     this.ppuLineScx = 0;
     this.ppuLineBgp = 0;
     this.ppuLineObp0 = 0;
@@ -1340,6 +1349,10 @@ export class GameBoy {
     if (register === 0x40) {
       const wasEnabled = !!(this.io[0x40] & 0x80);
       this.activateLivePixelTransfer(register);
+      if (this.model === "dmg" && this.ppuTransferLive) {
+        this.ppuBgEnablePending = value & 1;
+        this.ppuBgEnableDelay = DMG_BG_ENABLE_PIPELINE_PIXELS;
+      }
       this.io[0x40] = value;
       const enabled = !!(value & 0x80);
       if (wasEnabled && !enabled) {
@@ -2004,6 +2017,9 @@ export class GameBoy {
     this.ppuScyApplied = this.ppuLineScy;
     this.ppuScyPending = this.ppuLineScy;
     this.ppuScyDelay = 0;
+    this.ppuBgEnableApplied = this.io[0x40] & 1;
+    this.ppuBgEnablePending = this.ppuBgEnableApplied;
+    this.ppuBgEnableDelay = 0;
     this.ppuLineScx = this.io[0x43];
     this.ppuLineBgp = this.io[0x47];
     this.ppuLineObp0 = this.io[0x48];
@@ -2582,7 +2598,12 @@ export class GameBoy {
     const lcdc = this.io[0x40];
     const cgbRendering = this.cgbMode || (this.model === "cgb" && this.bootEnabled);
     const cgbCompatibility = this.model === "cgb" && !cgbRendering;
-    const bgEnabled = cgbRendering || !!(lcdc & 1);
+    if (this.model === "dmg" && this.ppuTransferLive) {
+      if (this.ppuBgEnableDelay > 0) this.ppuBgEnableDelay -= 1;
+      if (this.ppuBgEnableDelay === 0) this.ppuBgEnableApplied = this.ppuBgEnablePending;
+    }
+    const bgEnabled = cgbRendering
+      || (this.model === "dmg" ? !!this.ppuBgEnableApplied : !!(lcdc & 1));
     const fifoPixel = fifoColorIndex >= 0;
     let useWindow = fifoPixel ? fifoWindow : bgEnabled && this.ppuWindowActive;
     // Disabling WIN_EN is sampled at the end of the in-flight window tile.

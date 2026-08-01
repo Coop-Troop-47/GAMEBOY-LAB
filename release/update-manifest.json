@@ -1,12 +1,12 @@
 {
-  "version": "2.5.5",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.5.5/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.5.5",
+  "version": "2.5.6",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.5.6/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.5.6",
   "changes": [
-    "Long-running Game Boy window overlays now wrap cleanly instead of drifting after repeated scanlines.",
-    "DMG reference-picture matching improved from 94.7014% to 94.9047% (+0.21% relative).",
-    "The focused window scene improved by 4.8785 percentage points (+5.72% relative); the other 23 scenes held steady.",
-    "Six representative games kept identical frame/CPU checksums, so gameplay timing and existing saves remain unchanged.",
-    "The full project suite is green (62/62); v3.0 remains reserved for the broader accuracy milestone."
+    "Mid-screen background changes now land at the right point in original Game Boy raster effects, reducing wrong-pixel blocks in wipes, HUDs, and split screens.",
+    "DMG reference-picture matching improved from 94.9047% to 94.9946% (+0.09% relative).",
+    "The focused background-toggle scene improved by 2.1571 percentage points (+2.44% relative); the other 23 scenes held steady.",
+    "Saved states, native Game Boy Color rendering, and representative game timing checksums remain unchanged.",
+    "The full project suite is green (63/63); v3.0 remains reserved for the broader accuracy milestone."
   ]
 }

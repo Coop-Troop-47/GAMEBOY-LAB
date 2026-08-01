@@ -244,6 +244,9 @@ test("round-trips complete save states without confusing them with cartridge sav
   gb.pc = 0x2345;
   gb.ppuDot = 191;
   gb.ly = 77;
+  gb.ppuBgEnableApplied = 0;
+  gb.ppuBgEnablePending = 1;
+  gb.ppuBgEnableDelay = 9;
   gb.framebuffer[1234] = 91;
   const cartridgeSave = gb.exportBattery();
   const state = gb.exportState();
@@ -260,6 +263,9 @@ test("round-trips complete save states without confusing them with cartridge sav
   assert.equal(gb.pc, 0x2345);
   assert.equal(gb.ppuDot, 191);
   assert.equal(gb.ly, 77);
+  assert.equal(gb.ppuBgEnableApplied, 0);
+  assert.equal(gb.ppuBgEnablePending, 1);
+  assert.equal(gb.ppuBgEnableDelay, 9);
   assert.equal(gb.framebuffer[1234], 91);
   assert.equal(cartridgeSave.length, 0x2000);
   assert.equal(state.memory.framebuffer.length, 160 * 144 * 4);
@@ -727,6 +733,30 @@ test("keeps a DMG SCY write in the measured fetch handoff phase", () => {
   assert.equal(gb.ppuScyApplied, 0);
   gb.renderTransferPixel(0, 1);
   assert.equal(gb.ppuScyApplied, 7);
+});
+
+test("keeps a DMG LCDC background toggle in the measured pixel pipeline", () => {
+  const gb = new GameBoy("dmg");
+  gb.loadROM(makeRom());
+  gb.ppuMode = 3;
+  gb.ly = 0;
+  gb.ppuTransferLive = true;
+  gb.ppuTransferDot = 0;
+  gb.ppuDot = 0;
+  gb.ppuTransferX = 0;
+  gb.ppuLineLcdc = 0x91;
+  gb.ppuLineCgbRendering = false;
+  gb.ppuBgEnableApplied = 1;
+  gb.ppuBgEnablePending = 1;
+  gb.ppuBgEnableDelay = 0;
+
+  gb.writeIO(0x40, 0x90);
+  assert.equal(gb.ppuBgEnablePending, 0);
+  assert.equal(gb.ppuBgEnableDelay, 16);
+  for (let x = 0; x < 15; x += 1) gb.renderTransferPixel(0, x);
+  assert.equal(gb.ppuBgEnableApplied, 1);
+  gb.renderTransferPixel(0, 15);
+  assert.equal(gb.ppuBgEnableApplied, 0);
 });
 
 test("wraps the window line counter at the hardware's 8-bit boundary", () => {

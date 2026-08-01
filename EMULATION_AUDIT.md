@@ -1,4 +1,32 @@
-# GAMEBOY LAB v2.5.5 Emulation Audit
+# GAMEBOY LAB v2.5.6 Emulation Audit
+
+## v2.5.6 delta
+
+### DMG LCDC background-enable pipeline
+
+The DMG LCDC background-enable bit now has an explicit 16-pixel in-flight
+pipeline latch when written during mode 3. The write still updates the
+register immediately for CPU-visible reads, but the pixel renderer keeps the
+previous background state for the measured fetch interval before applying the
+new state. This is DMG-only; native CGB rendering continues to use its existing
+fetch path. The three latch values are serialized so a mid-line save state
+resumes at the same visible phase.
+
+In games, this affects raster wipes, HUD/status panels, split-screen effects,
+and other scenes that toggle the background layer while the LCD is drawing. It
+does not change the fixed CPU/PPU clock or the ordinary write-free fast path.
+
+| Test group | v2.5.5 | v2.5.6 | Change |
+| --- | ---: | ---: | ---: |
+| Project tests | 62/62 | 63/63 | +1 LCDC pipeline regression |
+| Mealybug DMG picture match | 94.9047% | 94.9946% | **+0.0899 pp / +0.09% relative** |
+| `m3_lcdc_bg_en_change` | 88.3420% | 90.4991% | **+2.1571 pp / +2.44% relative** |
+| SameSuite full set | 55/78, 0 timeouts | 55/78, 0 timeouts | held |
+
+The remaining 23 Mealybug pictures are unchanged. Representative DMG and CGB
+frame/CPU checksums remain stable, and the paired short benchmark showed no
+throughput regression. This is intentionally a narrow accuracy patch; the
+revision-aware PPU/APU work remains gated for v3.0.
 
 ## v2.5.5 delta
 
