@@ -226,6 +226,12 @@ export class GameBoy {
     this.bootRom = null;
     this.rom = new Uint8Array(0x8000);
     this.romBanks = 2;
+    // The CPU fetch path reads cartridge ROM far more often than mapper
+    // registers change. Keep the two visible bank bases derived from the
+    // mapper state so ordinary opcode fetches do not repeat bank-selection
+    // bit-twiddling on every read.
+    this.romBank0Base = 0;
+    this.romBankBase = 0x4000;
     this.vram = new Uint8Array(0x4000);
     this.decodedTileRows = new Uint16Array(0x2000);
     this.wram = new Uint8Array(0x8000);
@@ -590,6 +596,7 @@ export class GameBoy {
       this.statSignal = false;
     }
     this.updateStat();
+    this.refreshRomBankBases();
   }
 
   compatibilityPalette() {
@@ -862,16 +869,21 @@ export class GameBoy {
     return this.ramBank;
   }
 
+  refreshRomBankBases() {
+    this.romBank0Base = this.selectedRomBank0() * 0x4000;
+    this.romBankBase = this.selectedRomBank() * 0x4000;
+  }
+
   read8(address, direct = false) {
     address &= 0xffff;
     const bootValue = this.readBootROM(address);
     if (bootValue !== null) return bootValue;
     if (address < 0x4000) {
-      const offset = this.selectedRomBank0() * 0x4000 + address;
+      const offset = this.romBank0Base + address;
       return this.rom[offset % this.rom.length] ?? 0xff;
     }
     if (address < 0x8000) {
-      const offset = this.selectedRomBank() * 0x4000 + (address - 0x4000);
+      const offset = this.romBankBase + (address - 0x4000);
       return this.rom[offset % this.rom.length] ?? 0xff;
     }
     if (address < 0xa000) {
@@ -1139,6 +1151,7 @@ export class GameBoy {
         this.ramBank = value & (this.cartType >= 0x1c ? 0x07 : 0x0f);
       }
     }
+    this.refreshRomBankBases();
   }
 
   readIO(register) {
@@ -4058,6 +4071,7 @@ export class GameBoy {
     if (this.model === "cgb" && !this.cgbMode) this.updateCompatibilityPaletteAliases();
     this.audioSampleCount = 0;
     this.batteryDirty = this.hasBattery;
+    this.refreshRomBankBases();
     this.updateStat();
     return true;
   }

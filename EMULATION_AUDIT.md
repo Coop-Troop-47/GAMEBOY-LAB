@@ -1,11 +1,58 @@
-# GAMEBOY LAB v2.3.0 Emulation Audit
+# GAMEBOY LAB v2.4.0 Emulation Audit
 
-This audit compares the v2.3.0 candidate with the tagged v2.2.2 core and keeps
-the older v2.2.2, v2.2.1, v2.2.0, and v2.1.0 results below as historical release
-baselines. It keeps
+This audit compares the v2.4.0 candidate with the tagged v2.3.0 core and keeps
+the older v2.3.0, v2.2.2, v2.2.1, v2.2.0, and v2.1.0 results below as historical
+release baselines. It keeps
 measured results separate from ambition: a finite collection of ROMs cannot
 prove equivalence to every Game Boy silicon revision, cartridge peripheral,
 browser, or audio device.
+
+## v2.4.0 delta
+
+### Practical cartridge-fetch headroom
+
+The CPU reads cartridge ROM continuously, while the mapper only changes its
+visible banks occasionally. The core now keeps the two active ROM-bank offsets
+ready and refreshes them only when a mapper write, reset, or save-state restore
+can change them. This removes repeated bank-selection work from ordinary
+opcode and data fetches without changing the bytes returned by any mapper.
+
+In games, the extra headroom is most useful in scenes that combine scrolling
+maps, sprite work, audio, and an LCD shader: Super Mario Land, Pokémon, Link's
+Awakening, Wario Land 3, Shantae, and Pokémon Crystal all completed with the
+same final checksums while leaving more CPU time for presentation and audio
+delivery. It does **not** make the emulated machine run faster than its fixed
+hardware clock.
+
+Five fresh-process trials used 120 warm-up frames and 600 measured frames per
+cartridge. Median available throughput improved for every tested game:
+
+| Cartridge/model | v2.3.0 median | v2.4.0 median | Relative change |
+| --- | ---: | ---: | ---: |
+| Super Mario Land, DMG | 1,103.13 fps | 1,124.98 fps | **+1.98%** |
+| Link's Awakening, DMG | 1,241.52 fps | 1,289.85 fps | **+3.89%** |
+| Pokémon Blue, DMG | 1,587.72 fps | 1,638.45 fps | **+3.20%** |
+| Wario Land 3, CGB | 771.14 fps | 795.14 fps | **+3.11%** |
+| Shantae, CGB | 743.71 fps | 758.15 fps | **+1.94%** |
+| Pokémon Crystal, CGB | 881.01 fps | 915.34 fps | **+3.90%** |
+
+That is a **+3.16% median gain across the six-game set**. The framebuffer and
+CPU checksums matched the v2.3.0 run for all six cartridges.
+
+### Accuracy and safety gates
+
+| Test group | v2.3.0 | v2.4.0 | Change |
+| --- | ---: | ---: | ---: |
+| Project tests | 58/58 | 58/58 | held |
+| Mealybug DMG structural frame match | 92.9402% | 92.9402% | held |
+| SameSuite APU | 47/70 | 47/70 | held; no timeouts |
+| Six-game checksums | matched | matched | held |
+
+An attempted CGB envelope-timing change was rejected because it did not move
+the SameSuite result and would have expanded the regression surface. The
+larger revision-aware PPU/APU work remains deliberately reserved for v3.0.0;
+this release claims a measured performance improvement, not full hardware
+equivalence.
 
 ## v2.3.0 delta
 

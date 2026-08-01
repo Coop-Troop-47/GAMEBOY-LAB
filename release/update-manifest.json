@@ -1,12 +1,12 @@
 {
-  "version": "2.3.0",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.3.0/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.3.0",
+  "version": "2.4.0",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.4.0/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.4.0",
   "changes": [
-    "DMG window effects that begin at the far left of a scanline now line up much more closely with real hardware, with fewer stale tiles and one-pixel seams.",
-    "Reference-frame agreement for the tested DMG timing set rose 4.76% overall; the WX 4, 5 and 6 edge cases improved 74.70%, 56.98% and 48.31% respectively.",
-    "The six-game performance check stayed checksum-identical and measured 1.6% more available processing headroom, especially useful for shader, audio and interface work.",
-    "Save states now remember the screen's in-progress drawing step, so snapshots taken during a tricky window effect resume cleanly.",
-    "All 58 project tests pass and the existing audio timing results are unchanged; the larger PPU/APU accuracy work is being held for v3.0.0."
+    "Cartridge reads now use a small cached lookup, giving the browser about 3.16% more processing headroom across six tested games without changing game timing.",
+    "In busy scrolling, sprite-heavy scenes with music and the LCD shader enabled, that extra room helps keep audio, input and presentation responsive.",
+    "The measured gain was positive in all six games: +1.98% to +3.90%, with identical final game checksums.",
+    "All 58 project checks still pass, including BIOS startup, mapper and RTC behaviour, save states, cartridge loading and the standalone build.",
+    "The DMG reference score and CGB audio score are unchanged; the larger revision-accuracy work remains reserved for v3.0.0."
   ]
 }
