@@ -1,12 +1,12 @@
 {
-  "version": "2.4.0",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.4.0/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.4.0",
+  "version": "2.5.0",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.5.0/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.5.0",
   "changes": [
-    "Cartridge reads now use a small cached lookup, giving the browser about 3.16% more processing headroom across six tested games without changing game timing.",
-    "In busy scrolling, sprite-heavy scenes with music and the LCD shader enabled, that extra room helps keep audio, input and presentation responsive.",
-    "The measured gain was positive in all six games: +1.98% to +3.90%, with identical final game checksums.",
+    "CGB volume-envelope timing now matches two more hardware edge cases, so fades, held notes and startup sound changes are less likely to jump or arrive one beat early.",
+    "Audio conformance rose from 47/70 to 49/70: a 2.86 percentage-point gain (4.26% relative) on the external CGB timing set, with no new timeouts.",
+    "The improvement applies to the small timing details behind music and sound effects; the emulator's fixed Game Boy speed and final game checksums remain unchanged.",
     "All 58 project checks still pass, including BIOS startup, mapper and RTC behaviour, save states, cartridge loading and the standalone build.",
-    "The DMG reference score and CGB audio score are unchanged; the larger revision-accuracy work remains reserved for v3.0.0."
+    "This is a focused accuracy patch, not the larger v3.0 release; the remaining PPU and APU revision cases are still being measured before that milestone."
   ]
 }

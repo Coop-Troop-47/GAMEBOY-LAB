@@ -109,7 +109,8 @@ const STATE_SCALARS = [
   "frameNumber", "cycles", "bootEnabled", "doubleSpeed", "speedSwitchArmed",
   "baseCycles",
   "speedSwitchCycles", "speedSubcycle", "audioClock", "audioIntegralLeft",
-  "audioIntegralRight", "audioFrameStep", "apuSquarePhase", "apuSkipFrameEvent", "cgbMode",
+  "audioIntegralRight", "audioFrameStep", "apuSquarePhase", "apuDivDivider",
+  "apuSkipFrameEvent", "cgbMode",
 ];
 
 // Production CGB boot-ROM palette dictionary in RGB555 form. Compatibility
@@ -697,6 +698,11 @@ export class GameBoy {
     this.audioIntegralRight = 0;
     this.apuPendingClocks = 0;
     this.audioFrameStep = 0;
+    // CGB envelope clocks have a second divider phase between the visible
+    // 512 Hz frame-sequencer edges.  Keep it separate from audioFrameStep:
+    // the latter still drives length/sweep compatibility behaviour, while
+    // this divider models the CGB's volume-counter path.
+    this.apuDivDivider = 0;
     this.apuSquarePhase = 0;
     this.apuSkipFrameEvent = false;
     this.ch1 = {
@@ -710,6 +716,11 @@ export class GameBoy {
       volume: 0,
       envCounter: 0,
       envRunning: false,
+      volumeCountdown: 0,
+      envelopeClock: false,
+      envelopeClockLocked: false,
+      envelopeClockShouldLock: false,
+      cgbEnvelopeLegacy: false,
       sweepCounter: 0,
       sweepEnabled: false,
       sweepNegated: false,
@@ -729,6 +740,11 @@ export class GameBoy {
       volume: 0,
       envCounter: 0,
       envRunning: false,
+      volumeCountdown: 0,
+      envelopeClock: false,
+      envelopeClockLocked: false,
+      envelopeClockShouldLock: false,
+      cgbEnvelopeLegacy: false,
       phaseStep: 0,
       sampleSuppressed: false,
       justReloaded: false,
@@ -753,6 +769,11 @@ export class GameBoy {
       volume: 0,
       envCounter: 0,
       envRunning: false,
+      volumeCountdown: 0,
+      envelopeClock: false,
+      envelopeClockLocked: false,
+      envelopeClockShouldLock: false,
+      cgbEnvelopeLegacy: false,
       lfsr: 0x7fff,
       phaseStep: 0,
     };
@@ -1564,7 +1585,12 @@ export class GameBoy {
       && ((this.serialControl & 0x81) !== 0x81 || this.serialBits <= 0)
     ) {
       const previousDivider = this.divCounter;
-      const apuPeriod = 2 << (this.doubleSpeed ? 13 : 12);
+      // CGB envelope clocks observe both halves of the APU divider: the
+      // rising edge arms a volume tick and the falling edge commits it. DMG
+      // has no secondary envelope event, so retain its larger fast-path span.
+      const apuPeriod = this.model === "cgb"
+        ? (1 << (this.doubleSpeed ? 13 : 12))
+        : (2 << (this.doubleSpeed ? 13 : 12));
       const firstApuEdge = apuPeriod - (previousDivider & (apuPeriod - 1));
       const crossesApuEdge = cycles >= firstApuEdge;
       let timerEdges = 0;
@@ -1628,6 +1654,21 @@ export class GameBoy {
         if ((previousDivider & apuMask) && !(nextDivider & apuMask)) {
           this.flushAPU();
           this.clockAPUFrameSequencer();
+        } else if (!(previousDivider & apuMask) && (nextDivider & apuMask)) {
+          const secondaryClockNeeded = this.model === "cgb"
+            && (this.io[0x26] & 0x80)
+            && ((this.ch1.enabled && !this.ch1.cgbEnvelopeLegacy
+              && !this.ch1.envelopeClockLocked && this.ch1.volumeCountdown === 0)
+              || (this.ch2.enabled && !this.ch2.cgbEnvelopeLegacy
+                && !this.ch2.envelopeClockLocked && this.ch2.volumeCountdown === 0));
+          if (secondaryClockNeeded) {
+            const secondaryAudioNeeded = (this.ch1.enabled && !this.ch1.cgbEnvelopeLegacy
+              && (this.io[0x12] & 7) && this.ch1.volumeCountdown === 0)
+              || (this.ch2.enabled && !this.ch2.cgbEnvelopeLegacy
+                && (this.io[0x17] & 7) && this.ch2.volumeCountdown === 0);
+            if (secondaryAudioNeeded) this.flushAPU();
+            this.clockAPUSecondaryEvent();
+          }
         }
         if ((this.serialControl & 0x81) === 0x81 && this.serialBits > 0) {
           const serialMask = 1 << (this.cgbMode && (this.serialControl & 2) ? 3 : 8);
@@ -2923,6 +2964,7 @@ export class GameBoy {
           // Production CGB silicon therefore delays all length, sweep, and
           // envelope phases by one 512 Hz event in this case.
           this.audioFrameStep = 0;
+          this.apuDivDivider = this.apuDividerSignal() ? 1 : 0;
           this.apuSkipFrameEvent = this.apuDividerSignal();
         }
         this.refreshAudioSteps();
@@ -3030,6 +3072,11 @@ export class GameBoy {
       this.ch4.envCounter = (this.io[0x21] & 7) || 8;
       this.ch4.envRunning = this.ch4.enabled
         && (this.model === "cgb" || (this.io[0x21] & 7) !== 0);
+      this.ch4.volumeCountdown = this.io[0x21] & 7;
+      this.ch4.envelopeClock = false;
+      this.ch4.envelopeClockLocked = false;
+      this.ch4.envelopeClockShouldLock = false;
+      this.ch4.cgbEnvelopeLegacy = false;
       this.ch4.lfsr = 0x7fff;
       this.ch4.phase = 0;
       this.ch4.timer = this.noiseTriggerPeriod() + (wasEnabled ? 8 : 0);
@@ -3061,22 +3108,56 @@ export class GameBoy {
     // CGB-D's envelope counter is wired directly to NRx2. Changing period or
     // direction while a channel is live can clock or invert the current
     // volume even though no frame-sequencer envelope step occurred.
-    let shouldTick = !!(value & 7) && !(previous & 7);
+    if (this.model === "cgb" && channel.envelopeClock) {
+      channel.volumeCountdown = value & 7;
+    }
+    if (this.model === "cgb") channel.cgbEnvelopeLegacy = (value & 7) === 1;
+    const locked = this.model === "cgb" && channel.envelopeClockLocked;
+    let shouldTick = !!(value & 7) && !(previous & 7) && !locked;
     const directionChanged = !!((value ^ previous) & 8);
-    if ((value & 0x0f) === 8 && (previous & 0x0f) === 8) shouldTick = true;
+    if ((value & 0x0f) === 8 && (previous & 0x0f) === 8 && !locked) shouldTick = true;
     if (directionChanged) {
-      if (value & 8) {
+      if (value & 8 && !locked) {
         channel.volume = !(previous & 7)
           ? channel.volume ^ 0x0f
           : (0x0e - channel.volume) & 0x0f;
         shouldTick = false;
-      } else {
+      } else if (!locked) {
         channel.volume = (0x10 - channel.volume) & 0x0f;
       }
     }
     if (shouldTick) {
       channel.volume = (channel.volume + ((value & 8) ? 1 : -1)) & 0x0f;
     }
+    if (this.model === "cgb" && !(value & 7) && channel.envelopeClock) {
+      this.clearEnvelopeClock(channel);
+    }
+  }
+
+  setEnvelopeClock(channel, value, direction = false) {
+    if (this.model !== "cgb" || channel.envelopeClock === value) return;
+    if (value) {
+      channel.envelopeClock = true;
+      channel.envelopeClockShouldLock = (channel.volume === 0xf && direction)
+        || (channel.volume === 0 && !direction);
+    } else {
+      channel.envelopeClock = false;
+      if (channel.envelopeClockShouldLock) channel.envelopeClockLocked = true;
+      channel.envelopeClockShouldLock = false;
+    }
+  }
+
+  clearEnvelopeClock(channel) {
+    this.setEnvelopeClock(channel, false, false);
+  }
+
+  clockCgbEnvelope(channel, register) {
+    if (channel.cgbEnvelopeLegacy || !channel.envelopeClock) return;
+    this.clearEnvelopeClock(channel);
+    if (channel.envelopeClockLocked) return;
+    const value = this.io[register];
+    if (!(value & 7)) return;
+    channel.volume = (channel.volume + ((value & 8) ? 1 : -1)) & 0xf;
   }
 
   prepareTriggeredLength(channel, previous, value) {
@@ -3096,6 +3177,12 @@ export class GameBoy {
     channel.envCounter = (this.io[envelopeRegister] & 7) || 8;
     channel.envRunning = channel.enabled
       && (this.model === "cgb" || (this.io[envelopeRegister] & 7) !== 0);
+    channel.volumeCountdown = this.io[envelopeRegister] & 7;
+    channel.envelopeClock = false;
+    channel.envelopeClockLocked = false;
+    channel.envelopeClockShouldLock = false;
+    channel.cgbEnvelopeLegacy = this.model === "cgb"
+      && (this.io[envelopeRegister] & 7) === 1;
     // Trigger resets the period timer but not the duty step counter.
     channel.phase = Math.floor(channel.phase * 8) / 8;
     channel.sampleSuppressed = channel.enabled && !wasEnabled;
@@ -3259,11 +3346,32 @@ export class GameBoy {
       this.apuSkipFrameEvent = false;
       return;
     }
+    if (this.model === "cgb") {
+      this.apuDivDivider = (this.apuDivDivider + 1) & 7;
+      if (this.apuDivDivider === 7) {
+        for (const channel of [this.ch1, this.ch2, this.ch4]) {
+          if (channel.enabled && !channel.envelopeClock && !channel.cgbEnvelopeLegacy) {
+            channel.volumeCountdown = (channel.volumeCountdown - 1) & 7;
+          }
+        }
+      }
+      this.clockCgbEnvelope(this.ch1, 0x12);
+      this.clockCgbEnvelope(this.ch2, 0x17);
+    }
     const step = this.audioFrameStep;
     if ((step & 1) === 0) this.clockLengths();
     if (step === 2 || step === 6) this.clockSweeps();
-    if (step === 7) this.clockEnvelopes();
+    if (step === 7) this.clockEnvelopes(true);
     this.audioFrameStep = (step + 1) & 7;
+  }
+
+  clockAPUSecondaryEvent() {
+    if (this.model !== "cgb" || !(this.io[0x26] & 0x80)) return;
+    const channels = [[this.ch1, 0x12], [this.ch2, 0x17]];
+    for (const [channel, register] of channels) {
+      if (!channel.enabled || channel.cgbEnvelopeLegacy || channel.volumeCountdown !== 0) continue;
+      this.setEnvelopeClock(channel, true, !!(this.io[register] & 8));
+    }
   }
 
   calculateSweep() {
@@ -3312,8 +3420,11 @@ export class GameBoy {
     }
   }
 
-  clockEnvelopes() {
-    const channels = [[this.ch1, 0x12], [this.ch2, 0x17], [this.ch4, 0x21]];
+  clockEnvelopes(frameSequencer = false) {
+    const channels = frameSequencer && this.model === "cgb"
+      ? [[this.ch1, 0x12], [this.ch2, 0x17], [this.ch4, 0x21]]
+        .filter(([channel]) => channel === this.ch4 || channel.cgbEnvelopeLegacy)
+      : [[this.ch1, 0x12], [this.ch2, 0x17], [this.ch4, 0x21]];
     for (const [channel, register] of channels) {
       const period = (this.io[register] & 7) || 8;
       if (!channel.enabled || !channel.envRunning) continue;
@@ -3986,6 +4097,12 @@ export class GameBoy {
     ) return false;
     for (const key of STATE_SCALARS) {
       if (Object.hasOwn(snapshot.scalars ?? {}, key)) this[key] = snapshot.scalars[key];
+    }
+    // v2.4 save states predate the CGB envelope divider. Reconstruct its
+    // phase from the existing frame-sequencer position instead of carrying a
+    // stale value from the destination machine.
+    if (!Object.hasOwn(snapshot.scalars ?? {}, "apuDivDivider")) {
+      this.apuDivDivider = this.audioFrameStep & 7;
     }
     const memory = snapshot.memory ?? {};
     const restore = (target, source) => {

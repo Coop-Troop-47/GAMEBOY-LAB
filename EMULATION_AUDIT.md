@@ -1,6 +1,53 @@
-# GAMEBOY LAB v2.4.0 Emulation Audit
+# GAMEBOY LAB v2.5.0 Emulation Audit
 
-This audit compares the v2.4.0 candidate with the tagged v2.3.0 core and keeps
+This audit keeps the v2.5.0 audio timing change separate from the earlier
+performance releases. The user-facing notes in `release/v2.5.0.md` explain the
+same result without emulator-internal terminology; this document records the
+test method and the remaining limits for maintainers.
+
+## v2.5.0 delta
+
+### CGB envelope divider timing
+
+The CGB APU has a primary divider edge used by the frame sequencer and a
+secondary edge that arms the volume envelope counter. The core now tracks that
+secondary phase for the two pulse channels, including the CGB write-glitch,
+counter-lock, and save-state phase. The established DMG envelope path remains
+unchanged. Period-one CGB envelopes retain the existing compatibility path
+because that path is still the best match for the current mixed-revision test
+set; this is intentionally not presented as universal CGB-revision emulation.
+
+In a game, this is the timing behind short note fades, volume changes while a
+channel is already playing, and divider-triggered retriggers. The audio sample
+rate, fixed CPU clock, mixer, and final cartridge checksums are unchanged.
+
+| Test group | v2.4.0 | v2.5.0 | Change |
+| --- | ---: | ---: | ---: |
+| Project tests | 58/58 | 58/58 | held |
+| Mealybug DMG structural frame match | 92.9402% | 92.9402% | held |
+| SameSuite CGB APU | 47/70 | 49/70 | **+2 cases / +2.86 pp / +4.26% relative** |
+| SameSuite APU timeouts | 0 | 0 | held |
+
+The two additional passing cases are the generic CGB NRx2 envelope-glitch
+checks for channels 1 and 2. The remaining failures are left visible in the
+test report rather than being hidden behind a broad model claim. The external
+suite includes revision-specific tests that need separate hardware-model
+selection before they can be safely folded into a larger release.
+
+## v2.5.0 verification commands
+
+```text
+npm test
+npm run lint
+npm run test:mealybug -- --roms <extracted-roms> --expected <DMG-blob> --model dmg --quiet
+node scripts/core-conformance.mjs --suite samesuite <apu-roms> --model cgb --quiet
+```
+
+The final standalone build and six-game checksum smoke tests remain required
+release gates. The next major release is deliberately held until the broader
+PPU/APU work improves coverage while preserving the measured browser headroom.
+
+The historical v2.4.0 section below compares that candidate with the tagged v2.3.0 core and keeps
 the older v2.3.0, v2.2.2, v2.2.1, v2.2.0, and v2.1.0 results below as historical
 release baselines. It keeps
 measured results separate from ambition: a finite collection of ROMs cannot
