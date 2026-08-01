@@ -2495,7 +2495,8 @@ export class GameBoy {
     const claimed = this.lineSpriteClaimed;
     claimed.fill(0, start, limit);
     const objPalette = this.objPalette;
-    for (const sprite of sprites) {
+    for (let spriteIndex = 0; spriteIndex < sprites.length; spriteIndex += 1) {
+      const sprite = sprites[spriteIndex];
       const spriteStart = Math.max(start, sprite.x);
       const spriteEnd = Math.min(limit, sprite.x + 8);
       if (spriteEnd <= spriteStart) continue;
@@ -2630,7 +2631,8 @@ export class GameBoy {
 
     const spriteHeight = lcdc & 0x04 ? 16 : 8;
     const sprites = this.lineSprites;
-    for (const sprite of sprites) {
+    for (let spriteIndex = 0; spriteIndex < sprites.length; spriteIndex += 1) {
+      const sprite = sprites[spriteIndex];
       if (x < sprite.x || x >= sprite.x + 8) continue;
       let tileX = x - sprite.x;
       let tileY = line - sprite.y;

@@ -1,6 +1,48 @@
-# GAMEBOY LAB v2.5.0 Emulation Audit
+# GAMEBOY LAB v2.5.1 Emulation Audit
 
-This audit keeps the v2.5.0 audio timing change separate from the earlier
+This audit starts with the v2.5.1 performance patch. The user-facing notes in
+`release/v2.5.1.md` describe the practical result without internal emulator
+terminology; this document keeps the measurement detail and release gates for
+maintainers.
+
+## v2.5.1 delta
+
+### Allocation-free sprite compositing loop
+
+The renderer now indexes the already-selected scanline sprite pool directly
+instead of creating an iterator for each sprite pass. This is a host-side
+optimization only: sprite order, transparency, priority, palette selection,
+and every emulated clock remain unchanged.
+
+The paired benchmark used 120 warm-up frames and 600 measured frames in three
+fresh-process trials per cartridge. Available core throughput improved for all
+six representative cartridges, while the checksums stayed identical:
+
+| Cartridge/model | v2.5.0 median | v2.5.1 median | Relative change |
+| --- | ---: | ---: | ---: |
+| Super Mario Land, DMG | 1,048.32 fps | 1,072.34 fps | **+2.29%** |
+| Link's Awakening DX, CGB | 704.56 fps | 724.41 fps | **+2.82%** |
+| Pokémon Blue, DMG | 1,486.02 fps | 1,522.26 fps | **+2.44%** |
+| Wario Land 3, CGB | 735.79 fps | 750.79 fps | **+2.04%** |
+| Shantae, CGB | 696.00 fps | 706.38 fps | **+1.49%** |
+| Pokémon Crystal, CGB | 844.48 fps | 859.63 fps | **+1.79%** |
+
+The six-game median gain is **+2.17%**. These are available host frames, not
+gameplay speed: the emulated clock remains fixed at the Game Boy cadence. The
+frame/CPU checksums were `d65b3bb2`, `ac84ed26`, `bade4d3c`, `e272a94f`,
+`329a0a7c`, and `2c200251` in both runs.
+
+| Test group | v2.5.0 | v2.5.1 | Change |
+| --- | ---: | ---: | ---: |
+| Project tests | 58/58 | 58/58 | held |
+| Mealybug DMG structural frame match | 92.9402% | 92.9402% | held |
+| SameSuite CGB APU | 49/70 | 49/70 | held |
+| SameSuite APU timeouts | 0 | 0 | held |
+
+This is intentionally a host-side performance patch. No timing behavior was
+changed, and the larger revision-aware accuracy work remains gated for v3.0.
+
+The v2.5.0 audio timing change remains separate from the earlier
 performance releases. The user-facing notes in `release/v2.5.0.md` explain the
 same result without emulator-internal terminology; this document records the
 test method and the remaining limits for maintainers.
