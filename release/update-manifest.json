@@ -1,12 +1,12 @@
 {
-  "version": "2.5.1",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.5.1/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.5.1",
+  "version": "2.5.2",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.5.2/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.5.2",
   "changes": [
-    "Games now have more browser headroom for sound, LCD effects and the interface: six representative games measured 1.49% to 2.82% faster, with a 2.17% median gain.",
-    "The speed-up only removes repeated sprite-layer work; the Game Boy's fixed speed, rendered frames and audio timing stay the same.",
-    "Super Mario Land, Link's Awakening DX, Pokémon Blue, Wario Land 3, Shantae and Pokémon Crystal all kept their previous checksums.",
-    "Audio conformance remains 49/70 and DMG picture matching remains 92.9402%, with no new timeouts.",
-    "This is a small performance patch between the v2.5 accuracy work and the larger v3.0 milestone."
+    "DMG raster effects are cleaner: mid-line palette changes now match the reference hardware more closely, reducing misplaced colour bands in wipes, status bars and scene transitions.",
+    "DMG reference-picture matching improved from 92.9402% to 94.1665% (+1.23 percentage points, +1.32% relative).",
+    "A short live scanline can no longer reveal pixels left over from the previous row, so palette and window effects stay visually continuous.",
+    "Six representative games kept identical frame/CPU checksums; available browser headroom measured +1.65% at the median (1.12%–3.08% per game).",
+    "The complete project suite remains green, with no conformance timeouts. v3.0 stays reserved for broader revision-aware accuracy work."
   ]
 }

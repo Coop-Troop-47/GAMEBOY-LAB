@@ -1,9 +1,43 @@
-# GAMEBOY LAB v2.5.1 Emulation Audit
+# GAMEBOY LAB v2.5.2 Emulation Audit
 
-This audit starts with the v2.5.1 performance patch. The user-facing notes in
-`release/v2.5.1.md` describe the practical result without internal emulator
+This audit starts with the v2.5.2 DMG raster-timing patch. The user-facing
+notes in `release/v2.5.2.md` describe the practical result without internal emulator
 terminology; this document keeps the measurement detail and release gates for
 maintainers.
+
+## v2.5.2 delta
+
+### DMG live palette handoff and short-line completion
+
+The DMG live-transfer path now preserves the additional in-flight fetch phase
+seen when BGP is written during mode 3. The adjustment is limited to the
+DMG-only register path and does not change the fixed line clock or the CGB
+fetcher. If a dynamic transfer reaches HBlank before its visible x counter has
+reached 160, the remaining pixels are emitted through the same live renderer
+instead of retaining bytes from the preceding row. The state is already part
+of the existing save-state transfer snapshot, so mid-line saves remain
+deterministic.
+
+In games, this is visible in raster colour bars, palette-based fades, status
+panel wipes, and split-screen effects: the colour transition is less likely to
+start a few pixels late, and a short line cannot flash a stale strip from the
+previous scanline.
+
+| Test group | v2.5.1 | v2.5.2 | Change |
+| --- | ---: | ---: | ---: |
+| Project tests | 58/58 | 59/59 | +1 focused live-transfer regression |
+| Mealybug DMG picture match | 92.9402% | 94.1665% | **+1.2263 pp / +1.32% relative** |
+| SameSuite full set | 55/78, 0 timeouts | 55/78, 0 timeouts | held |
+
+The paired six-cartridge benchmark used 120 warm-up frames, 600 measured
+frames, and three fresh-process trials per cartridge. Available host
+throughput was **+1.65% at the median** (individual results +1.12% to
++3.08%), while all six frame/CPU checksums remained identical to v2.5.1:
+`d65b3bb2`, `ac84ed26`, `bade4d3c`, `e272a94f`, `329a0a7c`, and `2c200251`.
+
+This patch is intentionally not described as full hardware equivalence. The
+remaining Mealybug mismatches and revision-specific SameSuite cases stay in
+the v3.0 gate.
 
 ## v2.5.1 delta
 

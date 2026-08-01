@@ -2022,6 +2022,14 @@ export class GameBoy {
         && this.ppuLineWx <= 166;
       this.renderStaticTransferRange(this.ly, 0, SCREEN_WIDTH);
       if (this.ppuWindowDrawn) this.ppuWindowLineCursor = this.windowLine + 1;
+    } else if (this.ppuTransferX < SCREEN_WIDTH) {
+      // A live register write can leave the visible FIFO a few pixels short
+      // at the mode-3 boundary. Finish that queued portion from the same
+      // transfer path instead of exposing stale pixels from the prior row.
+      for (let x = this.ppuTransferX; x < SCREEN_WIDTH; x += 1) {
+        this.renderTransferPixel(this.ly, x);
+      }
+      this.ppuTransferX = SCREEN_WIDTH;
     }
     if (this.ppuWindowDrawn) this.windowLine = this.ppuWindowLineCursor;
   }
@@ -2040,6 +2048,12 @@ export class GameBoy {
       || this.ppuMode !== 3
       || this.ly >= SCREEN_HEIGHT
     ) return;
+    if (this.model === "dmg" && register === 0x47) {
+      // DMG palette writes keep four additional dots of the in-flight fetch
+      // visible before the new mapping reaches the LCD. This is a transfer
+      // phase adjustment only; the line's fixed timing remains unchanged.
+      this.ppuTransferWarmup = 16;
+    }
     // The first mode-3 register write is the point at which the old fast
     // renderer must hand ownership to the dot-timed fetcher. Replaying from
     // the transfer edge seeds the FIFO at the exact phase of that write while

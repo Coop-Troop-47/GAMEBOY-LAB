@@ -670,6 +670,25 @@ test("renders a complete 160×144 frame and raises VBlank", () => {
   assert.ok(gb.frameNumber >= 1);
 });
 
+test("completes a short live transfer without leaking the previous row", () => {
+  const gb = new GameBoy("dmg");
+  gb.loadROM(makeRom());
+  gb.ly = 0;
+  gb.ppuTransferLive = true;
+  gb.ppuTransferX = 158;
+  gb.ppuLineLcdc = 0x91;
+  gb.ppuLineBgp = 0xfc;
+  gb.ppuLineCgbRendering = false;
+  gb.framebuffer32[158] = 0x01020304;
+  gb.framebuffer32[159] = 0x01020304;
+
+  gb.finishPixelTransfer();
+
+  assert.equal(gb.ppuTransferX, 160);
+  assert.notEqual(gb.framebuffer32[158], 0x01020304);
+  assert.notEqual(gb.framebuffer32[159], 0x01020304);
+});
+
 test("raises the GBC line-144 OAM STAT source one M-cycle before VBlank", () => {
   const cgb = new GameBoy("cgb");
   cgb.loadROM(makeRom([], { cgb: 0x80 }));
