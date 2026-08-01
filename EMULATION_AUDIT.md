@@ -1,4 +1,30 @@
-# GAMEBOY LAB v2.5.3 Emulation Audit
+# GAMEBOY LAB v2.5.4 Emulation Audit
+
+## v2.5.4 delta
+
+### DMG mid-line vertical-scroll handoff
+
+The DMG live transfer path now keeps a two-pixel fetch handoff when SCY is
+written during mode 3. The visible row selection changes after that measured
+handoff instead of switching at the JavaScript write boundary. The delay is
+DMG-only, does not change the fixed line clock, and is serialized with the
+existing transfer state so a mid-line save resumes deterministically.
+
+In games, this is visible in split-screen scrolling, raster wipes, and status
+panels that change vertical position while the LCD is already drawing. The
+usual write-free renderer and native CGB path are untouched.
+
+| Test group | v2.5.3 | v2.5.4 | Change |
+| --- | ---: | ---: | ---: |
+| Project tests | 60/60 | 61/61 | +1 focused SCY handoff regression |
+| Mealybug DMG picture match | 94.6823% | 94.7014% | **+0.0191 pp / +0.02% relative** |
+| `m3_scy_change` | 82.5391% | 82.9991% | **+0.4600 pp / +0.56% relative** |
+| SameSuite full set | 55/78, 0 timeouts | 55/78, 0 timeouts | held |
+
+The remaining 23 Mealybug pictures are unchanged, and the six-game frame/CPU
+checksums remain identical. No host-throughput headline is claimed for this
+patch because ordinary write-free lines stay on the same optimized path. The
+revision-specific PPU/APU work remains gated for v3.0.
 
 This audit starts with the v2.5.3 DMG raster-timing patch. The user-facing
 notes in `release/v2.5.3.md` describe the practical result without internal emulator

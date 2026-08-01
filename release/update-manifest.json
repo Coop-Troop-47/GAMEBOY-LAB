@@ -1,12 +1,12 @@
 {
-  "version": "2.5.3",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.5.3/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.5.3",
+  "version": "2.5.4",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.5.4/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.5.4",
   "changes": [
-    "DMG colour changes that happen mid-line now look smoother in raster wipes, status bars, scene transitions and split-screen effects.",
-    "DMG reference-picture matching improved from 94.1665% to 94.6823% (+0.52 percentage points, +0.55% relative).",
-    "The two palette-change reference scenes improved by about 6.2 percentage points each, while the other scenes held their previous scores.",
+    "Game Boy split-screen scrolling and raster wipes now change rows more cleanly when a game scrolls during a drawn line.",
+    "DMG reference-picture matching improved from 94.6823% to 94.7014% (+0.02% relative).",
+    "The focused scrolling scene improved by 0.46 percentage points (+0.56% relative); the other 23 scenes held steady.",
     "Six representative games kept identical frame/CPU checksums, so gameplay timing and existing saves remain unchanged.",
-    "The full project suite is green (60/60) with no SameSuite timeouts; v3.0 remains reserved for the broader accuracy milestone."
+    "The full project suite is green (61/61); v3.0 remains reserved for the broader accuracy milestone."
   ]
 }

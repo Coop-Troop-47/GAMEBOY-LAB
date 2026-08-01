@@ -705,6 +705,30 @@ test("keeps a DMG palette write in the measured in-flight transfer phase", () =>
   assert.equal(gb.ppuTransferWarmup, 18);
 });
 
+test("keeps a DMG SCY write in the measured fetch handoff phase", () => {
+  const gb = new GameBoy("dmg");
+  gb.loadROM(makeRom());
+  gb.ppuMode = 3;
+  gb.ly = 0;
+  gb.ppuTransferLive = true;
+  gb.ppuTransferDot = 0;
+  gb.ppuDot = 0;
+  gb.ppuTransferX = 0;
+  gb.ppuLineLcdc = 0x91;
+  gb.ppuLineCgbRendering = false;
+  gb.ppuScyApplied = 0;
+  gb.ppuScyPending = 0;
+  gb.ppuScyDelay = 0;
+
+  gb.writeIO(0x42, 7);
+  assert.equal(gb.ppuScyPending, 7);
+  assert.equal(gb.ppuScyDelay, 2);
+  gb.renderTransferPixel(0, 0);
+  assert.equal(gb.ppuScyApplied, 0);
+  gb.renderTransferPixel(0, 1);
+  assert.equal(gb.ppuScyApplied, 7);
+});
+
 test("raises the GBC line-144 OAM STAT source one M-cycle before VBlank", () => {
   const cgb = new GameBoy("cgb");
   cgb.loadROM(makeRom([], { cgb: 0x80 }));

@@ -99,6 +99,7 @@ const STATE_SCALARS = [
   "ppuWindowRow", "ppuWindowLineCursor",
   "ppuWindowPenaltyBudgeted", "ppuTransferLive",
   "ppuLineLcdc", "ppuLineScy", "ppuLineScx", "ppuLineBgp", "ppuLineObp0",
+  "ppuScyApplied", "ppuScyPending", "ppuScyDelay",
   "ppuLineObp1", "ppuLineWy", "ppuLineWx", "ppuLineWindowLine",
   "ppuLineCgbRendering", "ppuFetchScx", "ppuFetchLcdc", "ppuFetchWindowMap",
   "ppuFifoEnabled", "ppuFifoHead", "ppuFifoLength", "ppuFetcherState",
@@ -506,6 +507,9 @@ export class GameBoy {
     this.ppuTransferLive = false;
     this.ppuLineLcdc = 0;
     this.ppuLineScy = 0;
+    this.ppuScyApplied = 0;
+    this.ppuScyPending = 0;
+    this.ppuScyDelay = 0;
     this.ppuLineScx = 0;
     this.ppuLineBgp = 0;
     this.ppuLineObp0 = 0;
@@ -1477,6 +1481,13 @@ export class GameBoy {
       || (register >= 0x47 && register <= 0x4b)
     ) {
       this.activateLivePixelTransfer(register);
+      if (register === 0x42 && this.model === "dmg" && this.ppuMode === 3 && this.ppuTransferLive) {
+        // A DMG SCY write reaches the fetcher after the in-flight pixel's
+        // row has completed. Keeping a two-pixel handoff window preserves
+        // the measured mixed-row phase without changing line timing.
+        this.ppuScyPending = value;
+        this.ppuScyDelay = 2;
+      }
       if (register === 0x4b && this.ppuMode === 3) this.ppuWxJustChanged = true;
       this.io[register] = value;
     }
@@ -1990,6 +2001,9 @@ export class GameBoy {
     this.ppuWxJustChanged = false;
     this.ppuLineLcdc = this.io[0x40];
     this.ppuLineScy = this.io[0x42];
+    this.ppuScyApplied = this.ppuLineScy;
+    this.ppuScyPending = this.ppuLineScy;
+    this.ppuScyDelay = 0;
     this.ppuLineScx = this.io[0x43];
     this.ppuLineBgp = this.io[0x47];
     this.ppuLineObp0 = this.io[0x48];
@@ -2604,9 +2618,12 @@ export class GameBoy {
       const pixelX = useWindow
         ? this.ppuWindowPixelX
         : (x + scrollX) & 0xff;
+      if (!useWindow && this.ppuScyDelay > 0) this.ppuScyDelay -= 1;
+      if (!useWindow && this.ppuScyDelay === 0) this.ppuScyApplied = this.ppuScyPending;
+      const scrollY = this.model === "dmg" ? this.ppuScyApplied : this.io[0x42];
       const pixelY = useWindow
         ? this.ppuWindowRow
-        : (line + this.io[0x42]) & 0xff;
+        : (line + scrollY) & 0xff;
       const tileLcdc = useWindow ? lcdc : this.ppuFetchLcdc;
       const mapBase = useWindow
         ? (this.ppuFetchWindowMap ? 0x1c00 : 0x1800)
