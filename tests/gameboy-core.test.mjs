@@ -729,6 +729,24 @@ test("keeps a DMG SCY write in the measured fetch handoff phase", () => {
   assert.equal(gb.ppuScyApplied, 7);
 });
 
+test("wraps the window line counter at the hardware's 8-bit boundary", () => {
+  const gb = new GameBoy("dmg");
+  gb.loadROM(makeRom());
+  gb.windowLine = 0x100;
+  gb.ppuMode = 3;
+  gb.beginPixelTransfer(0);
+
+  assert.equal(gb.ppuWindowRow, 0);
+  assert.equal(gb.ppuWindowLineCursor, 0);
+
+  gb.ppuTransferLive = true;
+  gb.ppuTransferX = 160;
+  gb.ppuWindowDrawn = true;
+  gb.ppuWindowLineCursor = 0x100;
+  gb.finishPixelTransfer();
+  assert.equal(gb.windowLine, 0);
+});
+
 test("raises the GBC line-144 OAM STAT source one M-cycle before VBlank", () => {
   const cgb = new GameBoy("cgb");
   cgb.loadROM(makeRom([], { cgb: 0x80 }));

@@ -1,4 +1,32 @@
-# GAMEBOY LAB v2.5.4 Emulation Audit
+# GAMEBOY LAB v2.5.5 Emulation Audit
+
+## v2.5.5 delta
+
+### Eight-bit window line counter
+
+The PPU window line counter is now kept in its hardware-sized 8-bit range at
+line setup, each window activation, and the final line commit. The active
+fetcher and the static renderer use the wrapped value, and the wrapped phase
+is already included in save-state transfer data. This prevents a long-running
+window sequence from indexing beyond the 32-row tile map after repeated
+mid-line enable/disable events.
+
+In games, this fixes long HUD overlays, patterned windows, and repeated
+split-screen scenes that otherwise begin to drift after enough window rows.
+The DMG/CGB CPU clocks, ordinary write-free renderer, and native CGB path are
+otherwise unchanged.
+
+| Test group | v2.5.4 | v2.5.5 | Change |
+| --- | ---: | ---: | ---: |
+| Project tests | 61/61 | 62/62 | +1 window-wrap regression |
+| Mealybug DMG picture match | 94.7014% | 94.9047% | **+0.2033 pp / +0.21% relative** |
+| `m3_lcdc_win_en_change_multiple` | 85.2778% | 90.1563% | **+4.8785 pp / +5.72% relative** |
+| SameSuite full set | 55/78, 0 timeouts | 55/78, 0 timeouts | held |
+
+The remaining 23 Mealybug pictures are unchanged, and representative game
+frame/CPU checksums remain identical. No host-throughput headline is claimed
+because this is a correctness fix, not a hot-loop rewrite. Revision-specific
+PPU/APU work remains gated for v3.0.
 
 ## v2.5.4 delta
 

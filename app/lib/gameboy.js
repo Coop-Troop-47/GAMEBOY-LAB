@@ -1995,8 +1995,8 @@ export class GameBoy {
     this.ppuWindowActive = false;
     this.ppuWindowDrawn = false;
     this.ppuWindowPixelX = 0;
-    this.ppuWindowRow = this.windowLine;
-    this.ppuWindowLineCursor = this.windowLine;
+    this.ppuWindowRow = this.windowLine & 0xff;
+    this.ppuWindowLineCursor = this.windowLine & 0xff;
     this.ppuTransferLive = false;
     this.ppuWxJustChanged = false;
     this.ppuLineLcdc = this.io[0x40];
@@ -2010,7 +2010,7 @@ export class GameBoy {
     this.ppuLineObp1 = this.io[0x49];
     this.ppuLineWy = this.io[0x4a];
     this.ppuLineWx = this.io[0x4b];
-    this.ppuLineWindowLine = this.windowLine;
+    this.ppuLineWindowLine = this.windowLine & 0xff;
     this.ppuLineCgbRendering = this.cgbMode
       || (this.model === "cgb" && this.bootEnabled);
     this.ppuFetchScx = this.io[0x43];
@@ -2035,7 +2035,7 @@ export class GameBoy {
         && this.ly >= this.ppuLineWy
         && this.ppuLineWx <= 166;
       this.renderStaticTransferRange(this.ly, 0, SCREEN_WIDTH);
-      if (this.ppuWindowDrawn) this.ppuWindowLineCursor = this.windowLine + 1;
+      if (this.ppuWindowDrawn) this.ppuWindowLineCursor = (this.windowLine + 1) & 0xff;
     } else if (this.ppuTransferX < SCREEN_WIDTH) {
       // A live register write can leave the visible FIFO a few pixels short
       // at the mode-3 boundary. Finish that queued portion from the same
@@ -2045,7 +2045,7 @@ export class GameBoy {
       }
       this.ppuTransferX = SCREEN_WIDTH;
     }
-    if (this.ppuWindowDrawn) this.windowLine = this.ppuWindowLineCursor;
+    if (this.ppuWindowDrawn) this.windowLine = this.ppuWindowLineCursor & 0xff;
   }
 
   catchUpPixelTransfer() {
@@ -2103,7 +2103,7 @@ export class GameBoy {
       ? windowMode ? this.ppuFetcherPosition : 0xf0
       : position & 0xff;
     this.ppuFetcherBgY = windowMode
-      ? this.ppuWindowRow
+      ? (this.ppuWindowRow & 0xff)
       : (this.ly + this.io[0x42]) & 0xff;
     this.ppuFetcherTileNumber = 0;
     this.ppuFetcherAttr = 0;
@@ -2116,7 +2116,7 @@ export class GameBoy {
     const lcdc = this.io[0x40];
     const cgbRendering = this.cgbMode || (this.model === "cgb" && this.bootEnabled);
     const row = this.ppuFetcherWindow
-      ? this.ppuWindowRow
+      ? (this.ppuWindowRow & 0xff)
       : (this.ly + this.io[0x42]) & 0xff;
     this.ppuFetcherBgY = row;
     const mapBase = this.ppuFetcherWindow
@@ -2260,8 +2260,8 @@ export class GameBoy {
         this.ppuWindowActive = true;
         this.ppuWindowDrawn = true;
         this.ppuWindowPixelX = 0;
-        this.ppuWindowRow = this.ppuWindowLineCursor;
-        this.ppuWindowLineCursor += 1;
+        this.ppuWindowRow = this.ppuWindowLineCursor & 0xff;
+        this.ppuWindowLineCursor = (this.ppuWindowLineCursor + 1) & 0xff;
         this.ppuFetchLcdc = this.io[0x40];
         this.ppuFetchWindowMap = this.io[0x40] & 0x40;
         this.resetPixelFetcher(true);
@@ -2401,8 +2401,8 @@ export class GameBoy {
         this.ppuWindowActive = true;
         this.ppuWindowDrawn = true;
         this.ppuWindowPixelX = 0;
-        this.ppuWindowRow = this.ppuWindowLineCursor;
-        this.ppuWindowLineCursor += 1;
+        this.ppuWindowRow = this.ppuWindowLineCursor & 0xff;
+        this.ppuWindowLineCursor = (this.ppuWindowLineCursor + 1) & 0xff;
         this.ppuFetchLcdc = this.io[0x40];
         this.ppuFetchWindowMap = this.io[0x40] & 0x40;
         this.ppuTransferStall = 5;
@@ -2622,7 +2622,7 @@ export class GameBoy {
       if (!useWindow && this.ppuScyDelay === 0) this.ppuScyApplied = this.ppuScyPending;
       const scrollY = this.model === "dmg" ? this.ppuScyApplied : this.io[0x42];
       const pixelY = useWindow
-        ? this.ppuWindowRow
+        ? (this.ppuWindowRow & 0xff)
         : (line + scrollY) & 0xff;
       const tileLcdc = useWindow ? lcdc : this.ppuFetchLcdc;
       const mapBase = useWindow
