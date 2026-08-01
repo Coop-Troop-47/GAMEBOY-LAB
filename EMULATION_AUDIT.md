@@ -1,4 +1,32 @@
-# GAMEBOY LAB v2.5.6 Emulation Audit
+# GAMEBOY LAB v2.5.7 Emulation Audit
+
+## v2.5.7 delta
+
+### DMG WX=6 window-fetch row phase
+
+On the DMG FIFO path, a window activation with the line's latched WX value of
+6 enters the fetcher at a two-row phase offset from the visible FIFO. The core
+now applies a two-row correction only for that DMG edge before seeding the
+window tile fetch. WX 0–5 and 7+, the static renderer, and native CGB mode are
+unchanged. The existing `ppuWindowRow`/line-cursor state remains serialized for
+deterministic mid-line save states.
+
+In games, this fixes patterned windows, score panels, and split-screen overlays
+that use WX=6 and previously displayed the right shape with the wrong vertical
+tile rows. It does not change ordinary frames or the fixed CPU/PPU clock.
+
+| Test group | v2.5.6 | v2.5.7 | Change |
+| --- | ---: | ---: | ---: |
+| Project tests | 63/63 | 64/64 | +1 WX=6 FIFO regression |
+| Mealybug DMG picture match | 94.9946% | 95.9639% | **+0.9693 pp / +1.02% relative** |
+| `m3_wx_6_change` | 74.8698% | 98.1337% | **+23.2639 pp / +31.07% relative** |
+| SameSuite full set | 55/78, 0 timeouts | 55/78, 0 timeouts | held |
+
+The other 23 DMG-blob pictures and both DMG CPU-B fixtures hold their prior
+scores. Representative DMG/CGB frame and CPU checksums remain stable, and the
+paired benchmark shows no throughput regression. This remains a narrow
+hardware-edge patch; broader revision-aware PPU/APU work is still gated for
+v3.0.
 
 ## v2.5.6 delta
 

@@ -2276,7 +2276,12 @@ export class GameBoy {
         this.ppuWindowActive = true;
         this.ppuWindowDrawn = true;
         this.ppuWindowPixelX = 0;
-        this.ppuWindowRow = this.ppuWindowLineCursor & 0xff;
+        // The DMG's WX=6 early trigger enters the window fetcher two rows
+        // ahead of the visible FIFO phase. Keep the correction local to that
+        // measured edge; WX 0–5, 7+, and the native CGB path retain their
+        // ordinary line cursor.
+        const windowRowCorrection = this.model === "dmg" && this.ppuLineWx === 6 ? 2 : 0;
+        this.ppuWindowRow = (this.ppuWindowLineCursor - windowRowCorrection) & 0xff;
         this.ppuWindowLineCursor = (this.ppuWindowLineCursor + 1) & 0xff;
         this.ppuFetchLcdc = this.io[0x40];
         this.ppuFetchWindowMap = this.io[0x40] & 0x40;

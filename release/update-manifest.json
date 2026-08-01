@@ -1,12 +1,12 @@
 {
-  "version": "2.5.6",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.5.6/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.5.6",
+  "version": "2.5.7",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.5.7/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.5.7",
   "changes": [
-    "Mid-screen background changes now land at the right point in original Game Boy raster effects, reducing wrong-pixel blocks in wipes, HUDs, and split screens.",
-    "DMG reference-picture matching improved from 94.9047% to 94.9946% (+0.09% relative).",
-    "The focused background-toggle scene improved by 2.1571 percentage points (+2.44% relative); the other 23 scenes held steady.",
-    "Saved states, native Game Boy Color rendering, and representative game timing checksums remain unchanged.",
-    "The full project suite is green (63/63); v3.0 remains reserved for the broader accuracy milestone."
+    "Original Game Boy window scenes at the six-pixel left-edge position now line up instead of starting on the wrong tile row.",
+    "DMG reference-picture matching improved from 94.9946% to 95.9639% (+1.02% relative).",
+    "The focused WX=6 scene improved by 23.2639 percentage points (+31.07% relative); the other 23 scenes held steady.",
+    "Other window positions, native Game Boy Color rendering, saves, and representative game timing checksums remain unchanged.",
+    "The full project suite is green (64/64); v3.0 remains reserved for the broader accuracy milestone."
   ]
 }

@@ -759,6 +759,35 @@ test("keeps a DMG LCDC background toggle in the measured pixel pipeline", () => 
   assert.equal(gb.ppuBgEnableApplied, 0);
 });
 
+test("corrects the DMG WX=6 window row at FIFO activation", () => {
+  const gb = new GameBoy("dmg");
+  gb.loadROM(makeRom());
+  gb.ppuMode = 3;
+  gb.ly = 0;
+  gb.io[0x40] = 0xf3;
+  gb.io[0x4a] = 0;
+  gb.io[0x4b] = 6;
+  gb.ppuLineWx = 6;
+  gb.ppuFifoEnabled = true;
+  gb.ppuTransferLive = true;
+  gb.ppuTransferX = 0;
+  gb.ppuFetcherPosition = 0xff;
+  gb.ppuFifoLength = 8;
+  gb.ppuWindowActive = false;
+  gb.ppuWindowLineCursor = 8;
+  gb.ppuWindowRow = 0;
+  gb.ppuTransferWarmup = 0;
+  gb.ppuTransferStall = 0;
+  gb.ppuWxJustChanged = false;
+  gb.lineSpriteStalls.fill(0);
+
+  gb.advanceFifoPixelTransfer(1);
+
+  assert.equal(gb.ppuWindowRow, 6);
+  assert.equal(gb.ppuWindowLineCursor, 9);
+  assert.equal(gb.ppuWindowActive, true);
+});
+
 test("wraps the window line counter at the hardware's 8-bit boundary", () => {
   const gb = new GameBoy("dmg");
   gb.loadROM(makeRom());
