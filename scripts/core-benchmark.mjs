@@ -126,6 +126,49 @@ async function benchmarkCore(label, core, options, cartridges) {
   return { label, cases };
 }
 
+function summarizeCase(cartridge, values) {
+  return {
+    cartridge: cartridge.name,
+    model: cartridge.model,
+    medianFps: Number(median(values.map((value) => value.fps)).toFixed(2)),
+    p10Fps: Number(percentile(values.map((value) => value.fps), 0.1).toFixed(2)),
+    medianHeapDeltaKiB: Number(
+      (median(values.map((value) => value.heapDelta)) / 1024).toFixed(1),
+    ),
+    checksum: values.at(-1).checksum,
+    trials: values.map((value) => Number(value.fps.toFixed(2))),
+  };
+}
+
+async function benchmarkPaired(baselineLabel, baselineCore, currentCore, options, cartridges) {
+  const baselineCases = [];
+  const currentCases = [];
+  for (const cartridge of cartridges) {
+    const baselineValues = [];
+    const currentValues = [];
+    for (let trial = 0; trial < options.trials; trial += 1) {
+      const order = trial & 1
+        ? [[currentCore, currentValues], [baselineCore, baselineValues]]
+        : [[baselineCore, baselineValues], [currentCore, currentValues]];
+      for (const [core, values] of order) {
+        values.push(runTrial(
+          core.GameBoy,
+          cartridge.rom,
+          cartridge.model,
+          options.warmup,
+          options.frames,
+        ));
+      }
+    }
+    baselineCases.push(summarizeCase(cartridge, baselineValues));
+    currentCases.push(summarizeCase(cartridge, currentValues));
+  }
+  return [
+    { label: baselineLabel, cases: baselineCases },
+    { label: "current", cases: currentCases },
+  ];
+}
+
 const options = parseArguments(process.argv.slice(2));
 const cartridges = options.roms.map((path) => {
   const rom = new Uint8Array(readFileSync(path));
@@ -136,12 +179,18 @@ const cartridges = options.roms.map((path) => {
   };
 });
 const current = await importCore();
-const results = [
-  await benchmarkCore("current", current, options, cartridges),
-];
+let results;
 if (options.baselineRef) {
   const baseline = await importCore(options.baselineRef);
-  results.unshift(await benchmarkCore(options.baselineRef, baseline, options, cartridges));
+  results = await benchmarkPaired(
+    options.baselineRef,
+    baseline,
+    current,
+    options,
+    cartridges,
+  );
+} else {
+  results = [await benchmarkCore("current", current, options, cartridges)];
 }
 
 const report = {

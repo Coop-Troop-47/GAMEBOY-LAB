@@ -842,6 +842,7 @@ kbd {
 .segmented:has(> button:nth-child(2).active) { --segment-index: 1; }
 .segmented:has(> button:nth-child(3).active) { --segment-index: 2; }
 .segmented:has(> button:nth-child(4).active) { --segment-index: 3; }
+.segmented:has(> button:nth-child(5).active) { --segment-index: 4; }
 
 .segmented button {
   position: relative;
@@ -1845,6 +1846,11 @@ html[data-theme="dark"] body {
 .four-way {
   --segment-count: 4;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.five-way {
+  --segment-count: 5;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .save-center {

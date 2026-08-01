@@ -1,13 +1,13 @@
 {
-  "version": "2.0.0",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.0.0/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.0.0",
+  "version": "2.1.0",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.1.0/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.1.0",
   "changes": [
-    "Applicable Mooneye acceptance doubled from 33/66 in v1.3.0 to 66/66: +50 percentage points and +100% more passing tests.",
-    "Measured median core throughput improved 33.25% for DMG and 17.83% for GBC in the frozen seven-trial, 1,000-frame release benchmark.",
-    "CPU bus cycles, interrupts, timers, serial, OAM DMA corruption, HDMA, PPU mode timing, STOP, speed switching, and CGB registers now model many more hardware edge cases.",
-    "The APU now has hardware-timed channel state, length/envelope/sweep quirks, wave RAM behavior, exact sample integration, and sample-rate-correct analog coupling.",
-    "Audio playback now uses bounded interpolated clock correction, clean underrun recovery, four real latency targets, and a repaired low-latency fallback path.",
-    "MBC1 multicarts, MBC2, MBC3 RTC-only carts, MBC5 rumble banking, save-state compatibility, serial-link hooks, infrared hooks, and conformance tooling were expanded."
+    "SameSuite APU rose from 11/70 to 47/70: +51.43 percentage points and +327.27% more passing cases.",
+    "Mealybug DMG pixel-structure similarity rose from 82.7421% to 86.6361%: +3.894 points and +4.71% relative.",
+    "A dot-sensitive PPU now handles mid-line register effects, window activation, sprite-fetch stalls, HDMA state, and save-state restoration.",
+    "Pulse, wave, noise, envelope, trigger, frame-sequencer, RTC sub-second, EI/HALT, palette-access, and DMA edge cases were corrected.",
+    "Minimal audio buffering halves the former lowest queue target to 8 ms; maximum clock correction is 68.75% smaller and console-specific analog curves are used.",
+    "Paired throughput improved in five of six audited games by 2.61% to 31.26%; the accuracy-heavy Wario Land 3 path is 9.99% slower but remains over 11× real time."
   ]
 }

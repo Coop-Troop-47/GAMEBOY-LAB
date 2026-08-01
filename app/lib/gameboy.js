@@ -13,6 +13,17 @@ const DUTY_PATTERNS = [
 ];
 const NOISE_PERIODS = new Uint16Array([8, 16, 32, 48, 64, 80, 96, 112]);
 const TIMER_MASKS = new Uint16Array([1 << 9, 1 << 3, 1 << 5, 1 << 7]);
+const DECODED_TILE_ROWS = new Uint16Array(0x10000);
+for (let bytes = 0; bytes < 0x10000; bytes += 1) {
+  const low = bytes & 0xff;
+  const high = bytes >> 8;
+  let pixels = 0;
+  for (let x = 0; x < 8; x += 1) {
+    const bit = 7 - x;
+    pixels |= ((((high >> bit) & 1) << 1) | ((low >> bit) & 1)) << (x * 2);
+  }
+  DECODED_TILE_ROWS[bytes] = pixels;
+}
 const ILLEGAL_OPCODES = new Uint8Array(256);
 for (const opcode of [0xd3, 0xdb, 0xdd, 0xe3, 0xe4, 0xeb, 0xec, 0xed, 0xf4, 0xfc, 0xfd]) {
   ILLEGAL_OPCODES[opcode] = 1;
@@ -78,11 +89,18 @@ const STATE_SCALARS = [
   "hdmaSource", "hdmaDestination", "hdmaBlocks",
   "hdmaActive", "hdmaStallCycles", "bgPaletteIndex", "objPaletteIndex", "opri", "ppuDot", "ly",
   "ppuMode", "ppuMode3End", "ppuBusMode", "ppuBusDot", "ppuBusLine",
+  "ppuTransferWarmup", "ppuTransferDiscard", "ppuTransferX", "ppuTransferStall",
+  "ppuTransferDot",
+  "ppuInitialScxLow", "ppuWindowActive", "ppuWindowDrawn", "ppuWindowPixelX",
+  "ppuWindowPenaltyBudgeted", "ppuTransferLive",
+  "ppuLineLcdc", "ppuLineScy", "ppuLineScx", "ppuLineBgp", "ppuLineObp0",
+  "ppuLineObp1", "ppuLineWy", "ppuLineWx", "ppuLineWindowLine",
+  "ppuLineCgbRendering",
   "lcdStartup", "lycMatch", "statSignal", "windowLine", "frameReady",
   "frameNumber", "cycles", "bootEnabled", "doubleSpeed", "speedSwitchArmed",
   "baseCycles",
   "speedSwitchCycles", "speedSubcycle", "audioClock", "audioIntegralLeft",
-  "audioIntegralRight", "audioFrameStep", "cgbMode",
+  "audioIntegralRight", "audioFrameStep", "apuSquarePhase", "apuSkipFrameEvent", "cgbMode",
 ];
 
 // Production CGB boot-ROM palette dictionary in RGB555 form. Compatibility
@@ -200,6 +218,7 @@ export class GameBoy {
     this.rom = new Uint8Array(0x8000);
     this.romBanks = 2;
     this.vram = new Uint8Array(0x4000);
+    this.decodedTileRows = new Uint16Array(0x2000);
     this.wram = new Uint8Array(0x8000);
     this.eram = new Uint8Array(0x2000);
     this.oam = new Uint8Array(0xa0);
@@ -212,6 +231,17 @@ export class GameBoy {
     this.lineBgColors = new Uint8Array(SCREEN_WIDTH);
     this.lineBgPriority = new Uint8Array(SCREEN_WIDTH);
     this.lineSprites = [];
+    this.lineSpritePool = Array.from({ length: 10 }, () => ({
+      index: 0,
+      y: 0,
+      rawX: 0,
+      x: 0,
+      tile: 0,
+      attr: 0,
+    }));
+    this.lineSpriteStalls = new Uint16Array(SCREEN_WIDTH);
+    this.lineSpriteClaimed = new Uint8Array(SCREEN_WIDTH);
+    this.lineSpriteXGroups = new Uint8Array(168);
     this.colorScratch = new Uint8Array(3);
     this.audioMix = new Float64Array(6);
     this.audioSamples = new Float32Array(4096);
@@ -404,7 +434,16 @@ export class GameBoy {
     this.rumbleEnabled = false;
     this.rtcSelect = 0;
     this.rtcLatchValue = 0;
-    this.rtc = { seconds: 0, minutes: 0, hours: 0, days: 0, halt: false, carry: false, last: Date.now() };
+    this.rtc = {
+      seconds: 0,
+      minutes: 0,
+      hours: 0,
+      days: 0,
+      halt: false,
+      carry: false,
+      last: Date.now(),
+      subsecond: 0,
+    };
     this.dmaCycles = 0;
     this.dmaSource = 0;
     this.dmaIndex = 0;
@@ -426,6 +465,27 @@ export class GameBoy {
     this.ppuBusMode = 2;
     this.ppuBusDot = -1;
     this.ppuBusLine = -1;
+    this.ppuTransferWarmup = 0;
+    this.ppuTransferDiscard = 0;
+    this.ppuTransferX = 0;
+    this.ppuTransferStall = 0;
+    this.ppuTransferDot = 0;
+    this.ppuInitialScxLow = 0;
+    this.ppuWindowActive = false;
+    this.ppuWindowDrawn = false;
+    this.ppuWindowPixelX = 0;
+    this.ppuWindowPenaltyBudgeted = false;
+    this.ppuTransferLive = false;
+    this.ppuLineLcdc = 0;
+    this.ppuLineScy = 0;
+    this.ppuLineScx = 0;
+    this.ppuLineBgp = 0;
+    this.ppuLineObp0 = 0;
+    this.ppuLineObp1 = 0;
+    this.ppuLineWy = 0;
+    this.ppuLineWx = 0;
+    this.ppuLineWindowLine = 0;
+    this.ppuLineCgbRendering = false;
     this.lcdStartup = false;
     this.lycMatch = true;
     this.statSignal = false;
@@ -438,6 +498,7 @@ export class GameBoy {
     this.batteryDirty = false;
     this.io.fill(0);
     this.vram.fill(0);
+    this.decodedTileRows.fill(0);
     this.wram.fill(0);
     this.oam.fill(0);
     this.hram.fill(0);
@@ -563,12 +624,15 @@ export class GameBoy {
     this.audioIntegralRight = 0;
     this.apuPendingClocks = 0;
     this.audioFrameStep = 0;
+    this.apuSquarePhase = 0;
+    this.apuSkipFrameEvent = false;
     this.ch1 = {
       enabled: false,
       phase: 0,
       timer: 0,
       timerPeriod: 8192,
       dutyPosition: 0,
+      duty: 0,
       length: lengths[0],
       volume: 0,
       envCounter: 0,
@@ -578,6 +642,8 @@ export class GameBoy {
       sweepNegated: false,
       shadow: 0,
       phaseStep: 0,
+      sampleSuppressed: false,
+      justReloaded: false,
     };
     this.ch2 = {
       enabled: false,
@@ -585,11 +651,14 @@ export class GameBoy {
       timer: 0,
       timerPeriod: 8192,
       dutyPosition: 0,
+      duty: 0,
       length: lengths[1],
       volume: 0,
       envCounter: 0,
       envRunning: false,
       phaseStep: 0,
+      sampleSuppressed: false,
+      justReloaded: false,
     };
     this.ch3 = {
       enabled: false,
@@ -599,6 +668,7 @@ export class GameBoy {
       timerPeriod: 4096,
       wavePosition: 0,
       waveAccess: 0,
+      currentSample: 0,
       length: lengths[2],
     };
     this.ch4 = {
@@ -903,7 +973,9 @@ export class GameBoy {
     }
     if (address < 0xa000) {
       if (direct || !(this.io[0x40] & 0x80) || this.cpuAccessPPUMode(cpuBusWrite) !== 3) {
-        this.vram[this.vramBank * 0x2000 + address - 0x8000] = value;
+        const offset = this.vramBank * 0x2000 + address - 0x8000;
+        this.vram[offset] = value;
+        this.decodeVRAMRow(offset);
       }
       return;
     }
@@ -952,6 +1024,22 @@ export class GameBoy {
       return;
     }
     this.writeIO(address & 0x7f, value);
+  }
+
+  decodeVRAMRow(offset) {
+    const row = offset & ~1;
+    if ((row & 0x1fff) >= 0x1800) return;
+    const low = this.vram[row];
+    const high = this.vram[row + 1];
+    this.decodedTileRows[row >> 1] = DECODED_TILE_ROWS[(high << 8) | low];
+  }
+
+  rebuildDecodedTiles() {
+    for (let bank = 0; bank < 0x4000; bank += 0x2000) {
+      for (let offset = 0; offset < 0x1800; offset += 2) {
+        this.decodeVRAMRow(bank + offset);
+      }
+    }
   }
 
   writeMapper(address, value) {
@@ -1039,24 +1127,28 @@ export class GameBoy {
     }
     if (register === 0x76) {
       if (this.model !== "cgb") return 0xff;
-      this.flushAPU();
+      // PCM12/PCM34 are sampled halfway through the CPU read M-cycle. Keep
+      // the final two base clocks pending so their value is not observed two
+      // clocks too late.
+      this.flushAPU(2);
       const channel1 = this.ch1.enabled
-        && DUTY_PATTERNS[this.io[0x11] >> 6][this.ch1.dutyPosition]
+        && !this.ch1.sampleSuppressed
+        && DUTY_PATTERNS[this.ch1.duty][this.ch1.dutyPosition]
         ? this.ch1.volume
         : 0;
       const channel2 = this.ch2.enabled
-        && DUTY_PATTERNS[this.io[0x16] >> 6][this.ch2.dutyPosition]
+        && !this.ch2.sampleSuppressed
+        && DUTY_PATTERNS[this.ch2.duty][this.ch2.dutyPosition]
         ? this.ch2.volume
         : 0;
       return channel1 | (channel2 << 4);
     }
     if (register === 0x77) {
       if (this.model !== "cgb") return 0xff;
-      this.flushAPU();
+      this.flushAPU(2);
       let channel3 = 0;
       if (this.ch3.enabled && (this.io[0x1a] & 0x80)) {
-        const byte = this.io[0x30 + (this.ch3.wavePosition >> 1)];
-        channel3 = (this.ch3.wavePosition & 1) ? byte & 0x0f : byte >> 4;
+        channel3 = this.ch3.currentSample;
         const level = (this.io[0x1c] >> 5) & 3;
         channel3 = level === 0 ? 0 : channel3 >> (level - 1);
       }
@@ -1143,6 +1235,7 @@ export class GameBoy {
     }
     if (register === 0x40) {
       const wasEnabled = !!(this.io[0x40] & 0x80);
+      this.activateLivePixelTransfer();
       this.io[0x40] = value;
       const enabled = !!(value & 0x80);
       if (wasEnabled && !enabled) {
@@ -1210,6 +1303,7 @@ export class GameBoy {
       return;
     }
     if (register === 0x50) {
+      this.activateLivePixelTransfer();
       if (value !== 0 && this.bootEnabled) {
         if (this.model === "cgb" && !this.cgbCartridge) this.captureCompatibilityPalettes();
         this.bootEnabled = false;
@@ -1238,17 +1332,23 @@ export class GameBoy {
     }
     if (register === 0x68) { if (this.model === "cgb") this.bgPaletteIndex = value & 0xbf; return; }
     if (register === 0x69) {
-      if (this.cgbRegistersAvailable() && this.ppuMode !== 3) {
-        this.bgPalette[this.bgPaletteIndex & 0x3f] = value;
-        if (this.bgPaletteIndex & 0x80) this.bgPaletteIndex = 0x80 | ((this.bgPaletteIndex + 1) & 0x3f);
+      if (this.cgbRegistersAvailable()) {
+        if (this.ppuMode !== 3) this.bgPalette[this.bgPaletteIndex & 0x3f] = value;
+        // The data write is blocked during pixel transfer, but the address
+        // latch's auto-increment still occurs.
+        if (this.bgPaletteIndex & 0x80) {
+          this.bgPaletteIndex = 0x80 | ((this.bgPaletteIndex + 1) & 0x3f);
+        }
       }
       return;
     }
     if (register === 0x6a) { if (this.model === "cgb") this.objPaletteIndex = value & 0xbf; return; }
     if (register === 0x6b) {
-      if (this.cgbRegistersAvailable() && this.ppuMode !== 3) {
-        this.objPalette[this.objPaletteIndex & 0x3f] = value;
-        if (this.objPaletteIndex & 0x80) this.objPaletteIndex = 0x80 | ((this.objPaletteIndex + 1) & 0x3f);
+      if (this.cgbRegistersAvailable()) {
+        if (this.ppuMode !== 3) this.objPalette[this.objPaletteIndex & 0x3f] = value;
+        if (this.objPaletteIndex & 0x80) {
+          this.objPaletteIndex = 0x80 | ((this.objPaletteIndex + 1) & 0x3f);
+        }
       }
       return;
     }
@@ -1267,7 +1367,10 @@ export class GameBoy {
       register === 0x42
       || register === 0x43
       || (register >= 0x47 && register <= 0x4b)
-    ) this.io[register] = value;
+    ) {
+      this.activateLivePixelTransfer();
+      this.io[register] = value;
+    }
   }
 
   readJoypad() {
@@ -1523,6 +1626,20 @@ export class GameBoy {
   advancePPU(clocks) {
     if (!(this.io[0x40] & 0x80)) return;
     while (clocks > 0) {
+      if (this.ppuMode === 3 && this.ly < 144) {
+        const transferEnd = this.lcdStartup && this.ly === 0
+          ? 251
+          : this.ppuMode3End;
+        const step = Math.min(clocks, transferEnd - this.ppuDot);
+        if (this.ppuTransferLive) {
+          this.advancePixelTransfer(step);
+          this.ppuTransferDot += step;
+        }
+        this.ppuDot += step;
+        clocks -= step;
+        if (this.ppuDot >= transferEnd) this.processPPUEvent();
+        continue;
+      }
       const lineEnd = this.lcdStartup && this.ly === 0 ? 452 : 456;
       let nextEvent = lineEnd;
       if (this.ppuDot < 1) nextEvent = 1;
@@ -1584,8 +1701,9 @@ export class GameBoy {
       const previous = this.ppuMode;
       this.rememberPPUBusMode(previous);
       this.ppuMode = newMode;
+      if (newMode === 3 && this.ly < 144) this.beginPixelTransfer(this.ly);
       if (previous === 3 && newMode === 0 && this.ly < 144) {
-        this.renderLine(this.ly);
+        this.finishPixelTransfer();
         if (this.hdmaActive && !this.halted && !this.stopped) this.startHDMABlock();
       }
       this.updateStat();
@@ -1652,105 +1770,317 @@ export class GameBoy {
     const lcdc = this.io[0x40];
     let selected = 0;
     let spritePenalty = 0;
-    const spriteXGroups = new Set();
+    const spriteXGroups = this.lineSpriteXGroups;
+    spriteXGroups.fill(0);
     if (lcdc & 0x02) {
       const spriteHeight = lcdc & 0x04 ? 16 : 8;
       for (let index = 0; index < 40 && selected < 10; index += 1) {
         const y = this.oam[index * 4] - 16;
         if (line < y || line >= y + spriteHeight) continue;
         selected += 1;
-        const x = this.oam[index * 4 + 1];
-        if (x >= 168) continue;
+        const rawX = this.oam[index * 4 + 1];
+        if (rawX >= 168) continue;
         // Every fetched object costs six dots. The first object at a given X
         // also waits for the BG fetcher's 8-dot phase; coincident objects share
         // that alignment stall. This is why ten objects at one X are much
         // cheaper than ten objects spaced eight pixels apart.
         spritePenalty += 6;
-        if (!spriteXGroups.has(x)) {
-          spriteXGroups.add(x);
-          spritePenalty += 5 - Math.min(5, (x + this.io[0x43]) & 7);
+        if (!spriteXGroups[rawX]) {
+          spriteXGroups[rawX] = 1;
+          spritePenalty += 5 - Math.min(5, (rawX + this.io[0x43]) & 7);
         }
       }
     }
     const windowStarts = !!(lcdc & 0x20)
       && line >= this.io[0x4a]
       && this.io[0x4b] <= 166;
+    this.ppuWindowPenaltyBudgeted = windowStarts;
     // The exact FIFO penalty depends on alignment and fetch collisions. This
     // bounded model preserves the documented 172-dot baseline, SCX discard,
     // window restart, and per-object stalls instead of the old fixed Mode 3.
     return Math.min(369, 252 + (this.io[0x43] & 7) + spritePenalty + (windowStarts ? 6 : 0));
   }
 
-  renderLine(line) {
+  prepareLineObjects(line) {
     const lcdc = this.io[0x40];
     const cgbRendering = this.cgbMode || (this.model === "cgb" && this.bootEnabled);
+    const spriteHeight = lcdc & 0x04 ? 16 : 8;
+    const sprites = this.lineSprites;
+    const spritePool = this.lineSpritePool;
+    const stalls = this.lineSpriteStalls;
+    sprites.length = 0;
+    stalls.fill(0);
+    for (let index = 0; index < 40 && sprites.length < 10; index += 1) {
+      const y = this.oam[index * 4] - 16;
+      if (line < y || line >= y + spriteHeight) continue;
+      const rawX = this.oam[index * 4 + 1];
+      const sprite = spritePool[sprites.length];
+      sprite.index = index;
+      sprite.y = y;
+      sprite.rawX = rawX;
+      sprite.x = rawX - 8;
+      sprite.tile = this.oam[index * 4 + 2];
+      sprite.attr = this.oam[index * 4 + 3];
+      sprites.push(sprite);
+      if ((lcdc & 0x02) && rawX < 168) {
+        const stallX = Math.max(0, rawX - 8);
+        stalls[stallX] += 6;
+        if (stalls[stallX] === 6) {
+          stalls[stallX] += 5 - Math.min(5, (rawX + this.io[0x43]) & 7);
+        }
+      }
+    }
+    if (!cgbRendering || this.opri) {
+      sprites.sort((left, right) => left.x - right.x || left.index - right.index);
+    }
+  }
+
+  beginPixelTransfer(line) {
+    const windowStarts = !!(this.io[0x40] & 0x20)
+      && line >= this.io[0x4a]
+      && this.io[0x4b] <= 166;
+    if (windowStarts !== this.ppuWindowPenaltyBudgeted) {
+      this.ppuMode3End = Math.max(
+        252,
+        Math.min(369, this.ppuMode3End + (windowStarts ? 6 : -6)),
+      );
+      this.ppuWindowPenaltyBudgeted = windowStarts;
+    }
+    this.ppuTransferWarmup = 12;
+    this.ppuInitialScxLow = this.io[0x43] & 7;
+    this.ppuTransferDiscard = this.ppuInitialScxLow;
+    this.ppuTransferX = 0;
+    this.ppuTransferStall = 0;
+    this.ppuTransferDot = this.ppuDot;
+    this.ppuWindowActive = false;
+    this.ppuWindowDrawn = false;
+    this.ppuWindowPixelX = 0;
+    this.ppuTransferLive = false;
+    this.ppuLineLcdc = this.io[0x40];
+    this.ppuLineScy = this.io[0x42];
+    this.ppuLineScx = this.io[0x43];
+    this.ppuLineBgp = this.io[0x47];
+    this.ppuLineObp0 = this.io[0x48];
+    this.ppuLineObp1 = this.io[0x49];
+    this.ppuLineWy = this.io[0x4a];
+    this.ppuLineWx = this.io[0x4b];
+    this.ppuLineWindowLine = this.windowLine;
+    this.ppuLineCgbRendering = this.cgbMode
+      || (this.model === "cgb" && this.bootEnabled);
+    this.lineBgColors.fill(0);
+    this.lineBgPriority.fill(0);
+    // Mode-2 writes can change object size or visibility after the initial
+    // timing estimate. Re-sample the selected objects at the transfer edge so
+    // those writes affect the line exactly where hardware exposes them.
+    this.prepareLineObjects(line);
+  }
+
+  finishPixelTransfer() {
+    if (!this.ppuTransferLive) {
+      this.ppuTransferX = SCREEN_WIDTH;
+      const bgEnabled = this.ppuLineCgbRendering || !!(this.ppuLineLcdc & 1);
+      this.ppuWindowDrawn = bgEnabled
+        && !!(this.ppuLineLcdc & 0x20)
+        && this.ly >= this.ppuLineWy
+        && this.ppuLineWx <= 166;
+      this.renderStaticTransferRange(this.ly, 0, SCREEN_WIDTH);
+    }
+    if (this.ppuWindowDrawn) this.windowLine += 1;
+  }
+
+  catchUpPixelTransfer() {
+    if (this.ppuMode !== 3 || this.ly >= SCREEN_HEIGHT) return;
+    const pending = this.ppuDot - this.ppuTransferDot;
+    if (pending <= 0) return;
+    this.advancePixelTransfer(pending);
+    this.ppuTransferDot = this.ppuDot;
+  }
+
+  activateLivePixelTransfer() {
+    if (
+      this.ppuTransferLive
+      || this.ppuMode !== 3
+      || this.ly >= SCREEN_HEIGHT
+    ) return;
+    this.catchUpPixelTransfer();
+    this.renderStaticTransferRange(this.ly, 0, this.ppuTransferX);
+    this.ppuTransferLive = true;
+  }
+
+  windowCanStart(line, x) {
+    const lcdc = this.io[0x40];
+    if (!(lcdc & 0x20) || line < this.io[0x4a] || this.io[0x4b] > 166) return false;
+    const trigger = this.io[0x4b] - 7;
+    return trigger <= 0 ? x === 0 : x === trigger;
+  }
+
+  advancePixelTransfer(dots) {
+    while (dots > 0) {
+      if (this.ppuTransferWarmup > 0) {
+        const consumed = Math.min(dots, this.ppuTransferWarmup);
+        this.ppuTransferWarmup -= consumed;
+        dots -= consumed;
+        continue;
+      }
+      if (this.ppuTransferStall > 0) {
+        const consumed = Math.min(dots, this.ppuTransferStall);
+        this.ppuTransferStall -= consumed;
+        dots -= consumed;
+        continue;
+      }
+      if (this.ppuTransferDiscard > 0) {
+        const consumed = Math.min(dots, this.ppuTransferDiscard);
+        this.ppuTransferDiscard -= consumed;
+        dots -= consumed;
+        continue;
+      }
+      let x = this.ppuTransferX;
+      if (x >= SCREEN_WIDTH) return;
+
+      if (!this.ppuWindowActive && this.windowCanStart(this.ly, x)) {
+        if (!this.ppuWindowPenaltyBudgeted) {
+          this.ppuMode3End = Math.min(369, this.ppuMode3End + 6);
+          this.ppuWindowPenaltyBudgeted = true;
+        }
+        this.ppuWindowActive = true;
+        this.ppuWindowDrawn = true;
+        this.ppuWindowPixelX = 0;
+        this.ppuTransferStall = 5;
+        dots -= 1;
+        continue;
+      }
+      const spriteStall = this.lineSpriteStalls[x];
+      if (spriteStall > 0) {
+        this.lineSpriteStalls[x] = 0;
+        this.ppuTransferStall = spriteStall - 1;
+        dots -= 1;
+        continue;
+      }
+
+      // CPU-visible writes happen between tick batches, so all PPU registers
+      // are stable for the remaining dots in this call. Emit consecutive
+      // pixels together while still stopping exactly at window and object
+      // fetch boundaries. This preserves dot-level effects without paying a
+      // JavaScript method-call and event-loop cost for every individual dot.
+      do {
+        if (this.ppuTransferLive) {
+          this.renderTransferPixel(this.ly, x);
+        } else {
+          const lcdc = this.ppuLineLcdc;
+          const bgEnabled = this.cgbMode
+            || (this.model === "cgb" && this.bootEnabled)
+            || !!(lcdc & 1);
+          if (bgEnabled && this.ppuWindowActive && (lcdc & 0x20)) {
+            this.ppuWindowPixelX += 1;
+          }
+        }
+        x += 1;
+        dots -= 1;
+        if (dots <= 0 || x >= SCREEN_WIDTH) break;
+        if (
+          (!this.ppuWindowActive && this.windowCanStart(this.ly, x))
+          || this.lineSpriteStalls[x] > 0
+        ) break;
+      } while (true);
+      this.ppuTransferX = x;
+    }
+  }
+
+  renderStaticTransferRange(line, start, end) {
+    if (end <= start) return;
+    const lcdc = this.ppuLineLcdc;
+    const cgbRendering = this.ppuLineCgbRendering;
     const cgbCompatibility = this.model === "cgb" && !cgbRendering;
-    const scrollY = this.io[0x42];
-    const scrollX = this.io[0x43];
-    const windowY = this.io[0x4a];
-    const windowX = this.io[0x4b] - 7;
     const bgEnabled = cgbRendering || !!(lcdc & 1);
-    const windowEnabled = bgEnabled && !!(lcdc & 0x20) && line >= windowY && windowX < 160;
+    const windowTrigger = this.ppuLineWx - 7;
+    const windowStart = Math.max(0, windowTrigger);
+    const windowEnabled = bgEnabled
+      && !!(lcdc & 0x20)
+      && line >= this.ppuLineWy
+      && this.ppuLineWx <= 166;
     const bgColors = this.lineBgColors;
     const bgPriority = this.lineBgPriority;
-    bgColors.fill(0);
-    bgPriority.fill(0);
+    const limit = Math.min(SCREEN_WIDTH, end);
+    const framebuffer32 = this.framebuffer32;
+    const framebufferOffset = line * SCREEN_WIDTH;
+    const vram = this.vram;
+    const decodedTileRows = this.decodedTileRows;
+    const bgPalette = this.bgPalette;
+    let cachedTileKey = -1;
+    let cachedTileRow = 0;
+    let cachedTileAttr = 0;
 
-    for (let x = 0; x < 160; x += 1) {
+    for (let x = start; x < limit; x += 1) {
       let colorIndex = 0;
       let palette = 0;
       let priority = 0;
-      let useWindow = false;
       if (bgEnabled) {
-        useWindow = windowEnabled && x >= Math.max(0, windowX);
-        const pixelX = useWindow ? x - windowX : (x + scrollX) & 0xff;
-        const pixelY = useWindow ? this.windowLine : (line + scrollY) & 0xff;
-        const mapBase = useWindow ? ((lcdc & 0x40) ? 0x1c00 : 0x1800) : ((lcdc & 0x08) ? 0x1c00 : 0x1800);
+        const useWindow = windowEnabled && x >= windowStart;
+        const pixelX = useWindow
+          ? x - windowStart
+          : (x + this.ppuLineScx) & 0xff;
+        const pixelY = useWindow
+          ? this.ppuLineWindowLine
+          : (line + this.ppuLineScy) & 0xff;
+        const mapBase = useWindow
+          ? ((lcdc & 0x40) ? 0x1c00 : 0x1800)
+          : ((lcdc & 0x08) ? 0x1c00 : 0x1800);
         const mapOffset = mapBase + ((pixelY >> 3) * 32) + (pixelX >> 3);
-        const tileNumber = this.vram[mapOffset];
-        const attr = cgbRendering ? this.vram[0x2000 + mapOffset] : 0;
+        const rawTileY = pixelY & 7;
+        const tileKey = mapOffset | (rawTileY << 13);
+        if (tileKey !== cachedTileKey) {
+          const tileNumber = vram[mapOffset];
+          const attr = cgbRendering ? vram[0x2000 + mapOffset] : 0;
+          let tileY = rawTileY;
+          if (attr & 0x40) tileY = 7 - tileY;
+          const tileAddress = lcdc & 0x10
+            ? tileNumber * 16
+            : 0x1000 + signed8(tileNumber) * 16;
+          const bank = cgbRendering && (attr & 0x08) ? 0x2000 : 0;
+          cachedTileRow = decodedTileRows[(bank + tileAddress + tileY * 2) >> 1];
+          cachedTileAttr = attr;
+          cachedTileKey = tileKey;
+        }
+        const attr = cachedTileAttr;
         let tileX = pixelX & 7;
-        let tileY = pixelY & 7;
         if (attr & 0x20) tileX = 7 - tileX;
-        if (attr & 0x40) tileY = 7 - tileY;
-        let tileAddress;
-        if (lcdc & 0x10) tileAddress = tileNumber * 16;
-        else tileAddress = 0x1000 + signed8(tileNumber) * 16;
-        const bank = cgbRendering && (attr & 0x08) ? 0x2000 : 0;
-        const low = this.vram[bank + tileAddress + tileY * 2];
-        const high = this.vram[bank + tileAddress + tileY * 2 + 1];
-        const bit = 7 - tileX;
-        colorIndex = ((high >> bit) & 1) * 2 + ((low >> bit) & 1);
+        colorIndex = (cachedTileRow >> (tileX * 2)) & 3;
         palette = attr & 7;
         priority = (attr >> 7) & 1;
       }
       bgColors[x] = colorIndex;
       bgPriority[x] = priority;
       const packedColor = cgbRendering
-        ? this.cgbPackedColor(this.bgPalette, palette, colorIndex)
+        ? CGB_COLOR_LUT_PACKED[
+            (bgPalette[(palette * 8) + (colorIndex * 2)]
+              | (bgPalette[(palette * 8) + (colorIndex * 2) + 1] << 8)) & 0x7fff
+          ]
         : cgbCompatibility
-          ? this.cgbCompatibilityPackedColor(this.bgPalette, 0, this.io[0x47], colorIndex)
-          : this.dmgPackedColor(this.io[0x47], colorIndex, this.dmgBgPalettePacked);
-      this.setPackedPixel(x, line, packedColor);
+          ? CGB_COLOR_LUT_PACKED[
+              (bgPalette[((this.ppuLineBgp >> (colorIndex * 2)) & 3) * 2]
+                | (bgPalette[((this.ppuLineBgp >> (colorIndex * 2)) & 3) * 2 + 1]
+                  << 8)) & 0x7fff
+            ]
+          : this.dmgPackedColor(
+              this.ppuLineBgp,
+              colorIndex,
+              this.dmgBgPalettePacked,
+            );
+      framebuffer32[framebufferOffset + x] = packedColor;
     }
 
-    if (windowEnabled && Math.max(0, windowX) < 160) this.windowLine += 1;
     if (!(lcdc & 0x02)) return;
-
     const spriteHeight = lcdc & 0x04 ? 16 : 8;
     const sprites = this.lineSprites;
-    sprites.length = 0;
-    for (let i = 0; i < 40 && sprites.length < 10; i += 1) {
-      const y = this.oam[i * 4] - 16;
-      if (line >= y && line < y + spriteHeight) {
-        sprites.push({ index: i, y, x: this.oam[i * 4 + 1] - 8, tile: this.oam[i * 4 + 2], attr: this.oam[i * 4 + 3] });
-      }
-    }
-    if (!cgbRendering || this.opri) sprites.sort((left, right) => left.x - right.x || left.index - right.index);
-
-    for (let x = 0; x < 160; x += 1) {
-      for (const sprite of sprites) {
-        if (x < sprite.x || x >= sprite.x + 8) continue;
+    const claimed = this.lineSpriteClaimed;
+    claimed.fill(0, start, limit);
+    const objPalette = this.objPalette;
+    for (const sprite of sprites) {
+      const spriteStart = Math.max(start, sprite.x);
+      const spriteEnd = Math.min(limit, sprite.x + 8);
+      if (spriteEnd <= spriteStart) continue;
+      for (let x = spriteStart; x < spriteEnd; x += 1) {
+        if (claimed[x]) continue;
         let tileX = x - sprite.x;
         let tileY = line - sprite.y;
         if (sprite.attr & 0x20) tileX = 7 - tileX;
@@ -1759,38 +2089,137 @@ export class GameBoy {
         if (spriteHeight === 16) tile = (tile & 0xfe) + (tileY >= 8 ? 1 : 0);
         tileY &= 7;
         const bank = cgbRendering && (sprite.attr & 0x08) ? 0x2000 : 0;
-        const low = this.vram[bank + tile * 16 + tileY * 2];
-        const high = this.vram[bank + tile * 16 + tileY * 2 + 1];
-        const bit = 7 - tileX;
-        const colorIndex = ((high >> bit) & 1) * 2 + ((low >> bit) & 1);
-        if (colorIndex === 0) continue;
+        const row = decodedTileRows[(bank + tile * 16 + tileY * 2) >> 1];
+        const spriteColor = (row >> (tileX * 2)) & 3;
+        if (spriteColor === 0) continue;
+        claimed[x] = 1;
 
         const bgOpaque = bgColors[x] !== 0;
-        const bgMasterPriority = !!(lcdc & 1);
         const hiddenByBg = cgbRendering
-          ? bgMasterPriority && bgOpaque && (bgPriority[x] || (sprite.attr & 0x80))
+          ? !!(lcdc & 1) && bgOpaque
+            && (bgPriority[x] || (sprite.attr & 0x80))
           : bgOpaque && !!(sprite.attr & 0x80);
         if (!hiddenByBg) {
           const objectPalette = (sprite.attr & 0x10) ? 1 : 0;
-          const objectRegister = this.io[objectPalette ? 0x49 : 0x48];
-          const packedColor = cgbRendering
-            ? this.cgbPackedColor(this.objPalette, sprite.attr & 7, colorIndex)
+          const objectRegister = objectPalette
+            ? this.ppuLineObp1
+            : this.ppuLineObp0;
+          const spritePackedColor = cgbRendering
+            ? CGB_COLOR_LUT_PACKED[
+                (objPalette[((sprite.attr & 7) * 8) + (spriteColor * 2)]
+                  | (objPalette[((sprite.attr & 7) * 8) + (spriteColor * 2) + 1]
+                    << 8)) & 0x7fff
+              ]
             : cgbCompatibility
               ? this.cgbCompatibilityPackedColor(
-                  this.objPalette,
+                  objPalette,
                   objectPalette,
                   objectRegister,
-                  colorIndex,
+                  spriteColor,
                 )
               : this.dmgPackedColor(
                   objectRegister,
-                  colorIndex,
-                  objectPalette ? this.dmgObj1PalettePacked : this.dmgObj0PalettePacked,
+                  spriteColor,
+                  objectPalette
+                    ? this.dmgObj1PalettePacked
+                    : this.dmgObj0PalettePacked,
                 );
-          this.setPackedPixel(x, line, packedColor);
+          framebuffer32[framebufferOffset + x] = spritePackedColor;
         }
-        break;
       }
+    }
+  }
+
+  renderTransferPixel(line, x) {
+    const lcdc = this.io[0x40];
+    const cgbRendering = this.cgbMode || (this.model === "cgb" && this.bootEnabled);
+    const cgbCompatibility = this.model === "cgb" && !cgbRendering;
+    const bgEnabled = cgbRendering || !!(lcdc & 1);
+    const useWindow = bgEnabled && this.ppuWindowActive && !!(lcdc & 0x20);
+    let colorIndex = 0;
+    let palette = 0;
+    let priority = 0;
+
+    if (bgEnabled) {
+      const scrollX = (this.io[0x43] & 0xf8) | this.ppuInitialScxLow;
+      const pixelX = useWindow
+        ? this.ppuWindowPixelX
+        : (x + scrollX) & 0xff;
+      const pixelY = useWindow
+        ? this.windowLine
+        : (line + this.io[0x42]) & 0xff;
+      const mapBase = useWindow
+        ? ((lcdc & 0x40) ? 0x1c00 : 0x1800)
+        : ((lcdc & 0x08) ? 0x1c00 : 0x1800);
+      const mapOffset = mapBase + ((pixelY >> 3) * 32) + (pixelX >> 3);
+      const tileNumber = this.vram[mapOffset];
+      const attr = cgbRendering ? this.vram[0x2000 + mapOffset] : 0;
+      let tileX = pixelX & 7;
+      let tileY = pixelY & 7;
+      if (attr & 0x20) tileX = 7 - tileX;
+      if (attr & 0x40) tileY = 7 - tileY;
+      const tileAddress = lcdc & 0x10
+        ? tileNumber * 16
+        : 0x1000 + signed8(tileNumber) * 16;
+      const bank = cgbRendering && (attr & 0x08) ? 0x2000 : 0;
+      const row = this.decodedTileRows[(bank + tileAddress + tileY * 2) >> 1];
+      colorIndex = (row >> (tileX * 2)) & 3;
+      palette = attr & 7;
+      priority = (attr >> 7) & 1;
+    }
+    if (useWindow) this.ppuWindowPixelX += 1;
+    this.lineBgColors[x] = colorIndex;
+    this.lineBgPriority[x] = priority;
+    const packedColor = cgbRendering
+      ? this.cgbPackedColor(this.bgPalette, palette, colorIndex)
+      : cgbCompatibility
+        ? this.cgbCompatibilityPackedColor(this.bgPalette, 0, this.io[0x47], colorIndex)
+        : this.dmgPackedColor(this.io[0x47], colorIndex, this.dmgBgPalettePacked);
+    this.setPackedPixel(x, line, packedColor);
+    if (!(lcdc & 0x02)) return;
+
+    const spriteHeight = lcdc & 0x04 ? 16 : 8;
+    const sprites = this.lineSprites;
+    for (const sprite of sprites) {
+      if (x < sprite.x || x >= sprite.x + 8) continue;
+      let tileX = x - sprite.x;
+      let tileY = line - sprite.y;
+      if (sprite.attr & 0x20) tileX = 7 - tileX;
+      if (sprite.attr & 0x40) tileY = spriteHeight - 1 - tileY;
+      let tile = sprite.tile;
+      if (spriteHeight === 16) tile = (tile & 0xfe) + (tileY >= 8 ? 1 : 0);
+      tileY &= 7;
+      const bank = cgbRendering && (sprite.attr & 0x08) ? 0x2000 : 0;
+      const row = this.decodedTileRows[(bank + tile * 16 + tileY * 2) >> 1];
+      const spriteColor = (row >> (tileX * 2)) & 3;
+      if (spriteColor === 0) continue;
+
+      const bgOpaque = this.lineBgColors[x] !== 0;
+      const bgMasterPriority = !!(lcdc & 1);
+      const hiddenByBg = cgbRendering
+        ? bgMasterPriority && bgOpaque
+          && (this.lineBgPriority[x] || (sprite.attr & 0x80))
+        : bgOpaque && !!(sprite.attr & 0x80);
+      if (!hiddenByBg) {
+        const objectPalette = (sprite.attr & 0x10) ? 1 : 0;
+        const objectRegister = this.io[objectPalette ? 0x49 : 0x48];
+        const spritePackedColor = cgbRendering
+          ? this.cgbPackedColor(this.objPalette, sprite.attr & 7, spriteColor)
+          : cgbCompatibility
+            ? this.cgbCompatibilityPackedColor(
+                this.objPalette,
+                objectPalette,
+                objectRegister,
+                spriteColor,
+              )
+            : this.dmgPackedColor(
+                objectRegister,
+                spriteColor,
+                objectPalette ? this.dmgObj1PalettePacked : this.dmgObj0PalettePacked,
+              );
+        this.setPackedPixel(x, line, spritePackedColor);
+      }
+      break;
     }
   }
 
@@ -1847,6 +2276,10 @@ export class GameBoy {
     if (register < 0x55) return;
     if (this.hdmaActive && !(value & 0x80)) {
       this.hdmaActive = false;
+      // CGB hardware reports $80 after a running HBlank transfer is stopped;
+      // the partially consumed request is no longer exposed as a resumable
+      // length counter.
+      this.hdmaBlocks = 1;
       return;
     }
     if (this.hdmaActive) return;
@@ -1892,6 +2325,13 @@ export class GameBoy {
     }
     this.hdmaSource = (this.hdmaSource + 0x10) & 0xffff;
     this.hdmaDestination += 0x10;
+    // HDMA1-4 are working address registers, not immutable setup latches.
+    // A second transfer that only rewrites HDMA5 continues from the byte
+    // immediately following the previous transfer.
+    this.io[0x51] = (this.hdmaSource >> 8) & 0xff;
+    this.io[0x52] = this.hdmaSource & 0xf0;
+    this.io[0x53] = (this.hdmaDestination >> 8) & 0x1f;
+    this.io[0x54] = this.hdmaDestination & 0xf0;
     this.hdmaBlocks -= 1;
     if (this.hdmaBlocks <= 0 || this.hdmaDestination >= 0xa000) {
       this.hdmaBlocks = 0;
@@ -1899,13 +2339,48 @@ export class GameBoy {
     }
   }
 
-  updateRTC() {
-    if (this.rtc.halt) return;
-    const now = Date.now();
-    let elapsed = Math.floor((now - this.rtc.last) / 1000);
+  rtcFieldsValid() {
+    return this.rtc.seconds < 60 && this.rtc.minutes < 60 && this.rtc.hours < 24;
+  }
+
+  incrementRTCSecond() {
+    const seconds = this.rtc.seconds;
+    this.rtc.seconds = (seconds + 1) & 0x3f;
+    if (seconds !== 59) return;
+    this.rtc.seconds = 0;
+
+    const minutes = this.rtc.minutes;
+    this.rtc.minutes = (minutes + 1) & 0x3f;
+    if (minutes !== 59) return;
+    this.rtc.minutes = 0;
+
+    const hours = this.rtc.hours;
+    this.rtc.hours = (hours + 1) & 0x1f;
+    if (hours !== 23) return;
+    this.rtc.hours = 0;
+    this.rtc.days += 1;
+    if (this.rtc.days > 511) {
+      this.rtc.days = 0;
+      this.rtc.carry = true;
+    }
+  }
+
+  advanceRTC(elapsed) {
+    // Invalid register values are legal on MBC3 hardware. They increment in
+    // their native 6/6/5-bit counters and only carry at 59/59/23; overflowing
+    // an invalid maximum such as 63 does not carry into the next register.
+    // Step only until the fields become ordinary clock values, then use an
+    // allocation-free bulk conversion for long offline intervals.
+    while (elapsed > 0 && !this.rtcFieldsValid()) {
+      this.incrementRTCSecond();
+      elapsed -= 1;
+    }
     if (elapsed <= 0) return;
-    this.rtc.last += elapsed * 1000;
-    let total = this.rtc.seconds + this.rtc.minutes * 60 + this.rtc.hours * 3600 + this.rtc.days * 86400 + elapsed;
+    let total = this.rtc.seconds
+      + this.rtc.minutes * 60
+      + this.rtc.hours * 3600
+      + this.rtc.days * 86400
+      + elapsed;
     this.rtc.days = Math.floor(total / 86400);
     total %= 86400;
     this.rtc.hours = Math.floor(total / 3600);
@@ -1916,6 +2391,18 @@ export class GameBoy {
       this.rtc.days %= 512;
       this.rtc.carry = true;
     }
+  }
+
+  updateRTC(now = Date.now()) {
+    if (this.rtc.halt) return;
+    if (now < this.rtc.last) {
+      this.rtc.last = now;
+      return;
+    }
+    const elapsed = Math.floor((now - this.rtc.last) / 1000);
+    if (elapsed <= 0) return;
+    this.rtc.last += elapsed * 1000;
+    this.advanceRTC(elapsed);
   }
 
   latchRTC() {
@@ -1934,22 +2421,37 @@ export class GameBoy {
   }
 
   writeRTC(register, value) {
-    this.updateRTC();
-    if (register === 0x08) this.rtc.seconds = value;
-    else if (register === 0x09) this.rtc.minutes = value;
-    else if (register === 0x0a) this.rtc.hours = value;
+    const now = Date.now();
+    this.updateRTC(now);
+    if (register === 0x08) {
+      this.rtc.seconds = value & 0x3f;
+      // Writing seconds resets the divider. Other RTC registers deliberately
+      // preserve this phase.
+      this.rtc.last = now;
+      this.rtc.subsecond = 0;
+    }
+    else if (register === 0x09) this.rtc.minutes = value & 0x3f;
+    else if (register === 0x0a) this.rtc.hours = value & 0x1f;
     else if (register === 0x0b) this.rtc.days = (this.rtc.days & 0x100) | value;
     else {
+      const wasHalted = this.rtc.halt;
+      const willHalt = !!(value & 0x40);
       this.rtc.days = (this.rtc.days & 0xff) | ((value & 1) << 8);
-      this.rtc.halt = !!(value & 0x40);
       this.rtc.carry = !!(value & 0x80);
+      if (!wasHalted && willHalt) {
+        this.rtc.subsecond = Math.max(0, Math.min(999, now - this.rtc.last));
+      } else if (wasHalted && !willHalt) {
+        this.rtc.last = now - (this.rtc.subsecond || 0);
+      }
+      this.rtc.halt = willHalt;
     }
-    this.rtc.last = Date.now();
     this.batteryDirty = true;
   }
 
   readAPU(register) {
-    this.flushAPU();
+    // Like the undocumented PCM taps, sound-register reads sample the APU at
+    // the midpoint of the CPU read M-cycle rather than its trailing edge.
+    this.flushAPU(2);
     if (register >= 0x30 && register <= 0x3f) {
       if (this.ch3.enabled) {
         if (this.model === "dmg" && this.ch3.waveAccess <= 0) return 0xff;
@@ -1977,7 +2479,10 @@ export class GameBoy {
   }
 
   writeAPU(register, value) {
-    this.flushAPU();
+    // Sound-register writes land halfway through the CPU write M-cycle. The
+    // final two base clocks must therefore execute with the new register
+    // value, not the old one.
+    this.flushAPU(2);
     if (
       register === 0x15
       || register === 0x1f
@@ -1985,11 +2490,22 @@ export class GameBoy {
     ) return;
     if (register === 0x26) {
       if (!(value & 0x80)) {
+        const postWriteClocks = this.apuPendingClocks;
         for (let i = 0x10; i <= 0x25; i += 1) this.io[i] = 0;
         this.apuReset(this.model === "dmg");
+        this.apuPendingClocks = postWriteClocks;
         this.io[0x26] = 0;
       } else {
+        const wasPowered = !!(this.io[0x26] & 0x80);
         this.io[0x26] = 0x80;
+        if (!wasPowered) {
+          // Powering the APU on during the high half of its DIV clock leaves
+          // the first falling edge disconnected from the frame sequencer.
+          // Production CGB silicon therefore delays all length, sweep, and
+          // envelope phases by one 512 Hz event in this case.
+          this.audioFrameStep = 0;
+          this.apuSkipFrameEvent = this.apuDividerSignal();
+        }
         this.refreshAudioSteps();
       }
       return;
@@ -2021,6 +2537,13 @@ export class GameBoy {
     ) {
       this.ch1.enabled = false;
     }
+    if (register === 0x12 && this.ch1.enabled) {
+      this.applyEnvelopeWriteGlitch(this.ch1, value, previous);
+    } else if (register === 0x17 && this.ch2.enabled) {
+      this.applyEnvelopeWriteGlitch(this.ch2, value, previous);
+    } else if (register === 0x21 && this.ch4.enabled) {
+      this.applyEnvelopeWriteGlitch(this.ch4, value, previous);
+    }
     this.io[register] = value;
     if (register === 0x13 || register === 0x14) {
       this.updateSquareStep(this.ch1, 0x13, 0x14);
@@ -2036,7 +2559,10 @@ export class GameBoy {
     if (register === 0x20) this.ch4.length = 64 - (value & 0x3f);
     if (register === 0x12 && (value & 0xf8) === 0) this.ch1.enabled = false;
     if (register === 0x17 && (value & 0xf8) === 0) this.ch2.enabled = false;
-    if (register === 0x1a && !(value & 0x80)) this.ch3.enabled = false;
+    if (register === 0x1a && !(value & 0x80)) {
+      this.ch3.enabled = false;
+      this.ch3.currentSample = 0;
+    }
     if (register === 0x21 && (value & 0xf8) === 0) this.ch4.enabled = false;
     if (register === 0x14) {
       if (value & 0x80) {
@@ -2053,6 +2579,7 @@ export class GameBoy {
       this.applyLengthControl(this.ch2, previous, value, 64, !!(value & 0x80));
     }
     if (register === 0x1e && (value & 0x80)) {
+      const wasEnabled = this.ch3.enabled;
       this.prepareTriggeredLength(this.ch3, previous, value);
       if (this.model === "dmg" && this.ch3.enabled && this.ch3.timer <= 2) {
         const source = ((this.ch3.wavePosition + 1) >> 1) & 0x0f;
@@ -2068,22 +2595,25 @@ export class GameBoy {
       this.ch3.phase = 0;
       this.ch3.wavePosition = 0;
       this.ch3.waveAccess = 0;
+      if (!wasEnabled) this.ch3.currentSample = 0;
       this.ch3.timer = this.ch3.timerPeriod + 6;
     }
     if (register === 0x1e) {
       this.applyLengthControl(this.ch3, previous, value, 256, !!(value & 0x80));
     }
     if (register === 0x23 && (value & 0x80)) {
+      const wasEnabled = this.ch4.enabled;
       this.prepareTriggeredLength(this.ch4, previous, value);
       this.updateNoiseStep();
       this.ch4.enabled = (this.io[0x21] & 0xf8) !== 0;
       if (this.ch4.length === 0) this.ch4.length = 64;
       this.ch4.volume = this.io[0x21] >> 4;
       this.ch4.envCounter = (this.io[0x21] & 7) || 8;
-      this.ch4.envRunning = (this.io[0x21] & 7) !== 0;
+      this.ch4.envRunning = this.ch4.enabled
+        && (this.model === "cgb" || (this.io[0x21] & 7) !== 0);
       this.ch4.lfsr = 0x7fff;
       this.ch4.phase = 0;
-      this.ch4.timer = this.ch4.timerPeriod;
+      this.ch4.timer = this.noiseTriggerPeriod() + (wasEnabled ? 8 : 0);
     }
     if (register === 0x23) {
       this.applyLengthControl(this.ch4, previous, value, 64, !!(value & 0x80));
@@ -2108,6 +2638,28 @@ export class GameBoy {
     }
   }
 
+  applyEnvelopeWriteGlitch(channel, value, previous) {
+    // CGB-D's envelope counter is wired directly to NRx2. Changing period or
+    // direction while a channel is live can clock or invert the current
+    // volume even though no frame-sequencer envelope step occurred.
+    let shouldTick = !!(value & 7) && !(previous & 7);
+    const directionChanged = !!((value ^ previous) & 8);
+    if ((value & 0x0f) === 8 && (previous & 0x0f) === 8) shouldTick = true;
+    if (directionChanged) {
+      if (value & 8) {
+        channel.volume = !(previous & 7)
+          ? channel.volume ^ 0x0f
+          : (0x0e - channel.volume) & 0x0f;
+        shouldTick = false;
+      } else {
+        channel.volume = (0x10 - channel.volume) & 0x0f;
+      }
+    }
+    if (shouldTick) {
+      channel.volume = (channel.volume + ((value & 8) ? 1 : -1)) & 0x0f;
+    }
+  }
+
   prepareTriggeredLength(channel, previous, value) {
     const enablingLength = !(previous & 0x40) && !!(value & 0x40);
     if (enablingLength && (this.audioFrameStep & 1) === 1 && channel.length === 1) {
@@ -2118,14 +2670,23 @@ export class GameBoy {
   }
 
   triggerSquare(channel, envelopeRegister) {
+    const wasEnabled = channel.enabled;
     channel.enabled = (this.io[envelopeRegister] & 0xf8) !== 0;
     if (channel.length === 0) channel.length = 64;
     channel.volume = this.io[envelopeRegister] >> 4;
     channel.envCounter = (this.io[envelopeRegister] & 7) || 8;
-    channel.envRunning = (this.io[envelopeRegister] & 7) !== 0;
+    channel.envRunning = channel.enabled
+      && (this.model === "cgb" || (this.io[envelopeRegister] & 7) !== 0);
     // Trigger resets the period timer but not the duty step counter.
     channel.phase = Math.floor(channel.phase * 8) / 8;
-    channel.timer = channel.timerPeriod;
+    channel.sampleSuppressed = channel.enabled && !wasEnabled;
+    // CGB-D pulse startup includes a three-clock pipeline delay. Restarting a
+    // live pulse reuses two stages of that pipeline, so it starts two clocks
+    // earlier while retaining its duty phase.
+    channel.timer = channel.timerPeriod
+      + (wasEnabled ? 1 : 7)
+      + (this.doubleSpeed ? 1 : 0)
+      + ((4 - this.apuSquarePhase) & 3);
     if (channel === this.ch1) {
       channel.shadow = this.squareFrequency(0x13, 0x14);
       const pace = (this.io[0x10] >> 4) & 7;
@@ -2147,10 +2708,25 @@ export class GameBoy {
     return shift >= 14 ? 0x7fffffff : NOISE_PERIODS[nr43 & 7] << shift;
   }
 
+  noiseTriggerPeriod() {
+    const nr43 = this.io[0x22];
+    const divisor = nr43 & 7;
+    const shift = nr43 >> 4;
+    if (shift >= 14) return 0x7fffffff;
+    if (divisor === 0) {
+      // Divisor zero is implemented by a background 1 MHz counter, not by a
+      // literal eight-clock reload. Its first selected-bit edge is 8 +
+      // 4*2^shift clocks away, with the 1 MHz phase retained across starts.
+      return 8 + (4 << shift) + this.apuSquarePhase;
+    }
+    return this.noiseTimerPeriod();
+  }
+
   updateSquareStep(channel, lowRegister, highRegister) {
     if (!channel) return;
     const frequency = this.squareFrequency(lowRegister, highRegister);
     channel.timerPeriod = Math.max(4, (2048 - frequency) * 4);
+    if (channel.justReloaded) channel.timer = channel.timerPeriod;
     channel.phaseStep = 131072 / Math.max(1, 2048 - frequency) / this.audioRate;
   }
 
@@ -2180,10 +2756,11 @@ export class GameBoy {
     this.flushAPU();
   }
 
-  flushAPU() {
-    const clocks = this.apuPendingClocks;
+  flushAPU(deferredClocks = 0) {
+    const deferred = Math.min(this.apuPendingClocks, deferredClocks);
+    const clocks = this.apuPendingClocks - deferred;
     if (clocks <= 0) return;
-    this.apuPendingClocks = 0;
+    this.apuPendingClocks = deferred;
     this.advanceAPU(clocks);
   }
 
@@ -2192,6 +2769,8 @@ export class GameBoy {
     // next waveform/sample event rather than touching four channel timers on
     // every individual clock. Events are still resolved in hardware order:
     // all channel timers first, then the DAC sample for that same T-cycle.
+    this.ch1.justReloaded = false;
+    this.ch2.justReloaded = false;
     while (clocks > 0) {
       const powered = !!(this.io[0x26] & 0x80);
       const clocksToSample = Math.max(
@@ -2202,35 +2781,48 @@ export class GameBoy {
       if (powered) {
         advance = Math.min(
           advance,
-          Math.max(1, this.ch1.timer),
-          Math.max(1, this.ch2.timer),
-          Math.max(1, this.ch3.timer),
-          Math.max(1, this.ch4.timer),
+          this.ch1.enabled ? Math.max(1, this.ch1.timer) : advance,
+          this.ch2.enabled ? Math.max(1, this.ch2.timer) : advance,
+          this.ch3.enabled ? Math.max(1, this.ch3.timer) : advance,
+          this.ch4.enabled ? Math.max(1, this.ch4.timer) : advance,
         );
-        this.ch1.timer -= advance;
-        this.ch2.timer -= advance;
-        this.ch3.timer -= advance;
-        this.ch4.timer -= advance;
-        this.ch3.waveAccess = Math.max(0, this.ch3.waveAccess - advance);
+        if (this.ch1.enabled) this.ch1.timer -= advance;
+        if (this.ch2.enabled) this.ch2.timer -= advance;
+        if (this.ch3.enabled) {
+          this.ch3.timer -= advance;
+          this.ch3.waveAccess = Math.max(0, this.ch3.waveAccess - advance);
+        }
+        if (this.ch4.enabled) this.ch4.timer -= advance;
       }
       this.integrateAudioLevel(advance);
+      if (powered) this.apuSquarePhase = (this.apuSquarePhase + advance) & 3;
       clocks -= advance;
 
       if (powered) {
-        if (this.ch1.timer <= 0) {
+        if (this.ch1.enabled && this.ch1.timer <= 0) {
           this.ch1.timer += this.ch1.timerPeriod;
           this.ch1.dutyPosition = (this.ch1.dutyPosition + 1) & 7;
+          this.ch1.duty = this.io[0x11] >> 6;
+          this.ch1.sampleSuppressed = false;
+          this.ch1.justReloaded = clocks === 0;
         }
-        if (this.ch2.timer <= 0) {
+        if (this.ch2.enabled && this.ch2.timer <= 0) {
           this.ch2.timer += this.ch2.timerPeriod;
           this.ch2.dutyPosition = (this.ch2.dutyPosition + 1) & 7;
+          this.ch2.duty = this.io[0x16] >> 6;
+          this.ch2.sampleSuppressed = false;
+          this.ch2.justReloaded = clocks === 0;
         }
-        if (this.ch3.timer <= 0) {
+        if (this.ch3.enabled && this.ch3.timer <= 0) {
           this.ch3.timer += this.ch3.timerPeriod;
           this.ch3.wavePosition = (this.ch3.wavePosition + 1) & 31;
+          const byte = this.io[0x30 + (this.ch3.wavePosition >> 1)];
+          this.ch3.currentSample = (this.ch3.wavePosition & 1)
+            ? byte & 0x0f
+            : byte >> 4;
           this.ch3.waveAccess = 1;
         }
-        if (this.ch4.timer <= 0) {
+        if (this.ch4.enabled && this.ch4.timer <= 0) {
           this.ch4.timer += this.ch4.timerPeriod;
           const bit = (this.ch4.lfsr & 1) ^ ((this.ch4.lfsr >> 1) & 1);
           this.ch4.lfsr = (this.ch4.lfsr >> 1) | (bit << 14);
@@ -2244,6 +2836,10 @@ export class GameBoy {
 
   clockAPUFrameSequencer() {
     if (!(this.io[0x26] & 0x80)) return;
+    if (this.apuSkipFrameEvent) {
+      this.apuSkipFrameEvent = false;
+      return;
+    }
     const step = this.audioFrameStep;
     if ((step & 1) === 0) this.clockLengths();
     if (step === 2 || step === 6) this.clockSweeps();
@@ -2300,8 +2896,8 @@ export class GameBoy {
   clockEnvelopes() {
     const channels = [[this.ch1, 0x12], [this.ch2, 0x17], [this.ch4, 0x21]];
     for (const [channel, register] of channels) {
-      const period = this.io[register] & 7;
-      if (!channel.enabled || !channel.envRunning || period === 0) continue;
+      const period = (this.io[register] & 7) || 8;
+      if (!channel.enabled || !channel.envRunning) continue;
       channel.envCounter -= 1;
       if (channel.envCounter <= 0) {
         channel.envCounter = period;
@@ -2321,18 +2917,14 @@ export class GameBoy {
     outputs[3] = 0;
     for (let index = 0; index < 2; index += 1) {
       const channel = index === 0 ? this.ch1 : this.ch2;
-      const dutyRegister = index === 0 ? 0x11 : 0x16;
-      if (!channel.enabled) continue;
-      const duty = this.io[dutyRegister] >> 6;
+      if (!channel.enabled || channel.sampleSuppressed) continue;
       outputs[index] = (
-        DUTY_PATTERNS[duty][channel.dutyPosition] ? 1 : -1
+        DUTY_PATTERNS[channel.duty][channel.dutyPosition] ? 1 : -1
       ) * (channel.volume / 15);
     }
 
     if (this.ch3.enabled && (this.io[0x1a] & 0x80)) {
-      const wavePosition = this.ch3.wavePosition;
-      const byte = this.io[0x30 + (wavePosition >> 1)];
-      let sample = (wavePosition & 1) ? (byte & 0x0f) : (byte >> 4);
+      let sample = this.ch3.currentSample;
       const level = (this.io[0x1c] >> 5) & 3;
       sample = level === 0 ? 0 : sample >> (level - 1);
       outputs[2] = sample / 7.5 - 1;
@@ -2657,8 +3249,18 @@ export class GameBoy {
 
     if (x === 1) {
       if (y === 6 && z === 6) {
-        if (!this.ime && (this.ie & this.iflag & 0x1f)) this.haltBug = true;
-        else this.halted = true;
+        if (!this.ime && (this.ie & this.iflag & 0x1f)) {
+          if (this.imeDelay === 1) {
+            // EI followed immediately by HALT is its own hardware case: IME
+            // becomes active at this boundary and the buffered interrupt
+            // returns to the HALT opcode itself. Subsequent pending sources are
+            // then serviced before HALT is re-fetched.
+            this.pc = (this.pc - 1) & 0xffff;
+            this.halted = true;
+          } else {
+            this.haltBug = true;
+          }
+        } else this.halted = true;
         return 4;
       }
       this.writeReg(y, this.readReg(z));
@@ -2911,6 +3513,7 @@ export class GameBoy {
   exportState() {
     if (!this.hasROM) return null;
     this.flushAPU();
+    this.catchUpPixelTransfer();
     const scalars = {};
     for (const key of STATE_SCALARS) scalars[key] = this[key];
     return {
@@ -2928,6 +3531,8 @@ export class GameBoy {
         bgPalette: this.bgPalette.slice(),
         objPalette: this.objPalette.slice(),
         framebuffer: this.framebuffer.slice(),
+        lineSprites: this.lineSprites.map((sprite) => ({ ...sprite })),
+        lineSpriteStalls: this.lineSpriteStalls.slice(),
       },
       rtc: { ...this.rtc },
       latchedRTC: this.latchedRTC ? { ...this.latchedRTC } : null,
@@ -2976,6 +3581,38 @@ export class GameBoy {
       || !restore(this.objPalette, memory.objPalette)
       || !restore(this.framebuffer, memory.framebuffer)
     ) return false;
+    this.rebuildDecodedTiles();
+    if (this.ppuMode === 3 && this.ly < SCREEN_HEIGHT) {
+      const savedSprites = Array.isArray(memory.lineSprites)
+        ? memory.lineSprites
+        : null;
+      if (savedSprites) {
+        this.lineSprites.length = 0;
+        for (let index = 0; index < Math.min(10, savedSprites.length); index += 1) {
+          const saved = savedSprites[index];
+          const sprite = this.lineSpritePool[index];
+          sprite.index = saved.index;
+          sprite.y = saved.y;
+          sprite.rawX = saved.rawX;
+          sprite.x = saved.x;
+          sprite.tile = saved.tile;
+          sprite.attr = saved.attr;
+          this.lineSprites.push(sprite);
+        }
+      } else {
+        this.prepareLineObjects(this.ly);
+      }
+      if (memory.lineSpriteStalls?.length === this.lineSpriteStalls.length) {
+        this.lineSpriteStalls.set(memory.lineSpriteStalls);
+      } else {
+        for (let x = 0; x <= this.ppuTransferX && x < SCREEN_WIDTH; x += 1) {
+          this.lineSpriteStalls[x] = 0;
+        }
+      }
+    } else {
+      this.lineSprites.length = 0;
+      this.lineSpriteStalls.fill(0);
+    }
     this.rtc = { ...this.rtc, ...(snapshot.rtc ?? {}) };
     this.latchedRTC = snapshot.latchedRTC ? { ...snapshot.latchedRTC } : null;
     this.ch1 = { ...this.ch1, ...(snapshot.channels?.ch1 ?? {}) };

@@ -434,7 +434,10 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.doesNotMatch(source, /"CGB hardware|>CGB<|CGB LCD color correction|Original CGB startup/);
   assert.match(source, /className=\{`pause-overlay pause-/);
   assert.match(source, /audio\.filterCoefficient \* audio\.previousOutputLeft/);
-  assert.match(source, /audioHighPassCoefficient\(context\.sampleRate\)/);
+  assert.match(
+    source,
+    /audioHighPassCoefficient\([\s\S]*context\.sampleRate,[\s\S]*modelRef\.current/,
+  );
   assert.match(source, /'button, input, select, textarea, \[contenteditable="true"\]'/);
   assert.doesNotMatch(source, /load-boot-rom|Choose a .{0,20}boot ROM|accept=["'][^"']*\.bin/i);
   assert.match(css, /html,[\s\S]*body\s*\{[^}]*overflow:\s*hidden[^}]*overscroll-behavior:\s*none/s);

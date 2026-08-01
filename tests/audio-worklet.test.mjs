@@ -43,6 +43,15 @@ function makeStereo(frames, phase = 0) {
   return samples;
 }
 
+test("host filter uses the measured DMG and GBC capacitor curves", () => {
+  const source = readFileSync(
+    new URL("../app/Emulator.jsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /model === "cgb" \? 0\.998943 : 0\.999958/);
+  assert.match(source, /audioHighPassCoefficient\([\s\S]*modelRef\.current/);
+});
+
 test("audio worklet starts cleanly and corrects queue drift without deleting samples", () => {
   const processor = loadProcessor();
   processor.port.onmessage({
@@ -67,7 +76,7 @@ test("audio worklet starts cleanly and corrects queue drift without deleting sam
   assert.equal(processor.underruns, 0);
   assert.ok(left.some((sample) => sample !== 0));
   assert.ok(right.some((sample) => sample !== 0));
-  assert.ok(processor.playbackRate >= 0.996 && processor.playbackRate <= 1.008);
+  assert.ok(processor.playbackRate >= 0.9975 && processor.playbackRate <= 1.0025);
 
   for (let callback = 0; callback < 12; callback += 1) {
     const refill = makeStereo(128, callback * 128);
@@ -163,5 +172,5 @@ test("balanced worklet follows the exact Game Boy frame cadence without drift", 
     averageQueue > 1000 && averageQueue < 1500,
     `unexpected average queue depth: ${averageQueue}`,
   );
-  assert.ok(processor.playbackRate >= 0.996 && processor.playbackRate <= 1.008);
+  assert.ok(processor.playbackRate >= 0.9975 && processor.playbackRate <= 1.0025);
 });

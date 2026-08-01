@@ -15,9 +15,10 @@ import { getEmbeddedBootROM } from "../app/lib/embeddedBios.js";
 const PASS_REGISTERS = [3, 5, 8, 13, 21, 34];
 const FAIL_REGISTERS = [0x42, 0x42, 0x42, 0x42, 0x42, 0x42];
 // A few mapper and sprite-timing ROMs intentionally perform long exhaustive
-// sweeps and report success between 40 and 49 million T-cycles. Sixty million
-// keeps those deterministic completions distinct from genuine hangs.
-const DEFAULT_CYCLE_BUDGET = 60_000_000;
+// sweeps and report success beyond 70 million T-cycles on the individual
+// Blargg builds. Eighty million avoids misclassifying those deterministic
+// completions as hangs while keeping genuinely stuck ROMs bounded.
+const DEFAULT_CYCLE_BUDGET = 80_000_000;
 let EmulatorClass = GameBoy;
 
 function collectRoms(root) {
@@ -77,6 +78,7 @@ function runUntilResult(path, {
   cycleBudget = DEFAULT_CYCLE_BUDGET,
   protocol = "auto",
   boot = true,
+  dumpRam = 0,
 } = {}) {
   const rom = new Uint8Array(readFileSync(path));
   const emulator = new EmulatorClass(model);
@@ -113,7 +115,7 @@ function runUntilResult(path, {
     }
   }
   const elapsed = performance.now() - start;
-  return {
+  const output = {
     path,
     model,
     result: result ?? "timeout",
@@ -122,6 +124,11 @@ function runUntilResult(path, {
     serial: (emulator.serialOutput.trim() || memoryText.trim()),
     registers: registerSignature(emulator),
   };
+  if (dumpRam > 0 && output.result !== "pass") {
+    output.ram = Array.from({ length: dumpRam }, (_, index) =>
+      emulator.read8(0xc000 + index, true));
+  }
+  return output;
 }
 
 function printResult(root, result) {
@@ -137,6 +144,9 @@ function printResult(root, result) {
     + `${relative(root, result.path)} · ${(result.cycles / 1_000_000).toFixed(2)} M cycles`
     + ` · ${result.milliseconds.toFixed(1)} ms${detail}${registers}`,
   );
+  if (result.ram) {
+    console.log(`     C000 ${result.ram.map((value) => value.toString(16).padStart(2, "0")).join(" ")}`);
+  }
 }
 
 function parseArguments(argv) {
@@ -149,6 +159,8 @@ function parseArguments(argv) {
     boot: true,
     quiet: false,
     baselineRef: null,
+    model: null,
+    dumpRam: 0,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -159,10 +171,15 @@ function parseArguments(argv) {
     else if (argument === "--no-boot") options.boot = false;
     else if (argument === "--quiet") options.quiet = true;
     else if (argument === "--baseline-ref") options.baselineRef = argv[++index];
+    else if (argument === "--model") options.model = argv[++index];
+    else if (argument === "--dump-ram") options.dumpRam = Number(argv[++index]);
     else if (!options.root) options.root = resolve(argument);
     else throw new Error(`Unexpected argument: ${argument}`);
   }
   if (!options.root) throw new Error("Provide the root directory containing test ROMs.");
+  if (options.model && !["dmg", "cgb"].includes(options.model)) {
+    throw new Error("--model must be dmg or cgb.");
+  }
   return options;
 }
 
@@ -188,28 +205,34 @@ if (!files.length) throw new Error("No matching .gb or .gbc test ROMs were found
 const results = [];
 for (const path of files) {
   if (options.suite === "mooneye") {
-    const model = modelForMooneye(path);
+    const model = options.model || modelForMooneye(path);
     if (!model) continue;
     const result = runUntilResult(path, {
       model,
       cycleBudget: options.cycleBudget,
       protocol: "mooneye",
       boot: options.boot,
+      dumpRam: options.dumpRam,
     });
     results.push(result);
     if (!options.quiet) printResult(options.root, result);
   } else {
     const header = readFileSync(path);
-    const model = (header[0x143] & 0x80)
+    const model = options.model || ((header[0x143] & 0x80)
       || extname(path).toLowerCase() === ".gbc"
       || /cgb/i.test(path)
       ? "cgb"
-      : "dmg";
+      : "dmg");
     const result = runUntilResult(path, {
       model,
       cycleBudget: options.cycleBudget,
-      protocol: "blargg",
+      // SameSuite deliberately terminates with the Fibonacci-register
+      // software breakpoint also used by Mooneye. Keep that signal enabled;
+      // treating it as a Blargg-only ROM otherwise turns completed results
+      // into 60-million-cycle timeouts.
+      protocol: options.suite === "samesuite" ? "auto" : "blargg",
       boot: options.boot,
+      dumpRam: options.dumpRam,
     });
     results.push(result);
     if (!options.quiet) printResult(options.root, result);

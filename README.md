@@ -9,8 +9,9 @@ JavaScript. No third-party emulator core or WebAssembly binary is used.
 - DMG and native GBC hardware modes
 - MBC1, MBC2, MBC3/RTC, and MBC5 cartridges; MBC3 clock latch, halt,
   carry/overflow, elapsed-time restoration, and browser persistence are covered
-- Event-driven scanline PPU with variable mode 3 timing, window, sprites,
-  priority, palettes, VRAM/OAM bus lockouts, timed OAM DMA and GBC HDMA
+- Event-driven, dot-sensitive PPU transfer pipeline with mid-line register
+  effects, dynamic window and sprite stalls, priority, palettes, VRAM/OAM bus
+  lockouts, timed OAM DMA, and GBC HDMA
 - Four-channel stereo audio synthesis with hardware-rate channel timers,
   DIV-driven envelopes/length/sweep, exact sample-window integration, and
   sample-rate-correct analog-style DC coupling
@@ -28,7 +29,7 @@ JavaScript. No third-party emulator core or WebAssembly binary is used.
 - One-file backups for every cached battery/RTC save and save-state slot, with
   validated, transactional restore and no ROM or preference replacement
 - Running-game confirmation before console changes and close-tab protection
-- Bounded AudioWorklet output with four buffering profiles, adaptive backlog
+- Bounded AudioWorklet output with five buffering profiles, adaptive backlog
   correction through interpolated resampling, soft underrun recovery,
   underrun/trim diagnostics, and stereo-safe fallback buffering
 - Off, one-frame, two-frame, and automatic presentation frame skipping; the
@@ -79,7 +80,7 @@ database, or cloud configuration. Cartridge files, preferences, and battery
 saves remain local to the browser and are never uploaded.
 
 The external conformance runners in `scripts/` accept locally sourced test-ROM
-directories. See `EMULATION_AUDIT.md` for the v2.0.0 methodology, measured
+  directories. See `EMULATION_AUDIT.md` for the v2.1.0 methodology, measured
 results, hardware-revision exclusions, and deliberately unclaimed areas.
 
 ## Releases

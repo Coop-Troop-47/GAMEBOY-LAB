@@ -380,6 +380,7 @@ function waitForVisualStability(element, {
 }
 
 const AUDIO_LATENCY_PRESETS = {
+  minimal: { label: "Minimal", target: 384, maximum: 1536 },
   low: { label: "Low", target: 768, maximum: 2816 },
   balanced: { label: "Balanced", target: 1280, maximum: 3328 },
   stable: { label: "Stable", target: 2560, maximum: 5120 },
@@ -411,8 +412,13 @@ const FRAME_SKIP_PRESETS = {
 const MINIMUM_BUTTON_PRESS_MS = 50;
 const APU_CLOCK_RATE = 4194304;
 
-function audioHighPassCoefficient(sampleRate) {
-  return Math.pow(0.999958, APU_CLOCK_RATE / Math.max(1, sampleRate));
+function audioHighPassCoefficient(sampleRate, model = "dmg") {
+  // The CGB/MGB output capacitor discharges much faster than the original
+  // DMG circuit. Convert each measured per-T-cycle charge factor to the
+  // browser's actual output rate instead of applying one console's curve to
+  // both models.
+  const hardwareFactor = model === "cgb" ? 0.998943 : 0.999958;
+  return Math.pow(hardwareFactor, APU_CLOCK_RATE / Math.max(1, sampleRate));
 }
 
 const AUDIO_WORKLET_SOURCE = `
@@ -557,7 +563,10 @@ class GbLabAudioProcessor extends AudioWorkletProcessor {
     }
     const queueDepth = this.buffered + (this.started ? 2 : 0);
     const queueError = (queueDepth - this.target) / Math.max(1, this.target);
-    const desiredRate = Math.max(.996, Math.min(1.008, 1 + queueError * .004));
+    // Browser and Game Boy clocks are independent, but on modern hardware
+    // their steady-state error is tiny. Keep correction inaudible and
+    // symmetrical; the queue ceiling handles genuine scheduling stalls.
+    const desiredRate = Math.max(.9975, Math.min(1.0025, 1 + queueError * .002));
     this.playbackRate += (desiredRate - this.playbackRate) * .08;
     let peak = 0;
     for (let index = 0; index < left.length; index += 1) {
@@ -2635,7 +2644,10 @@ export default function Emulator() {
         playbackPhase: 0,
         playbackRate: 1,
         ramp: 0,
-        filterCoefficient: audioHighPassCoefficient(context.sampleRate),
+        filterCoefficient: audioHighPassCoefficient(
+          context.sampleRate,
+          modelRef.current,
+        ),
         previousInputLeft: 0,
         previousInputRight: 0,
         previousOutputLeft: 0,
@@ -2674,7 +2686,7 @@ export default function Emulator() {
             audio.ramp = 0;
           }
           const queueError = (bufferedFrames - audio.target) / Math.max(1, audio.target);
-          const desiredRate = Math.max(.996, Math.min(1.008, 1 + queueError * .004));
+          const desiredRate = Math.max(.9975, Math.min(1.0025, 1 + queueError * .002));
           audio.playbackRate += (desiredRate - audio.playbackRate) * .08;
           for (let index = 0; index < left.length; index += 1) {
             let leftSample = 0;
@@ -3954,15 +3966,22 @@ export default function Emulator() {
     }
     const started = buttonPressStartedRef.current.get(button);
     const elapsed = started === undefined ? MINIMUM_BUTTON_PRESS_MS : window.performance.now() - started;
-    const release = () => {
-      emulatorRef.current.setButton(button, false);
-      buttonPressStartedRef.current.delete(button);
+    // Input follows the physical key immediately. Only the optional shell
+    // animation is held long enough to remain visible; coupling both used to
+    // extend very short taps by as much as 50 ms inside the emulated joypad.
+    emulatorRef.current.setButton(button, false);
+    buttonPressStartedRef.current.delete(button);
+    const releaseVisual = () => {
       releaseTimers.delete(button);
       if (showMotion) setButtonVisual(button, false);
     };
+    if (!showMotion) {
+      releaseTimers.delete(button);
+      return;
+    }
     const remaining = Math.max(0, MINIMUM_BUTTON_PRESS_MS - elapsed);
-    if (remaining === 0) release();
-    else releaseTimers.set(button, window.setTimeout(release, remaining));
+    if (remaining === 0) releaseVisual();
+    else releaseTimers.set(button, window.setTimeout(releaseVisual, remaining));
   }, [setButtonVisual]);
 
   const pressButton = useCallback((button, pressed) => {
@@ -4945,6 +4964,10 @@ export default function Emulator() {
   useEffect(() => {
     audioFilterRef.current = audioFilter;
     const audio = audioRef.current;
+    audio.filterCoefficient = audioHighPassCoefficient(
+      audio.context?.sampleRate ?? emulatorRef.current.audioRate ?? 48000,
+      model,
+    );
     audio.previousInputLeft = 0;
     audio.previousInputRight = 0;
     audio.previousOutputLeft = 0;
@@ -4965,7 +4988,7 @@ export default function Emulator() {
         filterCoefficient: audio.filterCoefficient,
       });
     }
-  }, [audioFilter]);
+  }, [audioFilter, model]);
 
   const fallbackContentWidth = model === "cgb" ? 230 : 258;
   const resolvedFrameWidth = screenGeometry.frameWidth
@@ -5789,7 +5812,7 @@ export default function Emulator() {
                   <span>Audio buffering</span>
                   <b>{AUDIO_LATENCY_PRESETS[audioLatency].label}</b>
                 </div>
-                <div className="segmented four-way" aria-label="Audio buffering">
+                <div className="segmented five-way" aria-label="Audio buffering">
                   {Object.entries(AUDIO_LATENCY_PRESETS).map(([value, preset]) => (
                     <button
                       key={value}
@@ -5809,11 +5832,12 @@ export default function Emulator() {
                   <p>
                     Sets how much completed stereo audio is ready on the browser&apos;s dedicated
                     audio thread before playback starts. At 48 kHz, the targets are roughly
-                    16 ms for Low, 27 ms for Balanced, 53 ms for Stable, and 85 ms for Deep.
+                    8 ms for Minimal, 16 ms for Low, 27 ms for Balanced, 53 ms for Stable,
+                    and 85 ms for Deep.
                     The browser and audio device add their own output latency after this queue.
                   </p>
                   <p>
-                    Low reacts fastest but has the least protection from a busy main thread.
+                    Minimal and Low react fastest but have the least protection from a busy main thread.
                     Stable and Deep absorb longer scheduling stalls. The queue now has a strict
                     ceiling, while a narrow interpolated clock correction continuously follows
                     the selected target. This repays small scheduling errors without abruptly
@@ -5823,7 +5847,8 @@ export default function Emulator() {
                     An underrun means the audio thread ran out of samples and had to restart after
                     refilling; an overrun means stale buffered time was trimmed to stop latency
                     growing. Try Stable if sound drops. Use Low only when the diagnostic counters
-                    remain at zero.
+                    remain at zero. Minimal is intended for fast desktops with a reliable AudioWorklet;
+                    the fallback audio path may use one 512-sample browser block instead.
                   </p>
                   <p><b>Recommended:</b> Balanced for desktop use; Stable for busy or power-limited systems.</p>
                 </details>
@@ -5952,8 +5977,9 @@ export default function Emulator() {
                     coupling capacitors. The filter removes constant speaker offset and slow
                     baseline drift from the four-channel mix, which reduces power-on and register
                     transition clicks without muting legitimate square, wave, or noise content.
-                    Its coefficient is recalculated from the browser&apos;s actual sample rate,
-                    keeping the analog time constant consistent from 44.1 to 192 kHz.
+                        Separate measured DMG and GBC capacitor curves are converted from the
+                        hardware T-cycle domain to the browser&apos;s actual sample rate, keeping
+                        each console&apos;s analog time constant consistent from 44.1 to 192 kHz.
                   </p>
                   <p>
                     It runs after NR50/NR51 volume and stereo routing, so duty timing, envelope,

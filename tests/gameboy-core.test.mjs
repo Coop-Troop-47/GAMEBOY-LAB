@@ -86,6 +86,31 @@ test("reproduces the HALT bug when IME is clear and an interrupt is pending", ()
   assert.equal(gb.b, 2);
 });
 
+test("returns buffered EI/HALT interrupts to the HALT opcode", () => {
+  const rom = makeRom([0xfb, 0x76, 0x00]);
+  rom[0x40] = 0xd9;
+  const gb = new GameBoy("cgb");
+  gb.loadROM(rom);
+  gb.pc = 0x150;
+  gb.ime = false;
+  gb.ie = 3;
+  gb.iflag = 3;
+
+  gb.step();
+  assert.equal(gb.imeDelay, 1);
+  gb.step();
+  assert.equal(gb.pc, 0x151);
+  assert.equal(gb.halted, true);
+  assert.equal(gb.ime, true);
+
+  gb.step();
+  assert.equal(gb.pc, 0x40);
+  gb.step();
+  assert.equal(gb.pc, 0x151);
+  gb.step();
+  assert.equal(gb.pc, 0x48, "the next source is serviced before HALT is re-fetched");
+});
+
 test("locks the CPU on unassigned SM83 opcodes while peripherals keep running", () => {
   const gb = new GameBoy("dmg");
   gb.loadROM(makeRom([0xd3, 0x04]));
@@ -244,6 +269,47 @@ test("round-trips complete save states without confusing them with cartridge sav
   assert.equal(other.importState(state), false);
 });
 
+test("restores an in-flight pixel transfer without replaying sprite stalls", () => {
+  const gb = new GameBoy("dmg");
+  gb.loadROM(makeRom([0x00, 0x18, 0xfd]));
+  gb.io[0x40] = 0x93;
+  gb.oam[0] = 16;
+  gb.oam[1] = 40;
+  gb.oam[2] = 0;
+  gb.oam[3] = 0;
+  gb.write8(0x8000, 0xff, true);
+  gb.write8(0x8001, 0xff, true);
+
+  let guard = 0;
+  while (!(gb.ppuMode === 3 && gb.ppuTransferStall > 0) && guard < 100_000) {
+    gb.step();
+    if (gb.ppuMode === 3) gb.activateLivePixelTransfer();
+    guard += 1;
+  }
+  assert.ok(guard < 100_000, "fixture reaches an active object-fetch stall");
+  const state = gb.exportState();
+
+  for (let step = 0; step < 3000; step += 1) gb.step();
+  const expected = {
+    cycles: gb.cycles,
+    pc: gb.pc,
+    ly: gb.ly,
+    dot: gb.ppuDot,
+    framebuffer: createHash("sha256").update(gb.framebuffer).digest("hex"),
+  };
+
+  assert.equal(gb.importState(state), true);
+  for (let step = 0; step < 3000; step += 1) gb.step();
+  assert.equal(gb.cycles, expected.cycles);
+  assert.equal(gb.pc, expected.pc);
+  assert.equal(gb.ly, expected.ly);
+  assert.equal(gb.ppuDot, expected.dot);
+  assert.equal(
+    createHash("sha256").update(gb.framebuffer).digest("hex"),
+    expected.framebuffer,
+  );
+});
+
 test("persists battery RAM and RTC metadata while preserving standard .sav bytes", () => {
   const mbc3 = new GameBoy("dmg");
   mbc3.loadROM(makeRom([], { type: 0x10, ram: 2 }));
@@ -303,6 +369,76 @@ test("advances, latches, halts, and overflows the MBC3 real-time clock", () => {
     gb.writeRTC(0x0c, 0x80);
     now += 1000;
     assert.equal(gb.readRTC(0x08), 4);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("preserves MBC3 sub-second phase and hardware invalid-value rollover rules", () => {
+  const originalNow = Date.now;
+  let now = 2_000_000;
+  Date.now = () => now;
+  try {
+    const gb = new GameBoy("dmg");
+    gb.loadROM(makeRom([], { type: 0x10, ram: 2 }));
+
+    gb.writeRTC(0x08, 10);
+    now += 100;
+    gb.writeRTC(0x09, 20);
+    now += 899;
+    gb.updateRTC();
+    assert.equal(gb.rtc.seconds, 10, "non-seconds writes preserve the RTC divider phase");
+    now += 1;
+    gb.updateRTC();
+    assert.equal(gb.rtc.seconds, 11);
+
+    now += 600;
+    gb.writeRTC(0x0c, 0x40);
+    now += 5000;
+    gb.writeRTC(0x0c, 0x00);
+    now += 399;
+    gb.updateRTC();
+    assert.equal(gb.rtc.seconds, 11, "halted clocks resume with their fractional phase intact");
+    now += 1;
+    gb.updateRTC();
+    assert.equal(gb.rtc.seconds, 12);
+
+    gb.writeRTC(0x09, 7);
+    gb.writeRTC(0x08, 60);
+    now += 1000;
+    gb.updateRTC();
+    assert.equal(gb.rtc.seconds, 61);
+    assert.equal(gb.rtc.minutes, 7);
+
+    gb.writeRTC(0x08, 63);
+    now += 1000;
+    gb.updateRTC();
+    assert.equal(gb.rtc.seconds, 0);
+    assert.equal(gb.rtc.minutes, 7, "invalid seconds overflow without carrying");
+
+    gb.writeRTC(0x09, 60);
+    gb.writeRTC(0x08, 59);
+    now += 1000;
+    gb.updateRTC();
+    assert.equal(gb.rtc.seconds, 0);
+    assert.equal(gb.rtc.minutes, 61);
+
+    gb.writeRTC(0x0a, 28);
+    gb.writeRTC(0x09, 59);
+    gb.writeRTC(0x08, 59);
+    now += 1000;
+    gb.updateRTC();
+    assert.equal(gb.rtc.hours, 29);
+    assert.equal(gb.rtc.minutes, 0);
+
+    gb.writeRTC(0x0b, 5);
+    gb.writeRTC(0x0a, 31);
+    gb.writeRTC(0x09, 59);
+    gb.writeRTC(0x08, 59);
+    now += 1000;
+    gb.updateRTC();
+    assert.equal(gb.rtc.hours, 0);
+    assert.equal(gb.rtc.days, 5, "invalid hours overflow without carrying into the day counter");
   } finally {
     Date.now = originalNow;
   }
@@ -449,7 +585,7 @@ test("clocks the noise channel at the hardware NR43 rate used by impact effects"
   gb.writeAPU(0x22, 0x00);
   gb.writeAPU(0x23, 0x80);
   const initialLfsr = gb.ch4.lfsr;
-  for (let cycle = 0; cycle < 8; cycle += 1) gb.tickAPU();
+  for (let cycle = 0; cycle < 12; cycle += 1) gb.tickAPU();
   assert.notEqual(gb.ch4.lfsr, initialLfsr);
   assert.equal(gb.ch4.timer, 8);
 
@@ -460,8 +596,8 @@ test("clocks the noise channel at the hardware NR43 rate used by impact effects"
   assert.equal(gb.ch4.lfsr, lockedLfsr);
 });
 
-test("keeps zero-period envelopes silent and clocks channel-one frequency sweep", () => {
-  const gb = new GameBoy("dmg");
+test("treats zero-period envelopes as period eight and clocks channel-one frequency sweep", () => {
+  const gb = new GameBoy("cgb");
   gb.io[0x26] = 0x80;
   gb.writeAPU(0x16, 0);
   gb.writeAPU(0x17, 0x08);
@@ -469,7 +605,7 @@ test("keeps zero-period envelopes silent and clocks channel-one frequency sweep"
   assert.equal(gb.ch2.volume, 0);
   assert.equal(gb.ch2.envCounter, 8);
   for (let index = 0; index < 8; index += 1) gb.clockEnvelopes();
-  assert.equal(gb.ch2.volume, 0);
+  assert.equal(gb.ch2.volume, 1);
 
   gb.writeAPU(0x10, 0x11);
   gb.writeAPU(0x12, 0xf0);
@@ -485,9 +621,9 @@ test("renders a complete 160×144 frame and raises VBlank", () => {
   const gb = new GameBoy("dmg");
   gb.loadROM(makeRom([0x18, 0xfe]));
   gb.io[0x47] = 0xe4;
-  gb.vram[0] = 0xff;
-  gb.vram[1] = 0xff;
-  gb.vram[0x1800] = 0;
+  gb.write8(0x8000, 0xff, true);
+  gb.write8(0x8001, 0xff, true);
+  gb.write8(0x9800, 0, true);
   const ready = gb.runFrame();
   assert.equal(ready, true);
   assert.equal(gb.framebuffer.length, 160 * 144 * 4);
