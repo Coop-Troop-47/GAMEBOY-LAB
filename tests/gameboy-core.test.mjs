@@ -689,6 +689,22 @@ test("completes a short live transfer without leaking the previous row", () => {
   assert.notEqual(gb.framebuffer32[159], 0x01020304);
 });
 
+test("keeps a DMG palette write in the measured in-flight transfer phase", () => {
+  const gb = new GameBoy("dmg");
+  gb.loadROM(makeRom());
+  gb.ppuMode = 3;
+  gb.ly = 0;
+  gb.ppuTransferDot = 0;
+  gb.ppuDot = 0;
+  gb.ppuTransferWarmup = 12;
+  gb.io[0x47] = 0xfc;
+
+  gb.activateLivePixelTransfer(0x47);
+
+  assert.equal(gb.ppuTransferLive, true);
+  assert.equal(gb.ppuTransferWarmup, 18);
+});
+
 test("raises the GBC line-144 OAM STAT source one M-cycle before VBlank", () => {
   const cgb = new GameBoy("cgb");
   cgb.loadROM(makeRom([], { cgb: 0x80 }));

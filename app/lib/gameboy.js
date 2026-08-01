@@ -2049,10 +2049,10 @@ export class GameBoy {
       || this.ly >= SCREEN_HEIGHT
     ) return;
     if (this.model === "dmg" && register === 0x47) {
-      // DMG palette writes keep four additional dots of the in-flight fetch
+      // DMG palette writes keep six additional dots of the in-flight fetch
       // visible before the new mapping reaches the LCD. This is a transfer
       // phase adjustment only; the line's fixed timing remains unchanged.
-      this.ppuTransferWarmup = 16;
+      this.ppuTransferWarmup = 18;
     }
     // The first mode-3 register write is the point at which the old fast
     // renderer must hand ownership to the dot-timed fetcher. Replaying from

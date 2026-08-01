@@ -1,12 +1,12 @@
 {
-  "version": "2.5.2",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.5.2/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.5.2",
+  "version": "2.5.3",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.5.3/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.5.3",
   "changes": [
-    "DMG raster effects are cleaner: mid-line palette changes now match the reference hardware more closely, reducing misplaced colour bands in wipes, status bars and scene transitions.",
-    "DMG reference-picture matching improved from 92.9402% to 94.1665% (+1.23 percentage points, +1.32% relative).",
-    "A short live scanline can no longer reveal pixels left over from the previous row, so palette and window effects stay visually continuous.",
-    "Six representative games kept identical frame/CPU checksums; available browser headroom measured +1.65% at the median (1.12%–3.08% per game).",
-    "The complete project suite remains green, with no conformance timeouts. v3.0 stays reserved for broader revision-aware accuracy work."
+    "DMG colour changes that happen mid-line now look smoother in raster wipes, status bars, scene transitions and split-screen effects.",
+    "DMG reference-picture matching improved from 94.1665% to 94.6823% (+0.52 percentage points, +0.55% relative).",
+    "The two palette-change reference scenes improved by about 6.2 percentage points each, while the other scenes held their previous scores.",
+    "Six representative games kept identical frame/CPU checksums, so gameplay timing and existing saves remain unchanged.",
+    "The full project suite is green (60/60) with no SameSuite timeouts; v3.0 remains reserved for the broader accuracy milestone."
   ]
 }

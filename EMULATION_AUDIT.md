@@ -1,9 +1,32 @@
-# GAMEBOY LAB v2.5.2 Emulation Audit
+# GAMEBOY LAB v2.5.3 Emulation Audit
 
-This audit starts with the v2.5.2 DMG raster-timing patch. The user-facing
-notes in `release/v2.5.2.md` describe the practical result without internal emulator
+This audit starts with the v2.5.3 DMG raster-timing patch. The user-facing
+notes in `release/v2.5.3.md` describe the practical result without internal emulator
 terminology; this document keeps the measurement detail and release gates for
 maintainers.
+
+## v2.5.3 delta
+
+### DMG palette handoff interval
+
+The DMG live-transfer path now keeps the old palette mapping visible for the
+measured six-dot in-flight interval after a mode-3 BGP write. This is limited to
+the DMG palette register and does not change line length, CPU timing, or the
+native CGB renderer. In games, the practical effect is cleaner raster wipes,
+status panels, split-screen bars, and scene transitions that change colours
+while a scanline is already being drawn.
+
+| Test group | v2.5.2 | v2.5.3 | Change |
+| --- | ---: | ---: | ---: |
+| Project tests | 59/59 | 60/60 | +1 focused handoff regression |
+| Mealybug DMG picture match | 94.1665% | 94.6823% | **+0.5158 pp / +0.55% relative** |
+| SameSuite full set | 55/78, 0 timeouts | 55/78, 0 timeouts | held |
+
+The two palette-change cases rose by 6.1719 and 6.2066 percentage points
+(6.83% and 7.05% relative); every other reference case held its v2.5.2 score.
+Six representative game checksums remained identical. No host-performance
+headline is claimed for this patch because ordinary write-free lines stay on
+the same fast path; the measured change is visual accuracy only.
 
 ## v2.5.2 delta
 
