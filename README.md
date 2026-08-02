@@ -1,166 +1,192 @@
 # GAMEBOY LAB
 
-A browser-based Game Boy and Game Boy Color emulator written from scratch in
-JavaScript. No third-party emulator core or WebAssembly binary is used.
+GAMEBOY LAB is a private, offline-first Game Boy and Game Boy Color player for
+the browser. Open one local HTML file, choose a cartridge from the library, and
+play with the feel of a small, carefully drawn console around the game screen.
+There is no account, server, upload step, or online dependency during play.
 
-## Features
+![GAMEBOY LAB running a game](docs/images/running-console.png)
 
-- Complete LR35902 opcode and CB-opcode decoder
-- DMG and native GBC hardware modes
-- Production hardware behavior is selected automatically; historical CGB
-  revision profiles are maintainer-only conformance diagnostics, not a user
-  setting
-- MBC1, MBC2, MBC3/RTC, and MBC5 cartridges; MBC3 clock latch, halt,
-  carry/overflow, elapsed-time restoration, and browser persistence are covered
-- Event-driven, dot-sensitive PPU transfer pipeline with mid-line register
-  effects, dynamic window and sprite stalls, priority, palettes, VRAM/OAM bus
-  lockouts, timed OAM DMA, and GBC HDMA
-- Four-channel stereo audio synthesis with hardware-rate channel timers,
-  DIV-driven envelopes/length/sweep, exact sample-window integration, and
-  sample-rate-correct analog-style DC coupling
-- M-cycle CPU bus behavior, timer reload/glitch timing, interrupt cancellation,
-  delayed `EI`, HALT bug, STOP, and GBC double-speed switching
-- Sharp and hardware-grid LCD modes with independently adjustable ghosting
-- Remappable keyboard controls with optional physical-button motion
-- Pointer and touch controls, volume/mute controls, and an OS-following theme
-- Console and large screen-only presentation modes
-- Fractional scaling at 90% by default, with optional whole-device integer scaling
-- Clearly separated cartridge `.sav` files and three browser-local snapshot slots
-- Library cards show battery-save support, stored-save status, and all three
-  save-state slots without opening the save drawer
-- Browser-local battery RAM/RTC persistence with standard `.sav` import/export
-- One-file backups for every cached battery/RTC save and save-state slot, with
-  validated, transactional restore and no ROM or preference replacement
-- Running-game confirmation before console changes and close-tab protection
-- Bounded AudioWorklet output with five buffering profiles, adaptive backlog
-  correction through interpolated resampling, soft underrun recovery,
-  underrun/trim diagnostics, and stereo-safe fallback buffering
-- Off, one-frame, two-frame, and automatic presentation frame skipping; the
-  emulated CPU, PPU, APU, timers, input, and saves always remain full speed
-- Toggleable main-screen technical monitor for emulated/presented/skipped FPS,
-  audio queue health, CPU/PPU state, and cartridge/RTC details
-- Batched event-domain execution, reusable render/audio buffers, precomputed
-  GBC color conversion, and separate CPU/base-speed clock domains
-- Engine-level serial-link and GBC infrared endpoints for external integrations
-- Header/logo lockout checks and model-specific startup animation
-- Guarded physical cartridge swaps with neutral LCD fade, power-light sequencing,
-  and drawer pauses queued to the first safe BIOS frame
-- Embedded production DMG/GBC startup firmware plus the supplied DMG-0 and MGB
-  diagnostic BIOS profiles used by the maintainer conformance suites; BIOS
-  selection is never exposed in the app
-- Every `.gb` and `.gbc` cartridge in `SELECT_ROMS/` embedded into the local
-  library, with offline Libretro cover artwork, detail cards, and filterable
-  tabletop layouts
-- Original GBC manual palette choices for monochrome cartridges
-- A self-contained, offline-capable HTML build at `public/gbc-lab.html`
-- Semantic release versioning and a non-blocking update card that checks a
-  public version manifest, then downloads the newest private GitHub release
+## Start playing
 
-## Controls
+1. Download or build [`public/gbc-lab.html`](public/gbc-lab.html).
+2. Open it in a current desktop browser (Chrome, Edge, Firefox, or Safari).
+3. Open **Library**, choose a cartridge, and press **Play**.
 
-- D-pad: arrow keys
-- A: X
-- B: Z
-- Start: Enter
-- Select: Shift
+The repository includes a small set of legally sourced local cartridges and
+artwork for development. Add your own ROMs through the library when you want
+to use a different collection. GAMEBOY LAB does not include Nintendo game
+software; use only ROMs and firmware you are legally allowed to use.
 
-## Development
+![The empty console screen](docs/images/console-empty.png)
+
+## The useful bits
+
+- **DMG and GBC modes.** Switch between the original grey Game Boy and the
+  Game Boy Color presentation. Compatible monochrome games can use the
+  original GBC startup palette combinations.
+- **A console that gets out of the way.** Keep the illustrated handheld around
+  the LCD, or switch to a large screen-only view. The transition keeps the same
+  live LCD rather than replacing it with a second, blurry copy.
+- **LCD options that stay readable.** Choose a sharp image, a DMG dot-and-gap
+  grid, a normal GBC LCD treatment, and optional ghosting. Ghosting is its own
+  control, so it can be used without the grid.
+- **Flexible sizing.** Whole-device integer scaling is available when you want
+  a crisp, even pixel scale. Turn it off for a 90% starting size and use the
+  manual scale control for a more exact fit.
+- **Controls that feel physical.** Arrow keys move the D-pad; **X**, **Z**,
+  **Enter**, and **Shift** are A, B, Start, and Select. Optional button motion,
+  remapping, pointer controls, mute, volume, buffering, and frame-presentation
+  choices live in the drawers.
+- **Saves that are hard to confuse.** A real cartridge save is the game’s own
+  battery-backed progress (`.sav`). A save state is an emulator snapshot of the
+  whole machine. Both are kept separately, labelled separately, and can be
+  backed up together from the save drawer.
+- **A local library.** Filter by GB/GBC, search titles, sort by name, size, or
+  recently played, and choose detail cards or a minimal scrollable tabletop.
+  Cartridge art and model colour are carried into the insertion animation.
+- **Offline by design.** Preferences, battery RAM, RTC data, and snapshots are
+  stored in this browser. The one-file build embeds the app, supplied BIOS
+  profiles, library metadata, and artwork so it can travel on a USB drive.
+
+![The cartridge library drawer](docs/images/library.png)
+
+## Keyboard controls
+
+| Game Boy control | Default key |
+| --- | --- |
+| D-pad | Arrow keys |
+| A | `X` |
+| B | `Z` |
+| Start | `Enter` |
+| Select | `Shift` |
+
+Arrow-key scrolling is prevented while the emulator has focus. Every binding
+can be changed in **Options → Controls** and the current key legend is shown
+inside the drawer.
+
+## Saves and backups
+
+Open the cartridge’s **Save options** from the small cartridge hint above the
+console. The two save systems are intentionally separate:
+
+- **Cartridge save** is the portable `.sav`/RTC data that a game writes itself.
+- **Save states** are three instant snapshots containing CPU, video, audio,
+  timers, mapper state, and cartridge RAM at one moment.
+
+The **Application data** section can export all cached cartridge saves and save
+states as one backup file. Restoring it replaces matching local data only after
+a confirmation. Individual `.sav` files remain available for use in another
+emulator.
+
+## Display, sound, and advanced controls
+
+The two drawers keep everyday choices separate from emulation choices:
+
+- **Options** contains theme, pause-on-menu, controls, LCD appearance, scale,
+  sound, library view, and application backup/restore.
+- **Emulation settings** contains timing and presentation controls for people
+  who need them: audio buffering profiles, frame presentation skip, and the
+  optional technical readout.
+
+The technical readout is deliberately off the game by default. When enabled
+on a wide enough window it reports emulated and presented FPS, skipped frames,
+audio queue health, cartridge details, ROM size, and RTC state. It is a monitor,
+not a requirement for playing.
+
+## Firmware and legality
+
+GAMEBOY LAB can run with a supplied legal startup BIOS. Production DMG/GBC
+firmware and maintainer-only diagnostic profiles are embedded in the build;
+the app does not expose a BIOS picker or an upload field. Do not redistribute
+Nintendo firmware or game ROMs without the rights to do so.
+
+## Troubleshooting
+
+- **The file opens but audio is silent:** click once in the page, then unmute
+  in Options. Browsers require a user gesture before audio can start.
+- **A game is too large or too small:** turn off integer scaling and adjust the
+  manual scale slider; the reset button returns to the default 90% size.
+- **A battery game starts without its progress:** open Save options and import
+  its `.sav`, or restore an application-data backup made by GAMEBOY LAB.
+- **The library is empty:** open Library and add a legally sourced `.gb` or
+  `.gbc` file. It will be identified, given a model colour, and added without
+  replacing the currently running cartridge.
+
+## For developers
+
+The source is a from-scratch JavaScript core with a single-file Vite build.
+There is no emulator WebAssembly dependency. The public artifact is generated
+from `app/` and `src/`-free React/CSS UI modules into
+[`public/gbc-lab.html`](public/gbc-lab.html).
 
 ```bash
 npm install
-npm run sync:artwork
+npm run sync:artwork       # optional: refresh the local Libretro artwork cache
 npm run dev
-npm test
-npm run benchmark:core -- --baseline-ref v2.5.7
-node scripts/samesuite-matrix.mjs --boot-dir /path/to/SameBoy/BootROMs \
-  --source-root "$PWD" /path/to/SameSuite --cycles 80000000
-node scripts/sameboy-matrix.mjs --runner /tmp/sameboy-conformance-runner \
-  --source-root /path/to/SameBoy --boot-dir /path/to/SameBoy/BootROMs \
-  /path/to/SameSuite --cycles 80000000
-npm run compare:conformance -- \
-  --lab-report /tmp/gameboy-lab-samesuite.json \
-  --reference-report /tmp/sameboy-samesuite.json
+npm test                   # builds the portable file, then runs the full suite
+npm run lint
+npm run benchmark:core
 ```
 
-Core benchmark trials run in fresh Node processes by default, so JIT warm-up,
-heap growth, and the previous cartridge cannot bias a later cartridge. Use
-`--no-isolate` only for a quick same-process profile; release figures should
-use the default isolated mode and report the exact frames, warm-up, and trial
-count.
+The conformance tools accept locally supplied test-suite and BIOS directories.
+They record ROM hashes, BIOS hashes and sizes, model/revision selection, cycle
+budget, timeout/crash status, and pass-detection protocol. Unknown CGB
+revisions are rejected rather than silently becoming CGB-E. The current
+controlled SameSuite checkout has 76 non-SGB ROMs: GAMEBOY LAB records 60/76
+and SameBoy 1.0.3 records 65/76 under the same explicit matrix. Those are
+observed suite results, not a claim that either core is “more accurate”; the
+remaining cases are revision-sensitive APU fixtures and are retained for the
+next accuracy pass.
 
-`npm run sync:artwork` refreshes the local cover-art cache in
-`SELECT_ROMS/artwork/` from the matching Libretro Game Boy and Game Boy Color
-thumbnail repositories. Normal builds use only those local PNGs and make no
-network requests.
+The reproducible native throughput smoke comparison uses the same two ROMs,
+120 warm-up frames, 600 measured frames, nine rotated-order trials, and a
+post-boot baseline for all three backends. It excludes DOM, CSS, shaders, and
+host audio so it measures core execution plus framebuffer delivery only. On
+the audit machine the medians were:
 
-`npm run build` regenerates the only distributable,
-`public/gbc-lab.html`. The project has no deployment adapter, server runtime,
-database, or cloud configuration. Cartridge files, preferences, and battery
-saves remain local to the browser and are never uploaded.
+| ROM / model | GAMEBOY LAB | SameBoy 1.0.3 | Gambatte-libretro |
+| --- | ---: | ---: | ---: |
+| Tetris / DMG | 792.70 FPS | 405.94 FPS | 3,628.48 FPS |
+| Tetris DX / CGB | 665.75 FPS | 477.36 FPS | 3,996.78 FPS |
 
-The external conformance runners in `scripts/` accept locally sourced test-ROM
-directories. Every runner requires an explicit boot policy; this prevents a
-production embedded BIOS from being mistaken for a revision-controlled
-comparison input. `samesuite-matrix.mjs` routes revision-labelled APU ROMs to the
-matching maintainer-only CGB profile, so its score is separate from the
-production-profile score. A revision-aware comparison is only considered valid
-when both reports use `--boot-dir` and `compare:conformance` confirms identical
-ROM hashes, revision selection, BIOS hashes and sizes, model, cycle budget, and
-pass detection. The cycle budget is expressed in DMG base-clock T-cycles
-(4.194304 MHz equivalent) for both cores; the SameBoy adapter converts its
-internal 8 MHz counter before enforcing it. A host wall-clock limit is recorded
-separately as a safety stop. The directory policy uses exact 0x900-byte CGB boot images;
-compact or truncated files are rejected rather than padded or silently
-substituted (the same rejection applies to a single explicit boot path). The
-SameBoy adapter must report the requested revision it received
-and the revision it actually selected. Single-image and no-boot runs remain
-diagnostic and are marked non-comparable. See `EMULATION_AUDIT.md` for the v3.0 methodology,
-measured results, hardware-revision exclusions, and deliberately unclaimed
-areas.
+Nine-trial p10–p90 spreads were 625.15–822.60 FPS for LAB DMG and
+577.73–741.97 FPS for LAB CGB. Every backend produced a stable per-run
+framebuffer hash, but hashes are not compared across cores because colour
+encoding and post-boot state differ. Run the harness with:
 
-LAB reports also content-address `app/lib/gameboy.js` and the embedded BIOS
-source. The commit identifies the checkout, while those file hashes identify
-the exact working-tree bytes actually measured; a comparison without that
-core-source manifest is rejected.
+```bash
+node scripts/three-way-benchmark.mjs \
+  --sameboy-runner /path/to/sameboy-frame-runner \
+  --gambatte-runner /path/to/gambatte-runner \
+  --gambatte-core /path/to/gambatte_libretro.dylib \
+  --frames 600 --warmup 120 --trials 9 \
+  --report /tmp/gameboy-lab-three-way.json
+```
 
-## Releases
+The full methodology, suite provenance, known failures, and intentionally
+unclaimed comparisons are in [`EMULATION_AUDIT.md`](EMULATION_AUDIT.md).
+The exact machine-readable smoke result is checked in at
+[`release/benchmarks/v3.0.1-three-way.json`](release/benchmarks/v3.0.1-three-way.json).
+Release-specific engineering notes live in [`release/`](release/); the app’s
+short, player-facing update text is maintained separately in
+[`release/update-manifest.json`](release/update-manifest.json) and mirrored to
+the public manifest used by `app/version.js`.
 
-The updater has two separate changelogs:
+## Release maintenance
 
-- **In-app update changelog:** the `changes` array in
-  `release/update-manifest.json`. This file is the repository copy of the
-  public `update-manifest.json` Gist fetched by `app/version.js`. These are the
-  concise changes shown inside GAMEBOY LAB before the user downloads an
-  update. The app displays at most six non-empty entries. Keep these notes
-  plain-language and game-focused: say what a player will notice, include a
-  measured percentage when one exists, and avoid implementation names such as
-  cache, FIFO, or register pipeline.
-- **GitHub release changelog:** the matching file in `release/` is supplied as
-  the GitHub release body. This is the longer release page for people viewing
-  the repository. GAMEBOY LAB does not read this text, so changing it does not
-  update the in-app changelog.
+Keep the two changelogs independent:
 
-Keep both descriptions accurate, but maintain them independently. For every
-release:
+1. `release/update-manifest.json` is the six-line, plain-language note shown in
+   the app. Say what a player will notice and include a measured percentage
+   only when the comparison is reproducible.
+2. `release/vX.Y.Z.md` is the developer-facing GitHub release body. Put the
+   nuanced engineering summary and tables at the top, then methodology,
+   caveats, and test commands.
 
-1. Increment the version in `app/version.js`, `package.json`, and the two
-   top-level package version fields in `package-lock.json`.
-2. Update `release/update-manifest.json` with the same version, matching
-   release/download URLs, and up to six short user-facing `changes`.
-3. Run `npm test`, `npm run lint`, and `git diff --check`. `npm test` rebuilds
-   the distributable at `public/gbc-lab.html`.
-4. Commit the exact tested state, create the matching annotated version tag,
-   and push the branch and tag.
-5. Create the GitHub release using the matching detailed notes in `release/`
-   as its body, and upload `public/gbc-lab.html` as `gbc-lab.html`.
-6. Verify that the uploaded asset is available and matches the local SHA-256.
-7. **Last**, copy `release/update-manifest.json` to the public manifest Gist.
-   Publishing the Gist earlier can advertise an update before its download is
-   ready.
-8. Read the Gist back and confirm its version, download URL, notes URL, and
-   `changes` exactly match the release.
-
-The manifest Gist ID and fetch URL live in `app/version.js`. The manifest
-metadata is public, while the standalone follows the visibility of its GitHub
-repository and release. Update checks fail silently while offline; downloading
-a private release requires the owner to be signed in to GitHub.
+For a release, bump `app/version.js`, `package.json`, and the two package-lock
+version fields; run `npm test`, `npm run lint`, and `git diff --check`; commit
+the built `public/gbc-lab.html`; create and push the matching tag; upload the
+same HTML file to GitHub Releases; verify its SHA-256; then mirror the manifest
+to the public Gist. The manifest must never advertise a download before that
+asset exists.

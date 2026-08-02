@@ -1,13 +1,13 @@
 {
-  "version": "3.0.0",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v3.0.0/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v3.0.0",
+  "version": "3.0.1",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v3.0.1/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v3.0.1",
   "changes": [
-    "Scrolling scenes and status panels on original Game Boy games now keep their tile rows lined up more reliably; the focused raster check improved by 2.03%.",
-    "Monochrome games running on Game Boy Color keep vertical scrolling and mid-frame colour changes in the correct phase, reducing shifted or torn effects.",
-    "Wave-channel mute behavior is corrected, helping prevent stale clicks and low-frequency tails when games turn that channel down.",
-    "Measured host headroom is up by 23.83% in a DMG run and 14.07% in a GBC run, while game speed and frame checksums stay unchanged.",
-    "The regression suite is green (73/73), with production-model acceptance at 66/66 applicable checks and no timeouts.",
-    "The portable one-file build includes the supplied legal BIOS files, library artwork, saves, and the same emulator core."
+    "Audio now hands off cleanly when a cartridge starts, so the end of the GBC startup jingle is no longer clipped and short underruns recover more quietly.",
+    "The options drawers now use one consistent centre-grown green selection bar, with even spacing around LCD and sound sliders.",
+    "The one-file offline library, artwork, supplied legal BIOS profiles, browser saves, snapshots, and cartridge-switch protections stay together in this build.",
+    "In a nine-trial core-only smoke run, median throughput was 792.70 FPS on the DMG Tetris case and 665.75 FPS on the CGB Tetris DX case; actual game speed is unchanged.",
+    "The controlled conformance harness reports 60/76 for GAMEBOY LAB and 65/76 for SameBoy 1.0.3 with failures, timeouts, crashes, and unsupported cases separated instead of hidden.",
+    "The full verification suite is green (99/99), with 70/70 applicable Mooneye checks and no conformance timeouts."
   ]
 }

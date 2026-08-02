@@ -190,17 +190,22 @@ The Mealybug run is a visual/structural diagnostic (1/24 pixel-exact and
 
 ### Performance rebaseline
 
-The previous **+26.13% DMG / +12.64% CGB** headline is superseded. The latest
-nine-trial paired run (120 warm-up frames, 600 measured frames, alternating
-baseline/current order, identical ROM hashes, model, framebuffer checksum,
-and core-only scope) measured a paired-trial median of **+25.09% DMG** and
-**+15.29% CGB** host throughput. The per-trial 10th–90th percentile spans were
-`+23.74%…+25.75%` (DMG) and `+14.38%…+21.13%` (CGB); the CGB run contains two
-visible host-noise outliers, so these are an observed benchmark range rather
-than a release promise. All frame checksums matched within each pair. This
-benchmark covers the emulator core, PPU framebuffer, and APU generation only;
-it excludes DOM, CSS, shaders, WebAudio, and UI work. The values remain held
-out of a release headline until the conformance comparison is explainable.
+The previous **+26.13% DMG / +12.64% CGB** headline is superseded. The final
+three-way smoke run used the same two ROM hashes, model selection, post-boot
+policy, 120 warm-up frames, 600 measured frames, and nine rotated-order trials
+for each backend. Median FPS was:
+
+| Case | GAMEBOY LAB | SameBoy 1.0.3 | Gambatte-libretro |
+| --- | ---: | ---: | ---: |
+| Tetris (DMG) | 792.70 | 405.94 | 3,628.48 |
+| Tetris DX (CGB) | 665.75 | 477.36 | 3,996.78 |
+
+LAB's p10–p90 ranges were `625.15–822.60` FPS (DMG) and `577.73–741.97`
+FPS (CGB); per-backend hashes were stable across all nine trials. These are
+host-throughput figures, not faster-than-hardware gameplay. The benchmark
+covers core execution, PPU framebuffer delivery, and APU generation only; it
+excludes DOM, CSS, shaders, WebAudio, and UI work. The older paired percentage
+headline is retained in the historical notes below, not used for this release.
 
 No release or “more accurate than SameBoy” claim is permitted until the
 SameSuite documentation/fixture discrepancy is resolved or explicitly

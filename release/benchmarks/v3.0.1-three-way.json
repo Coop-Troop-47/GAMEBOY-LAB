@@ -1,0 +1,243 @@
+{
+  "harness": "three-way-benchmark",
+  "harnessVersion": 1,
+  "frames": 600,
+  "warmup": 120,
+  "trials": 9,
+  "policy": {
+    "scope": "core execution plus native framebuffer delivery; no DOM, CSS, shader or host audio backend",
+    "boot": "none/post-boot for all three adapters",
+    "order": "rotated LAB/SameBoy/Gambatte order per trial",
+    "note": "Cross-core checksums are reported for reproducibility; differing checksums make no cross-core speed claim."
+  },
+  "adapters": {
+    "lab": {
+      "source": "app/lib/gameboy.js"
+    },
+    "sameboy": {
+      "runner": "sameboy-frame-runner-v103-noboot (local adapter)",
+      "label": "SameBoy"
+    },
+    "gambatte": {
+      "runner": "gambatte-runner-noboot (local adapter)",
+      "core": "gambatte_libretro.dylib (local build)",
+      "label": "Gambatte-libretro"
+    }
+  },
+  "cases": [
+    {
+      "cartridge": "Tetris (World) (Rev 1).gb",
+      "model": "dmg",
+      "romBytes": 32768,
+      "romSha256": "0d6535aef23969c7e5af2b077acaddb4a445b3d0df7bf34c8acef07b51b015c3",
+      "results": [
+        {
+          "label": "lab",
+          "medianFps": 792.7,
+          "p10Fps": 625.15,
+          "p90Fps": 822.6,
+          "minFps": 519.25,
+          "maxFps": 855.22,
+          "stddevFps": 97.31,
+          "variationPercent": 24.91,
+          "checksums": [
+            "cd0102ac",
+            "cd0102ac",
+            "cd0102ac",
+            "cd0102ac",
+            "cd0102ac",
+            "cd0102ac",
+            "cd0102ac",
+            "cd0102ac",
+            "cd0102ac"
+          ],
+          "outputStable": true,
+          "trials": [
+            779.58,
+            792.7,
+            754.82,
+            651.62,
+            800.25,
+            519.25,
+            792.96,
+            814.45,
+            855.22
+          ]
+        },
+        {
+          "label": "sameboy",
+          "medianFps": 405.94,
+          "p10Fps": 379.79,
+          "p90Fps": 429.34,
+          "minFps": 355.74,
+          "maxFps": 441.67,
+          "stddevFps": 23.53,
+          "variationPercent": 12.21,
+          "checksums": [
+            "c6c0a5e4",
+            "c6c0a5e4",
+            "c6c0a5e4",
+            "c6c0a5e4",
+            "c6c0a5e4",
+            "c6c0a5e4",
+            "c6c0a5e4",
+            "c6c0a5e4",
+            "c6c0a5e4"
+          ],
+          "outputStable": true,
+          "trials": [
+            405.94,
+            385.8,
+            410.4,
+            387.05,
+            355.74,
+            404.7,
+            426.26,
+            412.91,
+            441.67
+          ]
+        },
+        {
+          "label": "gambatte",
+          "medianFps": 3628.48,
+          "p10Fps": 3565.09,
+          "p90Fps": 3861.58,
+          "minFps": 3546.8,
+          "maxFps": 3885.92,
+          "stddevFps": 122.97,
+          "variationPercent": 8.17,
+          "checksums": [
+            "45a34bd7",
+            "45a34bd7",
+            "45a34bd7",
+            "45a34bd7",
+            "45a34bd7",
+            "45a34bd7",
+            "45a34bd7",
+            "45a34bd7",
+            "45a34bd7"
+          ],
+          "outputStable": true,
+          "trials": [
+            3628.48,
+            3779.48,
+            3569.66,
+            3604.68,
+            3546.8,
+            3855.49,
+            3771.34,
+            3591.5,
+            3885.92
+          ]
+        }
+      ]
+    },
+    {
+      "cartridge": "Tetris DX (World) (SGB Enhanced) (GB Compatible).gbc",
+      "model": "cgb",
+      "romBytes": 524288,
+      "romSha256": "d349dc93423c6abcd775d3b6a8797df715a44a42ec837afb21bf17ae43b40a9e",
+      "results": [
+        {
+          "label": "lab",
+          "medianFps": 665.75,
+          "p10Fps": 577.73,
+          "p90Fps": 741.97,
+          "minFps": 558.74,
+          "maxFps": 748.05,
+          "stddevFps": 62.54,
+          "variationPercent": 24.67,
+          "checksums": [
+            "e885690b",
+            "e885690b",
+            "e885690b",
+            "e885690b",
+            "e885690b",
+            "e885690b",
+            "e885690b",
+            "e885690b",
+            "e885690b"
+          ],
+          "outputStable": true,
+          "trials": [
+            582.48,
+            727.86,
+            676.55,
+            740.45,
+            646.78,
+            665.75,
+            748.05,
+            558.74,
+            654.28
+          ]
+        },
+        {
+          "label": "sameboy",
+          "medianFps": 477.36,
+          "p10Fps": 449.12,
+          "p90Fps": 498.3,
+          "minFps": 426.17,
+          "maxFps": 506.88,
+          "stddevFps": 23.67,
+          "variationPercent": 10.3,
+          "checksums": [
+            "e0b3e3c3",
+            "e0b3e3c3",
+            "e0b3e3c3",
+            "e0b3e3c3",
+            "e0b3e3c3",
+            "e0b3e3c3",
+            "e0b3e3c3",
+            "e0b3e3c3",
+            "e0b3e3c3"
+          ],
+          "outputStable": true,
+          "trials": [
+            496.16,
+            477.36,
+            476.68,
+            491.56,
+            506.88,
+            494.21,
+            426.17,
+            454.86,
+            462.64
+          ]
+        },
+        {
+          "label": "gambatte",
+          "medianFps": 3996.78,
+          "p10Fps": 3898.72,
+          "p90Fps": 4173.46,
+          "minFps": 3841.97,
+          "maxFps": 4248.83,
+          "stddevFps": 117.73,
+          "variationPercent": 6.87,
+          "checksums": [
+            "d5b35d4f",
+            "d5b35d4f",
+            "d5b35d4f",
+            "d5b35d4f",
+            "d5b35d4f",
+            "d5b35d4f",
+            "d5b35d4f",
+            "d5b35d4f",
+            "d5b35d4f"
+          ],
+          "outputStable": true,
+          "trials": [
+            4248.83,
+            3912.9,
+            3841.97,
+            3927.27,
+            4052.1,
+            3988.25,
+            4154.62,
+            3996.78,
+            4025.8
+          ]
+        }
+      ]
+    }
+  ]
+}

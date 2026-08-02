@@ -900,12 +900,12 @@ kbd {
 }
 
 .range-control {
-  margin-top: 16px;
+  margin: 16px 0 0;
   display: block;
 }
 
 .ghost-strength-control {
-  margin-bottom: 12px;
+  margin-bottom: 0;
 }
 
 .range-control > span {
@@ -2014,6 +2014,8 @@ html[data-theme="dark"] body {
 
 .sound-toggle,
 .preference-toggle {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   min-height: 43px;
   padding: 0 12px;
@@ -2028,9 +2030,32 @@ html[data-theme="dark"] body {
   text-transform: uppercase;
 }
 
+.sound-toggle::before,
+.preference-toggle::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  content: "";
+  background: var(--acid);
+  transform: scaleY(0);
+  transform-origin: center;
+  transition: transform 180ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.sound-toggle > *,
+.preference-toggle > * {
+  position: relative;
+  z-index: 1;
+}
+
 .sound-toggle.active,
 .preference-toggle.active {
-  box-shadow: inset 5px 0 0 var(--acid);
+  box-shadow: none;
+}
+
+.sound-toggle.active::before,
+.preference-toggle.active::before {
+  transform: scaleY(1);
 }
 
 .preference-toggle:disabled {
@@ -2114,7 +2139,7 @@ html[data-theme="dark"] body {
 }
 
 .manual-scale-control .range-control {
-  margin-top: 13px;
+  margin-top: 16px;
 }
 
 .manual-scale-control > div {
@@ -4486,8 +4511,8 @@ html[data-theme="dark"] body {
 }
 
 .dmg-contrast-control {
-  margin-top: 18px;
-  margin-bottom: 16px;
+  margin-top: 16px;
+  margin-bottom: 0;
   padding-top: 16px;
   border-top: 1px solid var(--line);
 }
@@ -4877,26 +4902,6 @@ html[data-theme="dark"] body {
   background: color-mix(in srgb, var(--cyan) 17%, transparent);
   box-shadow: 7px 7px 0 var(--cyan);
   transform: translate(-1px, -1px);
-}
-
-.app-behavior-section .preference-toggle {
-  position: relative;
-  overflow: hidden;
-}
-
-.app-behavior-section .preference-toggle::before {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 5px;
-  content: "";
-  background: var(--acid);
-  transform: scaleY(0);
-  transform-origin: center;
-  transition: transform 180ms cubic-bezier(.2, .8, .2, 1);
-}
-
-.app-behavior-section .preference-toggle.active::before {
-  transform: scaleY(1);
 }
 
 .app-data-summary p {
