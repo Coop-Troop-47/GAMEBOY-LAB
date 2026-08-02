@@ -43,12 +43,17 @@ function makeStereo(frames, phase = 0) {
   return samples;
 }
 
-test("host filter uses the measured DMG and GBC capacitor curves", () => {
+test("host filter keeps the production BIOS tail intact", () => {
   const source = readFileSync(
     new URL("../app/Emulator.jsx", import.meta.url),
     "utf8",
   );
-  assert.match(source, /model === "cgb" \? 0\.998943 : 0\.999958/);
+  // A previous CGB-only coefficient discharged the DC blocker too quickly
+  // and clipped the final decay of the GBC BIOS jingle. Revision-specific
+  // envelope experiments stay inside the diagnostic core profile instead of
+  // changing normal app audio.
+  assert.match(source, /const hardwareFactor = 0\.999958/);
+  assert.doesNotMatch(source, /0\.998943/);
   assert.match(source, /audioHighPassCoefficient\([\s\S]*modelRef\.current/);
 });
 

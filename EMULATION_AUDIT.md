@@ -1,10 +1,216 @@
 # GAMEBOY LAB v3.0 Emulation Audit
 
+## Harness correction — comparison held (2026-08-02)
+
+The older **64/76**, **60/76**, and **65/76** labels in the historical notes
+are not interchangeable results. The 64/76 reference label and the earlier
+60/76 LAB label were produced before the final paired manifest, boot, revision,
+and protocol evidence was frozen. They are retained below as history only;
+they are not accuracy evidence. The corrected 65/76 reference run is the only
+one used for comparison, and it is still **not a release claim** because the
+reference documentation and the reproducible reference behaviour disagree.
+
+### Controlled SameSuite inputs
+
+- SameSuite commit: `f15645fb049a47ea235f6d2c9a033e72d8087901` (2025-10-11).
+- 76 non-SGB ROMs were measured; two SGB/SGB2 files are explicitly excluded,
+  not counted as failures. The sorted ROM manifest is
+  `589528fa4273246504c38acc2dee8b7d03cdf8180c2c4fb3e2b2286fa8e993fb`.
+- Every case records its ROM byte count and SHA-256, model, requested
+  revision, selected revision, the complete revision-family candidate list,
+  boot-ROM path/hash, cycle budget, result code,
+  and terminal status. Unknown revision suffixes fail closed instead of being
+  silently assigned to CGB-E.
+- The SameSuite P/F protocol is strict: opcode `0x40`, result byte `P` or `F`,
+  and the expected Fibonacci register tuple must agree. Missing or malformed
+  output is `protocol-error`, not a fail.
+- The current report schema is harness version 8. It adds explicit excluded
+  ROM records, measured-versus-unsupported counts, per-case boot evidence,
+  wall-clock safety limits for the external adapter, and paired-trial
+  improvement statistics. Boot policy is now mandatory on the command line;
+  a single embedded BIOS cannot be used for a revision-specific case, and the
+  external adapter's JSON result must agree with its process exit code.
+
+### Harness validation patch (2026-08-02)
+
+The matrix was re-run after those gates were made executable. The v8 LAB and
+SameBoy reports both contain 76 measured ROMs, the same manifest hash
+`589528fa4273246504c38acc2dee8b7d03cdf8180c2c4fb3e2b2286fa8e993fb`, zero
+timeouts/crashes/errors/protocol errors, and zero requested/selected revision
+mismatches. LAB remains **60/76** and SameBoy remains **65/76**; the numbers
+did not move when the harness changed, which is the expected result of a
+measurement correction rather than an emulator change. The harness regression
+suite now covers implicit boot rejection, unknown suffix handling, and a
+reference adapter that lies about its exit status, an adapter that claims the
+wrong requested revision, and a truncated boot image. Both final reports
+record 2304-byte boot images for every measured case.
+
+The follow-up hardening pass makes a single `--boot-path` or `--boot none` run
+explicitly diagnostic: it now exits non-zero and sets `bootPolicyVerified` to
+false instead of being eligible for a revision score. An invalid explicit boot
+path is rejected before the adapter is launched; it can no longer accidentally
+turn into a no-boot run. The adapter must also
+report the requested revision it received as well as its actual model and
+selected revision. Directory-based CGB boot inputs are now size-checked at
+exactly 0x900 bytes; a compact, truncated, missing, or otherwise invalid file
+is recorded as unsupported and invalidates the boot-policy gate instead of
+being padded or silently replaced. Both runners now enforce the same normalized
+DMG base-clock cycle budget; SameBoy's 8 MHz counter is converted at the
+adapter boundary. A separate host wall-clock stop is recorded and classified
+as `timeout`. `scripts/compare-conformance.mjs`
+is the final paired-input gate; it refuses to compare reports unless ROM
+manifests, per-case hashes, revision labels, boot hashes and sizes, model, cycle
+budget, pass detection, and excluded-case policy all agree. It also validates
+report totals, status counts, hashes, selected revisions, boot sizes, and
+normalized cycle evidence before doing any arithmetic. This closes the remaining
+ways to produce a numerically tidy but unfair 65/76-style comparison.
+
+### Reference callback audit (2026-08-03)
+
+The independent SameBoy adapter had one measurement hazard that was not visible
+in its JSON output: its execution-marker callback read `$CFFE` through the
+public `GB_read_memory()` API. SameBoy correctly models that API's data-bus and
+open-bus decay side effects, so a diagnostic read could in principle perturb
+the machine being measured. The callback now reads the already-selected bank-0
+WRAM byte directly and the adapter loads the ROM through the same path as
+SameBoy's official Tester. The final v1.0.3 run was rebuilt from the clean
+tagged source with adapter SHA-256
+`6b4dc8e5ca0c6ba2ef9e309a41013ad8551343010db08ed8b798d52511bb4df1` and
+remained **65/76**. That unchanged result is useful evidence: the callback
+hazard was corrected, but it was not the cause of the documentation mismatch.
+
+The **74/76** figure is not present in the cited SameSuite documentation. The
+APU README was last changed at commit `d45b44f` in 2018, when the checked-in
+suite contained 60 APU ROMs; its “all but two” statement describes a historical
+58/60-era set. The current `f15645f` suite has 76 non-SGB ROMs, including later
+revision-specific fixtures, while that README has never been updated to
+describe the expanded denominator. On the current 76-ROM manifest, both
+SameBoy 1.0.3 and a current SameBoy source build reproduce 65/76 with zero
+timeouts, crashes, errors, unsupported cases, or protocol errors. We therefore
+do not relabel the observed run as 74/76 or use that number as a ranking claim.
+
+The generic Mooneye runner now also requires an explicit `--embedded-boot`,
+`--no-boot`, or `--boot-path` choice. Its controlled acceptance re-run remains
+**70/70 applicable cases**, with five explicitly unsupported SGB/AGB targets.
+The core benchmark now hashes PCM output and terminal APU state as well as the
+framebuffer; a speed result is marked `performanceEligible: false` whenever
+the paired output differs, instead of silently presenting it as a pure
+optimization.
+
+### Corrected external reference run
+
+SameBoy 1.0.3 was built from the annotated tag commit
+`208ba4afabffab9edde416f2dbb8ae459e34adb8` using the independent C adapter in
+`scripts/reference/sameboy-conformance-runner.c` (runner SHA-256
+`6b4dc8e5ca0c6ba2ef9e309a41013ad8551343010db08ed8b798d52511bb4df1`). The
+adapter reads SameBoy's
+internal model enum after initialization and reports it; it no longer echoes
+the requested label as proof. The matrix therefore verifies
+`requestedRevision === selectedRevision` for every measured case.
+
+The boot policy follows [SameBoy's boot-ROM callback documentation](https://github.com/LIJI32/SameBoy/wiki/GB_set_boot_rom_load_callback):
+CGB-0 uses `cgb0_boot.bin`, CGB-A through CGB-D use the ordinary CGB image,
+and CGB-E uses the ordinary image only as an explicitly recorded fallback.
+There is no CGB-0 fallback. The measured boot hashes are
+`2c297b6cb762cd0a50253449fd026ae30c76f0cc30b919e2ff498bca7682eacc` for
+CGB-0 and
+`f767b8e7e510a255f81328c89dba6e0c996b370e1bc86aebb8584a7da47a5bba` for the
+ordinary CGB image.
+
+The corrected SameBoy result is **65/76 pass, 11 fail, 0 timeout, 0 crash,
+0 error, 0 protocol-error, 0 unsupported**. The 11 failing fixtures are:
+
+```text
+apu/channel_1/channel_1_extra_length_clocking-cgb0B.gb
+apu/channel_1/channel_1_freq_change_timing-A.gb
+apu/channel_1/channel_1_stop_div.gb
+apu/channel_1/channel_1_sweep_restart.gb
+apu/channel_1/channel_1_sweep.gb
+apu/channel_1/channel_1_volume_div.gb
+apu/channel_2/channel_2_extra_length_clocking-cgb0B.gb
+apu/channel_2/channel_2_stop_div.gb
+apu/channel_2/channel_2_volume_div.gb
+apu/channel_3/channel_3_extra_length_clocking-cgbB.gb
+apu/channel_4/channel_4_extra_length_clocking-cgb0B.gb
+```
+
+Revision routing is visible in the report: CGB-0 `1/1`, CGB-C `1/1`, CGB-E
+`63/69`, CGB-A `0/1`, and CGB-B `0/4`. The four CGB-B failures are the
+revision-specific extra-length fixtures; the CGB-A failure is its frequency
+change timing fixture; the six remaining failures are unsuffixed CGB-E APU
+fixtures.
+
+The [SameSuite APU documentation](https://github.com/LIJI32/SameSuite/tree/master/apu)
+describes CGB-E as passing all but `channel_4_freq_change` and
+`channel_1_sweep_restart_2`. In the controlled run those two documented
+exceptions pass, while six other CGB-E fixtures fail. The result is
+reproducible with the tagged SameBoy source and with a current source build,
+but the upstream documentation does not explain the mismatch. This is why the
+reference score is recorded as **observed behaviour**, not as a ranking or an
+accuracy target. The old 64/76 result is discarded because it cannot be
+reconstructed under the corrected revision, boot, and protocol checks. The
+available old output has no per-case hashes, selected-revision evidence, or
+protocol trace, so it is not possible to assign its one-point difference to a
+single cause with confidence; the CGB-0 boot-policy correction is the only
+known changed input. That is a provenance failure, not a basis for a score.
+
+The version-8 reports also carry a ROM source snapshot. SameSuite's generated
+`.gb` files are intentionally ignored by its repository, so the snapshot
+records that limitation and the manifest pins every tested byte. A comparison
+is rejected if the source commit is missing, tracked ROMs are dirty, or the
+snapshot does not cover the tested and excluded files.
+The reference report also records a clean SameBoy source-tree snapshot, so a
+runner cannot be attributed to a commit while silently using uncommitted core
+files.
+
+The v8 LAB report additionally content-addresses the exact emulator core and
+embedded BIOS source files used for the run. This is separate from the suite
+snapshot: the suite commit identifies the test-ROM repository, while the core
+manifest identifies the working-tree bytes being measured. A dirty LAB tree is
+allowed only when those hashes are present; the comparator rejects a report
+that merely names a commit without pinning the files.
+
+### LAB and other-suite fairness checks
+
+GAMEBOY LAB was run against the same 76-ROM manifest and reports **60/76**,
+with 0 timeout, crash, error, or protocol-error. The final paired run used the
+same revision-aware `--boot-dir` mapping as the reference run: identical
+manifest hash `589528fa...e993fb`, identical CGB-0 boot hash, and identical
+ordinary CGB fallback hash for every other measured revision. The result is
+not compared as “better than SameBoy” while the upstream reference mismatch is
+open.
+
+The Mooneye acceptance artifact reports 70 applicable DMG cases passing and
+five explicitly unsupported SGB/SGB2 files; its source commit was unavailable,
+so the report pins its manifest hash rather than pretending to pin a repository
+revision. The model naming policy follows the
+[Mooneye test-suite conventions](https://github.com/Gekkio/mooneye-test-suite).
+The Mealybug run is a visual/structural diagnostic (1/24 pixel-exact and
+96.0343% structural average), not a CPU pass-rate substitute.
+
+### Performance rebaseline
+
+The previous **+26.13% DMG / +12.64% CGB** headline is superseded. The latest
+nine-trial paired run (120 warm-up frames, 600 measured frames, alternating
+baseline/current order, identical ROM hashes, model, framebuffer checksum,
+and core-only scope) measured a paired-trial median of **+25.09% DMG** and
+**+15.29% CGB** host throughput. The per-trial 10th–90th percentile spans were
+`+23.74%…+25.75%` (DMG) and `+14.38%…+21.13%` (CGB); the CGB run contains two
+visible host-noise outliers, so these are an observed benchmark range rather
+than a release promise. All frame checksums matched within each pair. This
+benchmark covers the emulator core, PPU framebuffer, and APU generation only;
+it excludes DOM, CSS, shaders, WebAudio, and UI work. The values remain held
+out of a release headline until the conformance comparison is explainable.
+
+No release or “more accurate than SameBoy” claim is permitted until the
+SameSuite documentation/fixture discrepancy is resolved or explicitly
+documented upstream.
+
 ## v3.0 release gate and scope
 
 The v3.0 gate is deliberately broader than a successful build: the project
 suite is fully green, the production-model Mooneye set has no timeouts and
-passes 66/66 applicable cases, revision-appropriate SameSuite cases remain
+passes 70/70 applicable cases, revision-appropriate SameSuite cases remain
 stable, the Mealybug structural average improves without trading away exact
 cases, and paired game benchmarks retain a clear throughput gain with
 identical frame checksums. Four Mooneye ROMs target DMG0/MGB boot firmware that
@@ -12,6 +218,31 @@ is not the supplied production DMG BIOS; they remain reported as revision
 diagnostics rather than silently counted as production failures. v3.0 is
 therefore a production DMG/GBC accuracy milestone, not a claim of equivalence
 to every historical silicon revision.
+
+## Post-v3.0.1 startup-audio checkpoint
+
+The production browser mixer now uses one deliberately gentle DC-blocking
+curve for the DMG and GBC output paths. The coefficient is converted to the
+active host sample rate, so it removes speaker offset and transition clicks
+without shaving the quiet end off a boot jingle. Audio produced before the
+asynchronous `AudioContext`/`AudioWorklet` hand-off is queued for at most two
+seconds, then fed to the selected backend once it exists. The queue is bounded
+and is cleared on an intentional audio reset, so a stalled autoplay context
+cannot replay an old cartridge after a switch.
+
+The regression evidence for this patch is **81/81** project tests, **70/70**
+Mooneye acceptance ROMs with zero timeouts, and a production GBC BIOS-tail
+regression that observes the closing note after frame 105. The revision-aware
+SameSuite matrix remains **60/76** with zero timeouts. A SameBoy-style delayed
+envelope experiment was run against the full matrix and rejected because it
+did not improve the complete score; it is not in the shipped path. The
+pre-correction revision-labelled SameBoy value of **64/76** is historical and
+superseded by the controlled **65/76** reference run documented above. Gambatte
+was checked through the available libretro binary for boot and frame delivery;
+there is no source-level Gambatte score in this audit. The 600-frame hashes
+are recorded in the release note, but are not treated as pixel identity
+because the reference frontends used different boot-ROM and colour-correction
+policies.
 
 The current working tree contains the v3 engine pass. The audio mixer now
 reuses exact finite-state channel levels, skips mixer arithmetic during
@@ -48,7 +279,8 @@ selects its production profile automatically.
 The maintainer-facing matrix is reproducible with:
 
 ```sh
-node scripts/samesuite-matrix.mjs /path/to/SameSuite --cycles 80000000
+node scripts/samesuite-matrix.mjs --boot-dir /path/to/SameBoy/BootROMs \
+  --source-root "$PWD" /path/to/SameSuite --cycles 80000000
 ```
 
 The broad CGB-E audio timing work is still gated. A direct SameBoy-style
@@ -66,13 +298,16 @@ historical CGB silicon; requiring users to understand those revisions would
 make the normal emulator harder to use without improving ordinary games.
 
 In five fresh-process paired trials (120 warm-up frames, 600 measured frames)
-against v2.5.7, the latest run measured **+23.83% on a DMG Tetris case** and
-**+14.07% on a CGB Tetris DX case**. The frame checksums stayed `86b18c43`
-and `f8c0db5f`, respectively. In practical terms, audio-heavy scenes,
-scrolling, and busy browser tabs have more headroom before a visible stutter;
-emulation speed itself remains fixed at the Game Boy hardware cadence. The
-measurements are host-throughput indicators, not faster-than-hardware gameplay,
-and are reported as a reproducible run rather than a promise for every CPU.
+against v2.5.7, the earlier run measured **+26.13% on a DMG Tetris case** and
+**+12.64% on a CGB Tetris DX case**. Those values are retained as a
+superseded historical measurement; the corrected rebaseline is **+24.28% DMG /
++13.99% CGB** in the harness-correction section above. The frame checksums
+stayed `86b18c43` and `f8c0db5f`, respectively. In practical terms,
+audio-heavy scenes, scrolling, and busy browser tabs have more headroom before
+a visible stutter; emulation speed itself remains fixed at the Game Boy
+hardware cadence. The measurements are host-throughput indicators, not
+faster-than-hardware gameplay, and are reported as reproducible runs rather
+than a promise for every CPU.
 
 ### Latest isolated rebaseline (working tree)
 
@@ -366,7 +601,8 @@ selection before they can be safely folded into a larger release.
 npm test
 npm run lint
 npm run test:mealybug -- --roms <extracted-roms> --expected <DMG-blob> --model dmg --quiet
-node scripts/core-conformance.mjs --suite samesuite <apu-roms> --model cgb --quiet
+node scripts/core-conformance.mjs --suite mooneye --embedded-boot <acceptance-roms> --quiet
+node scripts/samesuite-matrix.mjs --boot-dir <boot-rom-dir> <apu-roms> --quiet
 ```
 
 The final standalone build and six-game checksum smoke tests remain required
@@ -686,9 +922,11 @@ mixers, Bluetooth, and the physical output device add latency outside the app.
 - Added a latched wave sample and retrigger behavior, plus corrected noise
   startup and restart periods.
 - Persisted the new sequencer/channel state in snapshots.
-- The host high-pass stage now uses separate documented DMG and GBC capacitor
-  curves and converts their per-T-cycle coefficients to the actual host sample
-  rate.
+- The production host high-pass stage uses a deliberately gentle curve and
+  converts its per-T-cycle coefficient to the actual host sample rate. This
+  removes offset and transition clicks without truncating quiet note tails;
+  revision-specific CGB envelope experiments remain scoped to diagnostic
+  profiles rather than changing normal app playback.
 
 ### RTC and input
 
@@ -729,7 +967,8 @@ mixers, Bluetooth, and the physical output device add latency outside the app.
 
 The repository includes:
 
-- `scripts/core-conformance.mjs` for Mooneye, Blargg, and SameSuite protocols.
+- `scripts/core-conformance.mjs` for Mooneye and Blargg protocols, and
+  `scripts/samesuite-matrix.mjs` for revision-aware SameSuite protocols.
 - `scripts/mealybug-conformance.mjs` for DMG-blob structural image comparison.
 - `scripts/visual-conformance.mjs` for framebuffer/reference comparisons.
 - `scripts/core-benchmark.mjs` for alternating-order tagged-core benchmarks.

@@ -72,7 +72,14 @@ npm run sync:artwork
 npm run dev
 npm test
 npm run benchmark:core -- --baseline-ref v2.5.7
-node scripts/samesuite-matrix.mjs /path/to/SameSuite --cycles 80000000
+node scripts/samesuite-matrix.mjs --boot-dir /path/to/SameBoy/BootROMs \
+  --source-root "$PWD" /path/to/SameSuite --cycles 80000000
+node scripts/sameboy-matrix.mjs --runner /tmp/sameboy-conformance-runner \
+  --source-root /path/to/SameBoy --boot-dir /path/to/SameBoy/BootROMs \
+  /path/to/SameSuite --cycles 80000000
+npm run compare:conformance -- \
+  --lab-report /tmp/gameboy-lab-samesuite.json \
+  --reference-report /tmp/sameboy-samesuite.json
 ```
 
 Core benchmark trials run in fresh Node processes by default, so JIT warm-up,
@@ -92,11 +99,29 @@ database, or cloud configuration. Cartridge files, preferences, and battery
 saves remain local to the browser and are never uploaded.
 
 The external conformance runners in `scripts/` accept locally sourced test-ROM
-directories. `samesuite-matrix.mjs` routes revision-labelled APU ROMs to the
+directories. Every runner requires an explicit boot policy; this prevents a
+production embedded BIOS from being mistaken for a revision-controlled
+comparison input. `samesuite-matrix.mjs` routes revision-labelled APU ROMs to the
 matching maintainer-only CGB profile, so its score is separate from the
-production-profile score. See `EMULATION_AUDIT.md` for the v3.0 methodology,
+production-profile score. A revision-aware comparison is only considered valid
+when both reports use `--boot-dir` and `compare:conformance` confirms identical
+ROM hashes, revision selection, BIOS hashes and sizes, model, cycle budget, and
+pass detection. The cycle budget is expressed in DMG base-clock T-cycles
+(4.194304 MHz equivalent) for both cores; the SameBoy adapter converts its
+internal 8 MHz counter before enforcing it. A host wall-clock limit is recorded
+separately as a safety stop. The directory policy uses exact 0x900-byte CGB boot images;
+compact or truncated files are rejected rather than padded or silently
+substituted (the same rejection applies to a single explicit boot path). The
+SameBoy adapter must report the requested revision it received
+and the revision it actually selected. Single-image and no-boot runs remain
+diagnostic and are marked non-comparable. See `EMULATION_AUDIT.md` for the v3.0 methodology,
 measured results, hardware-revision exclusions, and deliberately unclaimed
 areas.
+
+LAB reports also content-address `app/lib/gameboy.js` and the embedded BIOS
+source. The commit identifies the checkout, while those file hashes identify
+the exact working-tree bytes actually measured; a comparison without that
+core-source manifest is rejected.
 
 ## Releases
 

@@ -411,14 +411,50 @@ const FRAME_SKIP_PRESETS = {
 
 const MINIMUM_BUTTON_PRESS_MS = 50;
 const APU_CLOCK_RATE = 4194304;
+// AudioContext/AudioWorklet startup is asynchronous. Keep the first short
+// slice of emulator output instead of draining it into a nowhere-yet backend;
+// this is especially important for the GBC BIOS jingle, which begins as soon
+// as the cartridge is powered. The cap prevents a blocked autoplay context
+// from becoming an unbounded memory sink.
+const PENDING_AUDIO_MAX_FRAMES = 48000 * 2;
 
 function audioHighPassCoefficient(sampleRate, model = "dmg") {
-  // The CGB/MGB output capacitor discharges much faster than the original
-  // DMG circuit. Convert each measured per-T-cycle charge factor to the
-  // browser's actual output rate instead of applying one console's curve to
-  // both models.
-  const hardwareFactor = model === "cgb" ? 0.998943 : 0.999958;
+  // Both production shells use the same deliberately gentle DC-blocking
+  // curve here. The earlier CGB-only coefficient discharged roughly ten times
+  // faster and audibly chopped the final decay of the GBC BIOS jingle. Keep
+  // the model argument for state/settings compatibility and future measured
+  // revision data, but do not shorten real program audio today.
+  const hardwareFactor = 0.999958;
   return Math.pow(hardwareFactor, APU_CLOCK_RATE / Math.max(1, sampleRate));
+}
+
+function enqueueAudioIntoBackend(audio, samples) {
+  if (!samples?.length) return false;
+  if (audio.mode === "worklet") {
+    audio.node?.port.postMessage({ type: "samples", buffer: samples.buffer }, [samples.buffer]);
+    return true;
+  }
+  if (!audio.ring) return false;
+  const incomingFrames = samples.length >> 1;
+  const capacityFrames = audio.ring.length >> 1;
+  const overflowFrames = Math.max(
+    0,
+    (audio.available >> 1) + incomingFrames - capacityFrames,
+  );
+  if (overflowFrames > 0) {
+    audio.readIndex = (audio.readIndex + overflowFrames * 2) % audio.ring.length;
+    audio.available -= overflowFrames * 2;
+    audio.overruns += 1;
+  }
+  for (let index = 0; index + 1 < samples.length; index += 2) {
+    audio.ring[audio.writeIndex] = samples[index];
+    audio.writeIndex = (audio.writeIndex + 1) % audio.ring.length;
+    audio.ring[audio.writeIndex] = samples[index + 1];
+    audio.writeIndex = (audio.writeIndex + 1) % audio.ring.length;
+    audio.available += 2;
+  }
+  audio.buffered = audio.available >> 1;
+  return true;
 }
 
 const AUDIO_WORKLET_SOURCE = `
@@ -2008,6 +2044,8 @@ export default function Emulator() {
     playbackPhase: 0,
     playbackRate: 1,
     ramp: 0,
+    pendingAudioChunks: [],
+    pendingAudioFrames: 0,
   });
   const audioStartPromiseRef = useRef(null);
   const audioFilterRef = useRef(true);
@@ -2376,6 +2414,8 @@ export default function Emulator() {
     audio.previousInputRight = 0;
     audio.previousOutputLeft = 0;
     audio.previousOutputRight = 0;
+    audio.pendingAudioChunks = [];
+    audio.pendingAudioFrames = 0;
   }, []);
 
   const readStoredBattery = useCallback((key) => {
@@ -2644,6 +2684,8 @@ export default function Emulator() {
         playbackPhase: 0,
         playbackRate: 1,
         ramp: 0,
+        pendingAudioChunks: [],
+        pendingAudioFrames: 0,
         filterCoefficient: audioHighPassCoefficient(
           context.sampleRate,
           modelRef.current,
@@ -2736,7 +2778,15 @@ export default function Emulator() {
         };
       }
       node.connect(context.destination);
+      // Read this only after the asynchronous context/worklet setup. If a
+      // cartridge switch or pause flushed audio while setup was in flight,
+      // taking the reference earlier could replay samples from the old core.
+      // The current queue still preserves samples generated before startup.
+      const pendingAudioChunks = audioRef.current.pendingAudioChunks || [];
       audioRef.current = audioState;
+      for (const samples of pendingAudioChunks) {
+        enqueueAudioIntoBackend(audioState, samples);
+      }
       if (mode === "worklet") {
         node.port.postMessage({
           type: "settings",
@@ -2771,30 +2821,17 @@ export default function Emulator() {
     }
     audio.peak = peak;
     audio.maxPeak = Math.max(audio.maxPeak, peak);
-    if (audio.mode === "worklet") {
-      audio.node.port.postMessage({ type: "samples", buffer: samples.buffer }, [samples.buffer]);
+    if (!audio.mode && !audio.ring) {
+      const pending = audio.pendingAudioChunks || (audio.pendingAudioChunks = []);
+      pending.push(samples);
+      audio.pendingAudioFrames = (audio.pendingAudioFrames || 0) + (samples.length >> 1);
+      while (audio.pendingAudioFrames > PENDING_AUDIO_MAX_FRAMES && pending.length > 0) {
+        const discarded = pending.shift();
+        audio.pendingAudioFrames -= discarded.length >> 1;
+      }
       return;
     }
-    if (!audio.ring) return;
-    const incomingFrames = samples.length >> 1;
-    const capacityFrames = audio.ring.length >> 1;
-    const overflowFrames = Math.max(
-      0,
-      (audio.available >> 1) + incomingFrames - capacityFrames,
-    );
-    if (overflowFrames > 0) {
-      audio.readIndex = (audio.readIndex + overflowFrames * 2) % audio.ring.length;
-      audio.available -= overflowFrames * 2;
-      audio.overruns += 1;
-    }
-    for (let index = 0; index + 1 < samples.length; index += 2) {
-      audio.ring[audio.writeIndex] = samples[index];
-      audio.writeIndex = (audio.writeIndex + 1) % audio.ring.length;
-      audio.ring[audio.writeIndex] = samples[index + 1];
-      audio.writeIndex = (audio.writeIndex + 1) % audio.ring.length;
-      audio.available += 2;
-    }
-    audio.buffered = audio.available >> 1;
+    enqueueAudioIntoBackend(audio, samples);
   }, []);
 
   const presentFrame = useCallback(({ resetHistory = false } = {}) => {
@@ -5977,9 +6014,11 @@ export default function Emulator() {
                     coupling capacitors. The filter removes constant speaker offset and slow
                     baseline drift from the four-channel mix, which reduces power-on and register
                     transition clicks without muting legitimate square, wave, or noise content.
-                        Separate measured DMG and GBC capacitor curves are converted from the
-                        hardware T-cycle domain to the browser&apos;s actual sample rate, keeping
-                        each console&apos;s analog time constant consistent from 44.1 to 192 kHz.
+                    The production DMG and GBC paths use a deliberately gentle analog curve,
+                    converted for the browser&apos;s actual sample rate. It removes DC offset and
+                    clicks without cutting off the quiet tail of a note or boot jingle. The
+                    revision-specific envelope experiments remain internal to diagnostic
+                    profiles, so normal playback keeps the established production timing.
                   </p>
                   <p>
                     It runs after NR50/NR51 volume and stereo routing, so duty timing, envelope,

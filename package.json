@@ -14,8 +14,10 @@
     "preview": "vite preview",
     "test": "npm run build && node --test tests/*.test.mjs",
     "test:core": "node --test tests/gameboy-core.test.mjs",
+    "test:harness": "node --test tests/samesuite-policy.test.mjs",
     "benchmark:core": "node --expose-gc scripts/core-benchmark.mjs",
     "test:mealybug": "node scripts/mealybug-conformance.mjs",
+    "compare:conformance": "node scripts/compare-conformance.mjs",
     "lint": "eslint ."
   },
   "dependencies": {

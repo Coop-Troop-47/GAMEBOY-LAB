@@ -661,7 +661,7 @@ test("keeps cached audio mixing bit-identical across channel edges", () => {
     createHash("sha256")
       .update(new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength))
       .digest("hex"),
-    "3ff8f1c22cc0360e3db835e80cce4e53c57a70d4eccc16ba1a0296ceaa3fcf2b",
+    "55f0d914ac873c7da6e0b5871ada4fbc7ccf92af05c8ec3293345139fcb37f4a",
   );
 });
 
@@ -1228,6 +1228,24 @@ test("boots through every embedded BIOS image", () => {
     assert.equal(gb.bootEnabled, false, `${bios} BIOS did not hand off`);
     assert.ok(gb.pc >= 0x0100);
   }
+});
+
+test("keeps the production GBC BIOS jingle's final envelope tail", () => {
+  const gb = new GameBoy("cgb");
+  gb.setBootROM(getEmbeddedBootROM("cgb"));
+  gb.loadROM(makeRom([0x18, 0xfe], { cgb: 0x80 }));
+  let latePeak = 0;
+  for (let frame = 0; frame < 132; frame += 1) {
+    gb.runFrame();
+    const audio = gb.drainAudio();
+    if (frame >= 105 && frame <= 115) {
+      for (const sample of audio) latePeak = Math.max(latePeak, Math.abs(sample));
+    }
+  }
+  assert.ok(
+    latePeak > 0.1,
+    "the production GBC envelope must not truncate the closing BIOS note",
+  );
 });
 
 test("boots and renders the supplied Tetris cartridge in both console models", () => {

@@ -1,16 +1,34 @@
 /* global Buffer, console, process */
 
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   readFileSync,
   readdirSync,
+  writeFileSync,
 } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 import { GameBoy } from "../app/lib/gameboy.js";
+import { getEmbeddedBootROM } from "../app/lib/embeddedBios.js";
 
 const SCREEN_BYTES = 160 * 144 * 4;
 let EmulatorClass = GameBoy;
+
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function gitCommit(root) {
+  try {
+    return execFileSync("git", ["-C", root, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
 
 function parseArguments(argv) {
   const options = {
@@ -20,15 +38,35 @@ function parseArguments(argv) {
     model: null,
     quiet: false,
     roms: null,
+    bootMode: "none",
+    bootPath: null,
+    reportPath: null,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
+    if (argument === "--help" || argument === "-h") {
+      console.log("Usage: node scripts/mealybug-conformance.mjs --roms DIR --expected DIR --model dmg|cgb [options]");
+      console.log("  --no-boot                      Use the post-boot state (default)");
+      console.log("  --embedded-boot                Use the embedded BIOS for the selected model");
+      console.log("  --boot-path PATH               Use an explicitly hashed BIOS");
+      console.log("  --cycles N                     Per-ROM emulated cycle budget");
+      console.log("  --expected DIR                 160x144 RGBA reference PNGs");
+      console.log("  --roms DIR                     Matching .gb ROMs");
+      process.exit(0);
+    }
     if (argument === "--baseline-ref") options.baselineRef = argv[++index];
     else if (argument === "--cycles") options.cycleBudget = Number(argv[++index]);
     else if (argument === "--expected") options.expected = resolve(argv[++index]);
     else if (argument === "--model") options.model = argv[++index];
     else if (argument === "--quiet") options.quiet = true;
     else if (argument === "--roms") options.roms = resolve(argv[++index]);
+    else if (argument === "--no-boot") options.bootMode = "none";
+    else if (argument === "--boot-path") {
+      options.bootMode = "path";
+      options.bootPath = resolve(argv[++index]);
+    }
+    else if (argument === "--embedded-boot") options.bootMode = "embedded";
+    else if (argument === "--report") options.reportPath = resolve(argv[++index]);
     else throw new Error(`Unexpected argument: ${argument}`);
   }
   if (!options.roms || !options.expected) {
@@ -39,6 +77,9 @@ function parseArguments(argv) {
   }
   if (!Number.isInteger(options.cycleBudget) || options.cycleBudget < 1) {
     throw new Error("--cycles must be a positive integer.");
+  }
+  if (options.bootMode === "path" && !existsSync(options.bootPath)) {
+    throw new Error(`Boot ROM does not exist: ${options.bootPath}`);
   }
   return options;
 }
@@ -171,10 +212,13 @@ function compareStructure(actual, expected) {
 }
 
 function runTest(romPath, referencePath, options) {
+  const rom = new Uint8Array(readFileSync(romPath));
   const emulator = new EmulatorClass(options.model);
-  emulator.loadROM(new Uint8Array(readFileSync(romPath)));
+  if (options.bootMode === "embedded") emulator.setBootROM(getEmbeddedBootROM(options.model));
+  else if (options.bootMode === "path") emulator.setBootROM(new Uint8Array(readFileSync(options.bootPath)));
+  emulator.loadROM(rom);
   let instructions = 0;
-  while (emulator.cycles < options.cycleBudget) {
+  while (emulator.baseCycles < options.cycleBudget) {
     if (instructions > 0 && emulator.read8(emulator.pc, true) === 0x40) break;
     emulator.step();
     instructions += 1;
@@ -188,9 +232,14 @@ function runTest(romPath, referencePath, options) {
     name: basename(romPath, extname(romPath)),
     breakpoint,
     cycles: emulator.cycles,
+    baseCycles: emulator.baseCycles,
     instructions,
     mismatched,
+    romSha256: sha256(rom),
+    referenceSha256: sha256(readFileSync(referencePath)),
+    bootMode: options.bootMode,
     matchPercent: Number(((SCREEN_BYTES / 4 - mismatched) / (SCREEN_BYTES / 4) * 100).toFixed(4)),
+    status: breakpoint ? (mismatched === 0 ? "pass" : "fail") : "timeout",
     pass: breakpoint && mismatched === 0,
   };
 }
@@ -218,29 +267,94 @@ for (const referenceName of references) {
   const stem = basename(referenceName, extname(referenceName));
   const romPath = join(options.roms, `${stem}.gb`);
   if (!existsSync(romPath)) continue;
-  const result = runTest(romPath, join(options.expected, referenceName), options);
+  let result;
+  try {
+    result = runTest(romPath, join(options.expected, referenceName), options);
+  } catch (error) {
+    result = {
+      name: stem,
+      status: "error",
+      pass: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
   results.push(result);
   if (!options.quiet) {
-    const marker = result.pass ? "PASS" : result.breakpoint ? "FAIL" : "TIME";
-    console.log(
-      `${marker.padEnd(4)} ${result.name} · ${result.matchPercent.toFixed(4)}%`
-      + ` · ${result.mismatched} px · ${(result.cycles / 1_000_000).toFixed(2)} M cycles`,
-    );
+    const marker = result.status === "pass" ? "PASS"
+      : result.status === "fail" ? "FAIL"
+        : result.status === "error" ? "ERR " : "TIME";
+    console.log(result.status === "error"
+      ? `${marker.padEnd(4)} ${result.name} · ${result.error}`
+      : `${marker.padEnd(4)} ${result.name} · ${result.matchPercent.toFixed(4)}%`
+        + ` · ${result.mismatched} px · ${(result.cycles / 1_000_000).toFixed(2)} M cycles`);
   }
 }
 
 const passing = results.filter((result) => result.pass).length;
+const statusCounts = results.reduce((counts, result) => {
+  counts[result.status || (result.pass ? "pass" : "error")] += 1;
+  return counts;
+}, { pass: 0, fail: 0, timeout: 0, error: 0 });
+const unsupportedCases = references
+  .filter((referenceName) => !existsSync(join(options.roms, `${basename(referenceName, extname(referenceName))}.gb`)))
+  .map((referenceName) => ({
+    name: basename(referenceName, extname(referenceName)),
+    referenceSha256: sha256(readFileSync(join(options.expected, referenceName))),
+    reason: "reference image has no matching ROM",
+  }));
+const romManifestSha256 = sha256(Buffer.from(results
+  .map((result) => `${result.name}\t${result.romSha256}\t${result.referenceSha256}`)
+  .concat(unsupportedCases.map((result) => `${result.name}\tunsupported\t${result.referenceSha256}`))
+  .sort()
+  .join("\n")));
 const averageMatch = results.reduce(
   (sum, result) => sum + result.matchPercent,
   0,
 ) / Math.max(1, results.length);
-console.log(JSON.stringify({
+const report = {
+  harness: "mealybug-conformance",
+  harnessVersion: 2,
+  suite: "Mealybug Tearoom Tests",
+  suiteCommit: gitCommit(options.roms) || gitCommit(options.expected),
+  romsCommit: gitCommit(options.roms),
+  expectedCommit: gitCommit(options.expected),
+  romManifestSha256,
   model: options.model,
   baselineRef: options.baselineRef,
   expected: options.expected,
   total: results.length,
   pass: passing,
-  fail: results.length - passing,
+  fail: statusCounts.fail,
   passRate: Number((passing / Math.max(1, results.length) * 100).toFixed(2)),
+  status: statusCounts,
   averageMatchPercent: Number(averageMatch.toFixed(4)),
+  unsupported: unsupportedCases.length,
+  unsupportedCases,
+  policy: {
+    cycleBudget: options.cycleBudget,
+    cycleUnit: "DMG base-clock T-cycles (4.194304 MHz equivalent)",
+    boot: options.bootMode,
+    bootSha256: options.bootMode === "embedded"
+      ? sha256(getEmbeddedBootROM(options.model))
+      : options.bootMode === "path" ? sha256(readFileSync(options.bootPath)) : null,
+    model: options.model,
+    passDetection: "opcode 0x40 breakpoint plus exact RGBA structural comparison",
+  },
+  cases: results,
+};
+if (options.reportPath) writeFileSync(options.reportPath, `${JSON.stringify(report, null, 2)}\n`);
+console.log(JSON.stringify({
+  harness: report.harness,
+  suite: report.suite,
+  model: report.model,
+  total: report.total,
+  pass: report.pass,
+  fail: report.fail,
+  passRate: report.passRate,
+  averageMatchPercent: report.averageMatchPercent,
+  unsupported: report.unsupported,
+  boot: report.policy.boot,
+  bootSha256: report.policy.bootSha256,
+  cycleBudget: report.policy.cycleBudget,
 }));
+if (report.fail || report.unsupported || report.status.timeout || report.status.error) process.exitCode = 1;

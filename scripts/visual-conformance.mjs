@@ -163,7 +163,7 @@ const reference = decodeReference(options.reference);
 let best = null;
 if (options.breakpoint) {
   let instructions = 0;
-  while (emulator.cycles < options.cycleBudget) {
+  while (emulator.baseCycles < options.cycleBudget) {
     if (instructions > 0 && emulator.read8(emulator.pc, true) === 0x40) break;
     emulator.step();
     instructions += 1;
@@ -172,6 +172,7 @@ if (options.breakpoint) {
   best = {
     breakpoint: emulator.read8(emulator.pc, true) === 0x40,
     cycles: emulator.cycles,
+    baseCycles: emulator.baseCycles,
     instructions,
     ...comparison,
   };
@@ -196,3 +197,4 @@ console.log(JSON.stringify({
   matchPercent: Number(((best.pixels - best.mismatched) / best.pixels * 100).toFixed(4)),
   pass: best.mismatched === 0,
 }, null, 2));
+if (best.mismatched !== 0 || (options.breakpoint && !best.breakpoint)) process.exitCode = 1;

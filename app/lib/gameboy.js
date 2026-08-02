@@ -1757,6 +1757,7 @@ export class GameBoy {
           this.clockAPUFrameSequencer();
         } else if (!(previousDivider & apuMask) && (nextDivider & apuMask)) {
           const secondaryClockNeeded = this.model === "cgb"
+            && this.hardwareRevision === "cgbE"
             && (this.io[0x26] & 0x80)
             && ((this.ch1.enabled && !this.ch1.cgbEnvelopeLegacy
               && !this.ch1.envelopeClockLocked && this.ch1.volumeCountdown === 0)
@@ -3599,7 +3600,7 @@ export class GameBoy {
       this.apuSkipFrameEvent = false;
       return;
     }
-    if (this.model === "cgb") {
+    if (this.model === "cgb" && this.hardwareRevision === "cgbE") {
       this.apuDivDivider = (this.apuDivDivider + 1) & 7;
       if (this.apuDivDivider === 7) {
         for (const channel of [this.ch1, this.ch2, this.ch4]) {
@@ -3619,7 +3620,11 @@ export class GameBoy {
   }
 
   clockAPUSecondaryEvent() {
-    if (this.model !== "cgb" || !(this.io[0x26] & 0x80)) return;
+    if (
+      this.model !== "cgb"
+      || this.hardwareRevision !== "cgbE"
+      || !(this.io[0x26] & 0x80)
+    ) return;
     // CGB's secondary envelope edge is shared by all envelope generators.
     // Noise was previously omitted here, which left NR42 volume/divider tests
     // one edge behind while square-channel tests happened to pass.
@@ -3690,7 +3695,9 @@ export class GameBoy {
   }
 
   clockEnvelopes(frameSequencer = false) {
-    const channels = frameSequencer && this.model === "cgb"
+    const channels = frameSequencer
+      && this.model === "cgb"
+      && this.hardwareRevision === "cgbE"
       ? [[this.ch1, 0x12], [this.ch2, 0x17], [this.ch4, 0x21]]
         .filter(([channel]) => channel === this.ch4 || channel.cgbEnvelopeLegacy)
       : [[this.ch1, 0x12], [this.ch2, 0x17], [this.ch4, 0x21]];
