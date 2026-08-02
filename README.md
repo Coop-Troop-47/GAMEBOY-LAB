@@ -70,6 +70,7 @@ npm run sync:artwork
 npm run dev
 npm test
 npm run benchmark:core -- --baseline-ref v2.5.7
+node scripts/samesuite-matrix.mjs /path/to/SameSuite --cycles 80000000
 ```
 
 Core benchmark trials run in fresh Node processes by default, so JIT warm-up,
@@ -89,8 +90,11 @@ database, or cloud configuration. Cartridge files, preferences, and battery
 saves remain local to the browser and are never uploaded.
 
 The external conformance runners in `scripts/` accept locally sourced test-ROM
-  directories. See `EMULATION_AUDIT.md` for the v3.0 methodology, measured
-results, hardware-revision exclusions, and deliberately unclaimed areas.
+directories. `samesuite-matrix.mjs` routes revision-labelled APU ROMs to the
+matching maintainer-only CGB profile, so its score is separate from the
+production-profile score. See `EMULATION_AUDIT.md` for the v3.0 methodology,
+measured results, hardware-revision exclusions, and deliberately unclaimed
+areas.
 
 ## Releases
 

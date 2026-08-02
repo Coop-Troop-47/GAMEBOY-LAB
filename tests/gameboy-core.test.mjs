@@ -681,6 +681,42 @@ test("keeps CGB silicon revision profiles internal and state-compatible", () => 
   assert.equal(revisionE.importState(snapshot), true);
 });
 
+test("keeps the pre-CGB-C extra length-write quirk revision-scoped", () => {
+  const older = new GameBoy("cgb", { hardwareRevision: "cgbB" });
+  older.audioFrameStep = 1;
+  older.ch1.length = 2;
+  older.applyLengthControl(older.ch1, 0x00, 0x00, 64, false);
+  assert.equal(older.ch1.length, 1);
+
+  const newer = new GameBoy("cgb", { hardwareRevision: "cgbE" });
+  newer.audioFrameStep = 1;
+  newer.ch1.length = 2;
+  newer.applyLengthControl(newer.ch1, 0x00, 0x00, 64, false);
+  assert.equal(newer.ch1.length, 2);
+});
+
+test("models the CGB-B wave length-write pipeline without changing later CGB revisions", () => {
+  const older = new GameBoy("cgb", { hardwareRevision: "cgbB" });
+  older.audioFrameStep = 1;
+  older.divCounter = 0x4000;
+  older.ch3.length = 1;
+  older.applyLengthControl(older.ch3, 0, 0x03, 256, false);
+  assert.equal(older.ch3.length, 1);
+  assert.equal(older.ch3.legacyLengthWritePending, true);
+  older.divCounter = 0x4014;
+  older.applyLengthControl(older.ch3, 0, 0x03, 256, false);
+  assert.equal(older.ch3.length, 0);
+  assert.equal(older.ch3.enabled, false);
+
+  const newer = new GameBoy("cgb", { hardwareRevision: "cgbE" });
+  newer.audioFrameStep = 1;
+  newer.divCounter = 0x4000;
+  newer.ch3.length = 1;
+  newer.applyLengthControl(newer.ch3, 0, 0x03, 256, false);
+  assert.equal(newer.ch3.length, 1);
+  assert.equal(newer.ch3.legacyLengthWritePending, false);
+});
+
 test("rebuilds the derived audio mix after loading a save state", () => {
   const gb = new GameBoy("cgb");
   gb.loadROM(makeRom([0x18, 0xfe], { cgb: 0x80 }));
@@ -1161,6 +1197,7 @@ test("maps and executes DMG and GBC boot ROMs", () => {
 
 test("embeds the supplied production BIOS revisions byte-for-byte", () => {
   const expected = {
+    dmg0: ["26e71cf01e301e5dc40e987cd2ecbf6d0276245890ac829db2a25323da86818e", 0x100],
     dmg: ["cf053eccb4ccafff9e67339d4e78e98dce7d1ed59be819d2a1ba2232c6fce1c7", 0x100],
     cgb: ["b4f2e416a35eef52cba161b159c7c8523a92594facb924b3ede0d722867c50c7", 0x900],
   };

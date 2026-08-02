@@ -1,6 +1,10 @@
-// User-supplied production boot ROMs. Vite inlines this module into the
+// User-supplied boot ROMs. Vite inlines this module into the
 // self-contained HTML artifact, so the emulator never performs a BIOS fetch.
 const BIOS_BASE64 = {
+  // User-supplied DMG-0 diagnostic boot ROM. This is kept as an internal
+  // conformance profile; the application still starts with the production
+  // DMG BIOS and never exposes a BIOS picker.
+  dmg0: "Mf7/ryH/nzLLfCD7ISb/DhE+gDLiDD7z4jI+d3c+/OBHIQQB5RHLABoTviBrI33+NCD1Bhl4hiMFIPuGIFrRIRCAGs2pAM2qABN7/jQg8z4YIS+ZDgwyPSgJDSD5Eez/GRjxZz5kV+BCPpHgQAQeAs28AA4TJHweg/5iKAYewf5kIAZ74gw+h+LwQpDgQhUg3QUgaRYgGNY+keBAHhTNvADwR+7/4EcY808GBMXLERfByxEXBSD1IiMiI8kODPBE/pAg+g0g9x0g8snO7WZmzA0ACwNzAIMADAANAAgRH4iJAA7czG7m3d3Zmbu7Z2NuDuzM3dyZn7u5Mz7//zzgUA==",
   dmg: [
     "Mf7/ryH/nzLLfCD7ISb/DhE+gDLiDD7z4jI+d3c+/OBHEQQBIRCAGs2VAM2WABN7/jQg8xHYAAYIGhMiIwUg+T4Z6hCZ",
     "IS+ZDgw9KAgyDSD5Lg8Y82c+ZFfgQj6R4EAEHgIODPBE/pAg+g0g9x0g8g4TJHweg/5iKAYewf5kIAZ74gw+h+LwQpDgQ",
@@ -49,11 +53,13 @@ function decodeBase64(value) {
 }
 
 const BIOS_BYTES = {
+  dmg0: decodeBase64(BIOS_BASE64.dmg0),
   dmg: decodeBase64(BIOS_BASE64.dmg),
   cgb: decodeBase64(BIOS_BASE64.cgb),
 };
 
 export const EMBEDDED_BIOS_INFO = Object.freeze({
+  dmg0: Object.freeze({ size: BIOS_BYTES.dmg0.length, revision: "DMG-0 diagnostic" }),
   dmg: Object.freeze({ size: BIOS_BYTES.dmg.length, revision: "Production DMG" }),
   cgb: Object.freeze({ size: BIOS_BYTES.cgb.length, revision: "Production GBC" }),
 });

@@ -26,6 +26,38 @@ those bases and the slow path remains authoritative for boot, DMA, RAM, I/O,
 and truncated images. These changes do not alter the emulated clock, audio
 sample boundaries, framebuffer bytes, or save-state format.
 
+## Post-v3 accuracy checkpoint (working tree)
+
+The supplied `Bios/dmg0_rom.bin` is now embedded as an internal diagnostic
+profile and routed only to the three Mooneye ROMs that explicitly require a
+DMG-0 boot image. Those cases moved from **0/3 to 3/3** without changing the
+production DMG boot path. The applicable acceptance run is now **69/70
+(98.57%)**; the single remaining failure is `boot_regs-mgb.gb`, which requires
+an MGB boot image that is not present in the supplied BIOS set and is therefore
+not silently substituted with a different Nintendo firmware image.
+
+The revision-aware SameSuite matrix now applies the documented pre-CGB-C
+extra-length-write quirk only to the internal CGB-0/A/B profiles, including
+the CGB-B wave-channel write pipeline. It rises from **56/76 to 60/76
+(78.95%)**, a **+5.26 percentage-point / +7.14% relative** gain, with no
+production-profile change. In a game this affects very narrow double-speed
+sound-length edge cases: square/noise channels no longer cut off one divider
+edge early, and CGB-B wave playback remains audible through the exact
+two-write handoff instead of ending prematurely. The normal emulator still
+selects its production profile automatically.
+
+The maintainer-facing matrix is reproducible with:
+
+```sh
+node scripts/samesuite-matrix.mjs /path/to/SameSuite --cycles 80000000
+```
+
+The broad CGB-E audio timing work is still gated. A direct SameBoy-style
+square-start delay improved a handful of PCM traces but regressed more timing
+ROMs overall, so it has not been promoted. This is deliberate: a benchmark
+headline is only accepted when the complete suite improves, not when one
+fixture is made to pass at the expense of several others.
+
 The core accepts an internal `hardwareRevision` profile only for conformance
 experiments (`production`, `cgb0`, `cgbA` through `cgbE`). GAMEBOY LAB does not
 expose that switch: normal users choose only Game Boy or Game Boy Color, and
@@ -43,6 +75,17 @@ emulation speed itself remains fixed at the Game Boy hardware cadence. The
 measurements are host-throughput indicators, not faster-than-hardware gameplay,
 and are reported as a reproducible run rather than a promise for every CPU.
 
+### Latest isolated rebaseline (working tree)
+
+A fresh five-trial isolated run of the same 120-warm-up/600-frame pair produced
+**605.91 FPS vs 418.92 FPS on DMG (+44.64%)** and **508.22 FPS vs 398.55 FPS
+on CGB (+27.52%)**, with unchanged frame checksums (`86b18c43` and
+`f8c0db5f`). The host was temporarily noisy (the p10 floor was 322.99/356.71
+FPS), so the earlier +23.83%/+14.07% figures remain the conservative release
+headline; this run is recorded as an observed upper-side rebaseline rather
+than a guaranteed multiplier. Heap deltas were 290.2 KiB (DMG) and 1,380.6
+KiB (CGB), compared with 1,852.5 KiB and 557.3 KiB on the v2.5.7 process pair.
+
 A second, hardware-timing correction now hands a DMG SCY write to the live
 fetcher at the measured source-tile boundary. The CGB path also keeps the
 vertical source row latched at its tile-fetch boundary, including when a GBC
@@ -54,10 +97,13 @@ moved from **95.9639% to
 `m3_scy_change` picture moved from **82.9991% to 84.6875%** (**+1.6884 pp /
 2.03% relative**). The latest change is limited to the DMG fetch-stage lead
 and leaves the other 23 reference pictures unchanged. This is a small but
-independently measured edge-case fix, not a claim that every revision now
+independently measured edge-case fix from earlier in this working-tree pass,
+not a claim that every revision now
 matches.
 
-The project suite is **73/73**. SameSuite is **55/78 with 0 timeouts**, and the
+The project suite is **75/75**. SameSuite is **55/78 with 0 timeouts** for the
+unchanged production profile, while the revision-aware diagnostic matrix is
+**60/76 with 0 timeouts**, and the
 DMG-blob run is **1/24 pixel-exact** with the structural average above. The
 remaining differences are documented revision-sensitive PPU/APU cases; the
 user-facing v3.0 notes describe the production-model result and practical game

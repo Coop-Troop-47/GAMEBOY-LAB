@@ -824,6 +824,10 @@ export class GameBoy {
       waveAccess: 0,
       currentSample: 0,
       length: lengths[2],
+      // CGB-B's wave length write path has a one-write pipeline when the
+      // counter was previously disabled. Keep it in channel state so a save
+      // state can resume in the middle of that edge sequence.
+      legacyLengthWritePending: false,
     };
     this.ch4 = {
       enabled: false,
@@ -3246,7 +3250,43 @@ export class GameBoy {
     // do not clock length, so enabling length on one performs the hardware's
     // immediate extra clock.
     const nextStepDoesNotClockLength = (this.audioFrameStep & 1) === 1;
-    if (!wasEnabled && enabled && nextStepDoesNotClockLength && channel.length > 0) {
+    // CGB-0/B revisions clock the extra length edge after a write that
+    // follows a disabled length counter even when that write keeps length
+    // disabled. CGB-C and later fixed this quirk; keep it behind the internal
+    // revision profile so production behavior remains unchanged.
+    const legacyCgbLengthWrite = this.model === "cgb"
+      && ["cgb0", "cgbA", "cgbB"].includes(this.hardwareRevision);
+    // The extra edge is sampled from the divider phase, not merely the
+    // frame-sequencer step. Older CGB square/noise channels skip the exact
+    // divider edge; treating that edge as an immediate clock is one phase
+    // early and produces the wrong PCM12/PCM34 result.
+    const apuPhaseMask = (1 << (this.doubleSpeed ? 13 : 12)) - 1;
+    const apuPhase = this.divCounter & apuPhaseMask;
+    let extraLengthClock = !wasEnabled && enabled;
+    if (legacyCgbLengthWrite) {
+      if (channel === this.ch3 && this.hardwareRevision === "cgbB" && !triggered) {
+        // CGB-B CH3 requires two writes to expose a disabled length=1
+        // counter. The second write becomes visible only after the short
+        // wave-pipeline handoff (20 T-cycles in double speed, 10 at normal
+        // speed). Keep the pending bit revision-scoped and serialisable.
+        if (!channel.legacyLengthWritePending) {
+          channel.legacyLengthWritePending = true;
+        } else {
+          extraLengthClock = apuPhase >= (this.doubleSpeed ? 20 : 10);
+          if (extraLengthClock && channel.length === 1) {
+            channel.legacyLengthWritePending = false;
+          }
+        }
+      } else if (channel === this.ch3) {
+        // CGB-0/A retain the older wave-channel behaviour without the B
+        // revision's two-write pipeline.
+        extraLengthClock = true;
+      } else {
+        extraLengthClock = apuPhase !== 0;
+      }
+    }
+    if (extraLengthClock
+      && nextStepDoesNotClockLength && channel.length > 0) {
       channel.length -= 1;
       if (channel.length === 0 && !triggered) channel.enabled = false;
     }

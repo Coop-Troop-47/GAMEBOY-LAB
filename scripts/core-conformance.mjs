@@ -73,9 +73,15 @@ function modelForMooneye(path) {
   return "dmg";
 }
 
+function bootProfileFor(path, model) {
+  if (model === "dmg" && /boot_.*-dmg0\.gb$/i.test(basename(path))) return "dmg0";
+  return model;
+}
+
 function runUntilResult(path, {
   model,
   hardwareRevision = null,
+  bootProfile = model,
   cycleBudget = DEFAULT_CYCLE_BUDGET,
   protocol = "auto",
   boot = true,
@@ -85,7 +91,7 @@ function runUntilResult(path, {
   const emulator = new EmulatorClass(model, hardwareRevision
     ? { hardwareRevision }
     : undefined);
-  if (boot) emulator.setBootROM(getEmbeddedBootROM(model));
+  if (boot) emulator.setBootROM(getEmbeddedBootROM(bootProfile));
   emulator.loadROM(rom);
   const start = performance.now();
   let result = null;
@@ -121,6 +127,7 @@ function runUntilResult(path, {
   const output = {
     path,
     model,
+    bootProfile,
     result: result ?? "timeout",
     cycles: emulator.cycles,
     milliseconds: elapsed,
@@ -217,6 +224,7 @@ for (const path of files) {
     if (!model) continue;
     const result = runUntilResult(path, {
       model,
+      bootProfile: bootProfileFor(path, model),
       hardwareRevision: options.hardwareRevision,
       cycleBudget: options.cycleBudget,
       protocol: "mooneye",
@@ -234,6 +242,7 @@ for (const path of files) {
       : "dmg");
     const result = runUntilResult(path, {
       model,
+      bootProfile: model,
       hardwareRevision: options.hardwareRevision,
       cycleBudget: options.cycleBudget,
       // SameSuite deliberately terminates with the Fibonacci-register
