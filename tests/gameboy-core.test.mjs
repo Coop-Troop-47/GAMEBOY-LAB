@@ -235,6 +235,22 @@ test("preserves mapper-specific bank-zero behavior and direct cartridge RAM", ()
   assert.equal(directRam.read8(0xa000), 0x7b);
 });
 
+test("keeps the fast CPU cartridge-read path coherent across boot handoff and bank changes", () => {
+  const rom = makeRom([], { banks: 4, type: 1 });
+  rom[0x0000] = 0x11;
+  rom[0x4000] = 0x22;
+  rom[0x8000] = 0x33;
+  const gb = new GameBoy("dmg");
+  gb.setBootROM(new Uint8Array(0x100).fill(0xa5));
+  gb.loadROM(rom);
+  assert.equal(gb.cpuRead(0x0000), 0xa5, "boot mapping must still win before FF50");
+  gb.writeIO(0x50, 1);
+  assert.equal(gb.cpuRead(0x0000), 0x11);
+  assert.equal(gb.cpuRead(0x4000), 0x22);
+  gb.write8(0x2000, 2);
+  assert.equal(gb.cpuRead(0x4000), 0x33, "mapper writes must refresh the visible bank base");
+});
+
 test("round-trips complete save states without confusing them with cartridge saves", () => {
   const gb = new GameBoy("dmg");
   gb.loadROM(makeRom([0x18, 0xfe], { type: 3, ram: 2 }));
@@ -621,6 +637,97 @@ test("matches audio generation to the host sample rate without per-sample mixer 
   assert.equal(gb.audioRate, 44100);
 });
 
+test("keeps cached audio mixing bit-identical across channel edges", () => {
+  const gb = new GameBoy("cgb");
+  gb.loadROM(makeRom([0x18, 0xfe], { cgb: 0x80 }));
+  gb.io[0x26] = 0x80;
+  gb.io[0x24] = 0x77;
+  gb.io[0x25] = 0xff;
+  gb.writeAPU(0x11, 0x80);
+  gb.writeAPU(0x12, 0xf3);
+  gb.writeAPU(0x13, 0x40);
+  gb.writeAPU(0x14, 0x87);
+  gb.writeAPU(0x16, 0x40);
+  gb.writeAPU(0x17, 0x72);
+  gb.writeAPU(0x18, 0x80);
+  gb.writeAPU(0x19, 0x87);
+  gb.writeAPU(0x21, 0x91);
+  gb.writeAPU(0x22, 0x15);
+  gb.writeAPU(0x23, 0x87);
+  for (let cycle = 0; cycle < 120_000; cycle += 1) gb.step();
+  const audio = gb.drainAudio();
+  assert.equal(audio.length, 32_958);
+  assert.equal(
+    createHash("sha256")
+      .update(new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength))
+      .digest("hex"),
+    "3ff8f1c22cc0360e3db835e80cce4e53c57a70d4eccc16ba1a0296ceaa3fcf2b",
+  );
+});
+
+test("keeps CGB silicon revision profiles internal and state-compatible", () => {
+  const production = new GameBoy("cgb");
+  const revisionE = new GameBoy("cgb", { hardwareRevision: "cgbE" });
+  const invalid = new GameBoy("cgb", { hardwareRevision: "not-a-real-revision" });
+  assert.equal(production.hardwareRevision, "production");
+  assert.equal(revisionE.hardwareRevision, "cgbE");
+  assert.equal(invalid.hardwareRevision, "production");
+
+  production.loadROM(makeRom([0x18, 0xfe], { cgb: 0x80 }));
+  revisionE.loadROM(makeRom([0x18, 0xfe], { cgb: 0x80 }));
+  const snapshot = revisionE.exportState();
+  assert.equal(snapshot.hardwareRevision, "cgbE");
+  assert.equal(production.importState(snapshot), false);
+  assert.equal(revisionE.importState(snapshot), true);
+});
+
+test("rebuilds the derived audio mix after loading a save state", () => {
+  const gb = new GameBoy("cgb");
+  gb.loadROM(makeRom([0x18, 0xfe], { cgb: 0x80 }));
+  gb.io[0x26] = 0x80;
+  gb.io[0x24] = 0x77;
+  gb.io[0x25] = 0xff;
+  gb.writeAPU(0x11, 0x80);
+  gb.writeAPU(0x12, 0xf3);
+  gb.writeAPU(0x13, 0x40);
+  gb.writeAPU(0x14, 0x87);
+  gb.runCycles(20_000);
+  gb.drainAudio();
+  const snapshot = gb.exportState();
+
+  gb.runCycles(20_000);
+  const expected = gb.drainAudio();
+  assert.equal(gb.importState(snapshot), true);
+  gb.runCycles(20_000);
+  const actual = gb.drainAudio();
+  assert.deepEqual(Array.from(actual), Array.from(expected));
+});
+
+test("discards a stale partial audio sample when the APU becomes silent", () => {
+  const gb = new GameBoy("dmg");
+  gb.audioClock = 0;
+  gb.audioIntegralLeft = 0.75;
+  gb.audioIntegralRight = -0.5;
+  gb.integrateSilentAudioLevel(1);
+  assert.equal(gb.audioIntegralLeft, 0);
+  assert.equal(gb.audioIntegralRight, 0);
+});
+
+test("disconnects the wave DAC at NR32 volume code zero", () => {
+  const gb = new GameBoy("cgb");
+  gb.io[0x26] = 0x80;
+  gb.io[0x25] = 0x44;
+  gb.io[0x1a] = 0x80;
+  gb.ch3.enabled = true;
+  gb.ch3.currentSample = 15;
+  gb.io[0x1c] = 0;
+  gb.audioMixDirty = true;
+  assert.equal(gb.calculateAudioLevel()[2], 0);
+  gb.io[0x1c] = 0x20;
+  gb.audioMixDirty = true;
+  assert.equal(gb.calculateAudioLevel()[2], 1);
+});
+
 test("clocks the noise channel at the hardware NR43 rate used by impact effects", () => {
   const gb = new GameBoy("dmg");
   gb.io[0x26] = 0x80;
@@ -711,6 +818,20 @@ test("keeps a DMG palette write in the measured in-flight transfer phase", () =>
   assert.equal(gb.ppuTransferWarmup, 18);
 });
 
+test("keeps a GBC compatibility BGP write in the measured handoff phase", () => {
+  const gb = new GameBoy("cgb");
+  gb.loadROM(makeRom());
+  gb.ppuMode = 3;
+  gb.ly = 0;
+  gb.io[0x47] = 0xfc;
+
+  gb.activateLivePixelTransfer(0x47);
+
+  assert.equal(gb.cgbMode, false);
+  assert.equal(gb.ppuTransferLive, true);
+  assert.equal(gb.ppuTransferWarmup, 18);
+});
+
 test("keeps a DMG SCY write in the measured fetch handoff phase", () => {
   const gb = new GameBoy("dmg");
   gb.loadROM(makeRom());
@@ -728,11 +849,51 @@ test("keeps a DMG SCY write in the measured fetch handoff phase", () => {
 
   gb.writeIO(0x42, 7);
   assert.equal(gb.ppuScyPending, 7);
-  assert.equal(gb.ppuScyDelay, 2);
+  assert.equal(gb.ppuScyDelay, 3);
   gb.renderTransferPixel(0, 0);
   assert.equal(gb.ppuScyApplied, 0);
   gb.renderTransferPixel(0, 1);
+  assert.equal(gb.ppuScyApplied, 0);
+  gb.renderTransferPixel(0, 2);
   assert.equal(gb.ppuScyApplied, 7);
+});
+
+test("samples a DMG SCY row at the fetch stage before the visible tile edge", () => {
+  const gb = new GameBoy("dmg");
+  gb.loadROM(makeRom());
+  gb.ppuMode = 3;
+  gb.ly = 0;
+  gb.ppuTransferLive = true;
+  gb.ppuInitialScxLow = 0;
+  gb.ppuLineLcdc = 0x91;
+  gb.ppuLineCgbRendering = false;
+  gb.ppuScyApplied = 0;
+  gb.ppuScyPending = 7;
+  gb.ppuScyDelay = 4;
+
+  gb.renderTransferPixel(0, 0);
+  gb.renderTransferPixel(0, 1);
+  assert.equal(gb.ppuScyApplied, 0);
+  gb.renderTransferPixel(0, 2);
+  assert.equal(gb.ppuScyApplied, 7);
+});
+
+test("latches CGB vertical scroll at tile-fetch boundaries", () => {
+  const gb = new GameBoy("cgb");
+  gb.loadROM(makeRom());
+  gb.ppuMode = 3;
+  gb.ly = 0;
+  gb.ppuTransferLive = true;
+  gb.ppuInitialScxLow = 0;
+  gb.ppuLineLcdc = 0x91;
+  gb.ppuLineCgbRendering = false;
+  gb.ppuFetchScy = 0;
+  gb.io[0x42] = 7;
+
+  for (let x = 0; x < 8; x += 1) gb.renderTransferPixel(0, x);
+  assert.equal(gb.ppuFetchScy, 0);
+  gb.renderTransferPixel(0, 8);
+  assert.equal(gb.ppuFetchScy, 7);
 });
 
 test("keeps a DMG LCDC background toggle in the measured pixel pipeline", () => {

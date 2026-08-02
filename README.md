@@ -7,6 +7,9 @@ JavaScript. No third-party emulator core or WebAssembly binary is used.
 
 - Complete LR35902 opcode and CB-opcode decoder
 - DMG and native GBC hardware modes
+- Production hardware behavior is selected automatically; historical CGB
+  revision profiles are maintainer-only conformance diagnostics, not a user
+  setting
 - MBC1, MBC2, MBC3/RTC, and MBC5 cartridges; MBC3 clock latch, halt,
   carry/overflow, elapsed-time restoration, and browser persistence are covered
 - Event-driven, dot-sensitive PPU transfer pipeline with mid-line register
@@ -66,7 +69,7 @@ npm install
 npm run sync:artwork
 npm run dev
 npm test
-npm run benchmark:core -- --baseline-ref v1.3.0
+npm run benchmark:core -- --baseline-ref v2.5.7
 ```
 
 Core benchmark trials run in fresh Node processes by default, so JIT warm-up,
@@ -86,7 +89,7 @@ database, or cloud configuration. Cartridge files, preferences, and battery
 saves remain local to the browser and are never uploaded.
 
 The external conformance runners in `scripts/` accept locally sourced test-ROM
-  directories. See `EMULATION_AUDIT.md` for the v2.5.7 methodology, measured
+  directories. See `EMULATION_AUDIT.md` for the v3.0 methodology, measured
 results, hardware-revision exclusions, and deliberately unclaimed areas.
 
 ## Releases
@@ -97,7 +100,10 @@ The updater has two separate changelogs:
   `release/update-manifest.json`. This file is the repository copy of the
   public `update-manifest.json` Gist fetched by `app/version.js`. These are the
   concise changes shown inside GAMEBOY LAB before the user downloads an
-  update. The app displays at most six non-empty entries.
+  update. The app displays at most six non-empty entries. Keep these notes
+  plain-language and game-focused: say what a player will notice, include a
+  measured percentage when one exists, and avoid implementation names such as
+  cache, FIFO, or register pipeline.
 - **GitHub release changelog:** the matching file in `release/` is supplied as
   the GitHub release body. This is the longer release page for people viewing
   the repository. GAMEBOY LAB does not read this text, so changing it does not

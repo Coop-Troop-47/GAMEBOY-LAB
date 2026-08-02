@@ -1,4 +1,76 @@
-# GAMEBOY LAB v2.5.7 Emulation Audit
+# GAMEBOY LAB v3.0 Emulation Audit
+
+## v3.0 release gate and scope
+
+The v3.0 gate is deliberately broader than a successful build: the project
+suite is fully green, the production-model Mooneye set has no timeouts and
+passes 66/66 applicable cases, revision-appropriate SameSuite cases remain
+stable, the Mealybug structural average improves without trading away exact
+cases, and paired game benchmarks retain a clear throughput gain with
+identical frame checksums. Four Mooneye ROMs target DMG0/MGB boot firmware that
+is not the supplied production DMG BIOS; they remain reported as revision
+diagnostics rather than silently counted as production failures. v3.0 is
+therefore a production DMG/GBC accuracy milestone, not a claim of equivalence
+to every historical silicon revision.
+
+The current working tree contains the v3 engine pass. The audio mixer now
+reuses exact finite-state channel levels, skips mixer arithmetic during
+provably silent batches, clears a stale partial sample when a channel stops,
+keeps channel references local to the APU event loop, and uses a precomputed
+NR50 gain/crossbar path. The write-free static background renderer also emits
+tile-row spans instead of repeating the same tile lookup for every pixel, and
+CPU register-pair reads no longer allocate a temporary array. The ordinary
+CPU cartridge-read path now uses the already-derived visible ROM bank bases
+after boot and DMA hazards have been ruled out; mapper writes still refresh
+those bases and the slow path remains authoritative for boot, DMA, RAM, I/O,
+and truncated images. These changes do not alter the emulated clock, audio
+sample boundaries, framebuffer bytes, or save-state format.
+
+The core accepts an internal `hardwareRevision` profile only for conformance
+experiments (`production`, `cgb0`, `cgbA` through `cgbE`). GAMEBOY LAB does not
+expose that switch: normal users choose only Game Boy or Game Boy Color, and
+the app always uses the production profile. The profile is useful because
+some diagnostic ROMs intentionally probe undocumented differences between
+historical CGB silicon; requiring users to understand those revisions would
+make the normal emulator harder to use without improving ordinary games.
+
+In five fresh-process paired trials (120 warm-up frames, 600 measured frames)
+against v2.5.7, the latest run measured **+23.83% on a DMG Tetris case** and
+**+14.07% on a CGB Tetris DX case**. The frame checksums stayed `86b18c43`
+and `f8c0db5f`, respectively. In practical terms, audio-heavy scenes,
+scrolling, and busy browser tabs have more headroom before a visible stutter;
+emulation speed itself remains fixed at the Game Boy hardware cadence. The
+measurements are host-throughput indicators, not faster-than-hardware gameplay,
+and are reported as a reproducible run rather than a promise for every CPU.
+
+A second, hardware-timing correction now hands a DMG SCY write to the live
+fetcher at the measured source-tile boundary. The CGB path also keeps the
+vertical source row latched at its tile-fetch boundary, including when a GBC
+is running a monochrome cartridge, and delays compatibility-mode BGP writes
+through the measured in-flight handoff. These are active mode-3 paths only;
+the clock cadence and save-state format are unchanged. The DMG-blob average
+moved from **95.9639% to
+96.0343%** (**+0.0704 percentage points / +0.0734% relative**); the focused
+`m3_scy_change` picture moved from **82.9991% to 84.6875%** (**+1.6884 pp /
+2.03% relative**). The latest change is limited to the DMG fetch-stage lead
+and leaves the other 23 reference pictures unchanged. This is a small but
+independently measured edge-case fix, not a claim that every revision now
+matches.
+
+The project suite is **73/73**. SameSuite is **55/78 with 0 timeouts**, and the
+DMG-blob run is **1/24 pixel-exact** with the structural average above. The
+remaining differences are documented revision-sensitive PPU/APU cases; the
+user-facing v3.0 notes describe the production-model result and practical game
+effects without implying that a browser core can match every DMG0/MGB/CGB
+revision simultaneously. This section is the maintainer-facing record.
+
+The reference runner now also measures high-color CGB screenshots with an exact
+assignment fallback instead of refusing them at twelve colors. The current
+candidate reaches **91.4527%** structural similarity for CPU CGB-C (31
+pictures) and **88.6856%** for CPU CGB-D (24 pictures), up from **89.7014%**
+and **86.2961%** in the v2.5.7 baseline. These are revision-specific
+diagnostics, not a claim that the default GBC mode emulates every CGB silicon
+revision equally.
 
 ## v2.5.7 delta
 
@@ -604,6 +676,9 @@ mixers, Bluetooth, and the physical output device add latency outside the app.
   isolation, but a one-file offline app needs a carefully designed audio,
   input, save, and framebuffer protocol; doing it without browser-level
   latency and determinism evidence would be a risky architectural change.
+- A DMG window-resume phase offset was tested against the repeated WIN_EN
+  fixture and rejected: it lowered that case from 90.1563% to 82.5000% and
+  lowered the complete DMG-blob average from 95.9639% to 95.6449%.
 
 ## Reproduction
 
@@ -625,11 +700,13 @@ The external ROM suites are not distributed in GAMEBOY LAB. The audit used
 
 ## Distance from the stated goal
 
-v2.2.2 is materially more accurate than v2.1.0 and exceptionally fast for a
-from-scratch JavaScript core, but the evidence does **not** establish “the most
-accurate browser emulator in the world.” The largest measured gap is still PPU
-behavior: 88.7153% Mealybug structural similarity and 1/24 pixel-exact cases.
-SameSuite APU at 47/70 also leaves 23 revision-sensitive or unimplemented cases.
+v2.5.7 is materially more accurate than v2.1.0 and the current performance
+candidate is exceptionally fast for a from-scratch JavaScript core, but the
+evidence does **not** establish “the most accurate browser emulator in the
+world.” The largest measured gap is still revision-sensitive PPU behavior:
+95.9639% Mealybug structural similarity and 1/24 pixel-exact cases. SameSuite
+is 55/78 with no timeouts; the remaining failures are largely revision-specific
+CGB APU/SGB fixtures rather than a single universal CGB behavior.
 
 High-value remaining work includes a true fetcher/FIFO PPU verified per model,
 APU revision profiles, broader OAM-corruption and DMA-bus validation, additional

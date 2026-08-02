@@ -13,6 +13,10 @@ const PPU_FETCH_PUSH = 3;
 // fetches (16 output pixels) before the new bit is observed. Keep this as a
 // small explicit pipeline latch rather than making the whole renderer live.
 const DMG_BG_ENABLE_PIPELINE_PIXELS = 16;
+// DMG SCY is sampled by the background fetcher's B/0/1 stages. Those stages
+// lead the visible eight-pixel boundary by two dots on the live transfer path.
+// Keep the handoff explicit so the fast renderer and the dot-timed edge agree.
+const DMG_SCY_FETCH_BOUNDARY_OFFSET = -2;
 
 const DUTY_PATTERNS = [
   new Uint8Array([0, 0, 0, 0, 0, 0, 0, 1]),
@@ -20,8 +24,41 @@ const DUTY_PATTERNS = [
   new Uint8Array([1, 0, 0, 0, 0, 1, 1, 1]),
   new Uint8Array([0, 1, 1, 1, 1, 1, 1, 0]),
 ];
+// Audio channel levels use a small, finite state space. Precompute the exact
+// floating-point values once so the hot mixer path only performs table reads
+// and routing, rather than repeating divisions for every sample boundary.
+const AUDIO_SQUARE_LEVELS = new Float64Array(4 * 8 * 16);
+const AUDIO_WAVE_LEVELS = new Float64Array(4 * 16);
+const AUDIO_NOISE_LEVELS = new Float64Array(2 * 16);
+const AUDIO_OUTPUT_GAINS = new Float64Array(8);
+for (let duty = 0; duty < 4; duty += 1) {
+  for (let position = 0; position < 8; position += 1) {
+    for (let volume = 0; volume < 16; volume += 1) {
+      const sign = DUTY_PATTERNS[duty][position] ? 1 : -1;
+      AUDIO_SQUARE_LEVELS[(duty * 8 + position) * 16 + volume] = sign * (volume / 15);
+    }
+  }
+}
+for (let level = 0; level < 4; level += 1) {
+  for (let sample = 0; sample < 16; sample += 1) {
+    // NR32 volume code 0 disconnects the wave DAC; it contributes the
+    // centred zero level rather than the lowest signed sample.
+    AUDIO_WAVE_LEVELS[level * 16 + sample] = level === 0
+      ? 0
+      : (sample >> (level - 1)) / 7.5 - 1;
+  }
+}
+for (let sign = 0; sign < 2; sign += 1) {
+  for (let volume = 0; volume < 16; volume += 1) {
+    AUDIO_NOISE_LEVELS[sign * 16 + volume] = (sign ? 1 : -1) * (volume / 15);
+  }
+}
+for (let volume = 0; volume < 8; volume += 1) {
+  AUDIO_OUTPUT_GAINS[volume] = (volume + 1) / 32;
+}
 const NOISE_PERIODS = new Uint16Array([8, 16, 32, 48, 64, 80, 96, 112]);
 const TIMER_MASKS = new Uint16Array([1 << 9, 1 << 3, 1 << 5, 1 << 7]);
+const CGB_HARDWARE_REVISIONS = new Set(["production", "cgb0", "cgbA", "cgbB", "cgbC", "cgbD", "cgbE"]);
 const DECODED_TILE_ROWS = new Uint16Array(0x10000);
 for (let bytes = 0; bytes < 0x10000; bytes += 1) {
   const low = bytes & 0xff;
@@ -37,7 +74,6 @@ const ILLEGAL_OPCODES = new Uint8Array(256);
 for (const opcode of [0xd3, 0xdb, 0xdd, 0xe3, 0xe4, 0xeb, 0xec, 0xed, 0xf4, 0xfc, 0xfd]) {
   ILLEGAL_OPCODES[opcode] = 1;
 }
-
 const FLAG_Z = 0x80;
 const FLAG_N = 0x40;
 const FLAG_H = 0x20;
@@ -107,7 +143,7 @@ const STATE_SCALARS = [
   "ppuScyApplied", "ppuScyPending", "ppuScyDelay",
   "ppuBgEnableApplied", "ppuBgEnablePending", "ppuBgEnableDelay",
   "ppuLineObp1", "ppuLineWy", "ppuLineWx", "ppuLineWindowLine",
-  "ppuLineCgbRendering", "ppuFetchScx", "ppuFetchLcdc", "ppuFetchWindowMap",
+  "ppuLineCgbRendering", "ppuFetchScx", "ppuFetchScy", "ppuFetchLcdc", "ppuFetchWindowMap",
   "ppuFifoEnabled", "ppuFifoHead", "ppuFifoLength", "ppuFetcherState",
   "ppuFetcherDots", "ppuFetcherWindow", "ppuFetcherTileCount", "ppuFetcherTileX", "ppuFetcherPosition", "ppuFetcherBgY",
   "ppuFetcherTileNumber", "ppuFetcherAttr", "ppuFetcherTileAddress", "ppuWxJustChanged",
@@ -229,8 +265,17 @@ function cartridgeName(type) {
 }
 
 export class GameBoy {
-  constructor(model = "dmg") {
+  constructor(model = "dmg", options = {}) {
     this.model = model;
+    // Revision profiles are intentionally an internal accuracy/testing hook.
+    // The app always uses the production profile; conformance tooling can
+    // select a known CGB silicon revision without exposing another user
+    // setting or changing the normal Game Boy / Game Boy Color choice.
+    const requestedRevision = options?.hardwareRevision;
+    this.hardwareRevision = model === "cgb"
+      && CGB_HARDWARE_REVISIONS.has(requestedRevision)
+      ? requestedRevision
+      : model === "cgb" ? "production" : "dmg";
     this.bootRom = null;
     this.rom = new Uint8Array(0x8000);
     this.romBanks = 2;
@@ -277,6 +322,10 @@ export class GameBoy {
     this.ppuFifoWindow = new Uint8Array(16);
     this.colorScratch = new Uint8Array(3);
     this.audioMix = new Float64Array(6);
+    // Mixer output is constant between channel/register edges. This derived
+    // cache avoids rebuilding the same four-channel mix for every host sample
+    // while leaving clock and sample integration unchanged.
+    this.audioMixDirty = true;
     this.audioSamples = new Float32Array(4096);
     this.audioSampleCount = 0;
     this.audioRate = AUDIO_RATE;
@@ -322,6 +371,7 @@ export class GameBoy {
     this.audioIntegralLeft = 0;
     this.audioIntegralRight = 0;
     this.audioSampleCount = 0;
+    this.audioMixDirty = true;
     this.refreshAudioSteps();
     return true;
   }
@@ -528,6 +578,7 @@ export class GameBoy {
     this.ppuLineWindowLine = 0;
     this.ppuLineCgbRendering = false;
     this.ppuFetchScx = 0;
+    this.ppuFetchScy = 0;
     this.ppuFetchLcdc = 0;
     this.ppuFetchWindowMap = 0;
     this.ppuFifoEnabled = false;
@@ -710,6 +761,7 @@ export class GameBoy {
     this.audioIntegralLeft = 0;
     this.audioIntegralRight = 0;
     this.apuPendingClocks = 0;
+    this.audioMixDirty = true;
     this.audioFrameStep = 0;
     // CGB envelope clocks have a second divider phase between the visible
     // 512 Hz frame-sequencer edges.  Keep it separate from audioFrameStep:
@@ -802,7 +854,14 @@ export class GameBoy {
   setHL(value) { this.h = (value >> 8) & 0xff; this.l = value & 0xff; }
 
   getPair(index) {
-    return [this.getBC(), this.getDE(), this.getHL(), this.sp][index];
+    // This helper sits on the CPU's hottest decode paths (LD/ADD/INC/DEC
+    // 16-bit pairs). Avoid allocating a four-entry array for every access;
+    // direct dispatch preserves the same register masking while keeping the
+    // interpreter allocation-free during ordinary instruction execution.
+    if (index === 0) return (this.b << 8) | this.c;
+    if (index === 1) return (this.d << 8) | this.e;
+    if (index === 2) return (this.h << 8) | this.l;
+    return this.sp;
   }
 
   setPair(index, value) {
@@ -1018,12 +1077,26 @@ export class GameBoy {
   cpuRead(address, iduIncrement = false) {
     this.tick(4);
     this.instructionTicks += 4;
-    this.triggerOAMCorruption(iduIncrement ? "read-write" : "read", address);
-    if (this.dmaConflictsWith(address)) {
+    if (address >= 0xfe00 && address < 0xff00) {
+      this.triggerOAMCorruption(iduIncrement ? "read-write" : "read", address);
+    }
+    if (this.dmaCycles > 0 && this.dmaConflictsWith(address)) {
       // During a conflicting read the CPU sees the byte currently driven by
       // the DMA source bus, rather than a fabricated constant $FF.
       const source = this.dmaSource + Math.max(0, this.dmaIndex - 1);
       return this.readDmaSource(source);
+    }
+    // Cartridge fetches are by far the most common CPU reads. Once the boot
+    // mapping and DMA bus hazards are out of the way, use the already-derived
+    // visible bank bases directly instead of re-running the full memory-map
+    // ladder (boot, VRAM, RAM, echo, OAM, I/O) for every opcode byte. The
+    // bounds fallback intentionally keeps truncated homebrew images reading
+    // $FF just like read8().
+    if (!this.bootEnabled && this.dmaCycles <= 0 && address < 0x8000) {
+      const offset = address < 0x4000
+        ? this.romBank0Base + address
+        : this.romBankBase + address - 0x4000;
+      return this.rom[offset] ?? 0xff;
     }
     return this.read8(address);
   }
@@ -1496,10 +1569,10 @@ export class GameBoy {
       this.activateLivePixelTransfer(register);
       if (register === 0x42 && this.model === "dmg" && this.ppuMode === 3 && this.ppuTransferLive) {
         // A DMG SCY write reaches the fetcher after the in-flight pixel's
-        // row has completed. Keeping a two-pixel handoff window preserves
+        // row has completed. Keeping a three-pixel handoff window preserves
         // the measured mixed-row phase without changing line timing.
         this.ppuScyPending = value;
-        this.ppuScyDelay = 2;
+        this.ppuScyDelay = 3;
       }
       if (register === 0x4b && this.ppuMode === 3) this.ppuWxJustChanged = true;
       this.io[register] = value;
@@ -1684,12 +1757,16 @@ export class GameBoy {
             && ((this.ch1.enabled && !this.ch1.cgbEnvelopeLegacy
               && !this.ch1.envelopeClockLocked && this.ch1.volumeCountdown === 0)
               || (this.ch2.enabled && !this.ch2.cgbEnvelopeLegacy
-                && !this.ch2.envelopeClockLocked && this.ch2.volumeCountdown === 0));
+                && !this.ch2.envelopeClockLocked && this.ch2.volumeCountdown === 0)
+              || (this.ch4.enabled && !this.ch4.cgbEnvelopeLegacy
+                && !this.ch4.envelopeClockLocked && this.ch4.volumeCountdown === 0));
           if (secondaryClockNeeded) {
             const secondaryAudioNeeded = (this.ch1.enabled && !this.ch1.cgbEnvelopeLegacy
               && (this.io[0x12] & 7) && this.ch1.volumeCountdown === 0)
               || (this.ch2.enabled && !this.ch2.cgbEnvelopeLegacy
-                && (this.io[0x17] & 7) && this.ch2.volumeCountdown === 0);
+                && (this.io[0x17] & 7) && this.ch2.volumeCountdown === 0)
+              || (this.ch4.enabled && !this.ch4.cgbEnvelopeLegacy
+                && (this.io[0x21] & 7) && this.ch4.volumeCountdown === 0);
             if (secondaryAudioNeeded) this.flushAPU();
             this.clockAPUSecondaryEvent();
           }
@@ -2030,6 +2107,7 @@ export class GameBoy {
     this.ppuLineCgbRendering = this.cgbMode
       || (this.model === "cgb" && this.bootEnabled);
     this.ppuFetchScx = this.io[0x43];
+    this.ppuFetchScy = this.io[0x42];
     this.ppuFetchLcdc = this.io[0x40];
     this.ppuFetchWindowMap = this.io[0x40] & 0x40;
     this.ppuFifoEnabled = false;
@@ -2078,10 +2156,11 @@ export class GameBoy {
       || this.ppuMode !== 3
       || this.ly >= SCREEN_HEIGHT
     ) return;
-    if (this.model === "dmg" && register === 0x47) {
-      // DMG palette writes keep six additional dots of the in-flight fetch
-      // visible before the new mapping reaches the LCD. This is a transfer
-      // phase adjustment only; the line's fixed timing remains unchanged.
+    if (register === 0x47 && (this.model === "dmg" || (this.model === "cgb" && !this.cgbMode))) {
+      // DMG LCDs and CGB compatibility mode keep six additional dots of the
+      // in-flight fetch visible before a BGP write reaches the LCD. This is a
+      // transfer phase adjustment only; the line's fixed timing remains
+      // unchanged.
       this.ppuTransferWarmup = 18;
     }
     // The first mode-3 register write is the point at which the old fast
@@ -2486,56 +2565,58 @@ export class GameBoy {
     const framebufferOffset = line * SCREEN_WIDTH;
     const vram = this.vram;
     const decodedTileRows = this.decodedTileRows;
-    let cachedTileKey = -1;
-    let cachedTileRow = 0;
-    let cachedTileAttr = 0;
-
-    for (let x = start; x < limit; x += 1) {
-      let colorIndex = 0;
-      let palette = 0;
-      let priority = 0;
+    let x = start;
+    while (x < limit) {
+      const useWindow = windowEnabled && x >= windowStart;
+      const pixelX = useWindow
+        ? x - windowStart
+        : (x + this.ppuLineScx) & 0xff;
+      const pixelY = useWindow
+        ? this.ppuLineWindowLine
+        : (line + this.ppuLineScy) & 0xff;
+      const mapBase = useWindow
+        ? ((lcdc & 0x40) ? 0x1c00 : 0x1800)
+        : ((lcdc & 0x08) ? 0x1c00 : 0x1800);
+      const mapOffset = bgEnabled
+        ? mapBase + ((pixelY >> 3) * 32) + (pixelX >> 3)
+        : 0;
+      const rawTileY = pixelY & 7;
+      let attr = 0;
+      let tileRow = 0;
       if (bgEnabled) {
-        const useWindow = windowEnabled && x >= windowStart;
-        const pixelX = useWindow
-          ? x - windowStart
-          : (x + this.ppuLineScx) & 0xff;
-        const pixelY = useWindow
-          ? this.ppuLineWindowLine
-          : (line + this.ppuLineScy) & 0xff;
-        const mapBase = useWindow
-          ? ((lcdc & 0x40) ? 0x1c00 : 0x1800)
-          : ((lcdc & 0x08) ? 0x1c00 : 0x1800);
-        const mapOffset = mapBase + ((pixelY >> 3) * 32) + (pixelX >> 3);
-        const rawTileY = pixelY & 7;
-        const tileKey = mapOffset | (rawTileY << 13);
-        if (tileKey !== cachedTileKey) {
-          const tileNumber = vram[mapOffset];
-          const attr = cgbRendering ? vram[0x2000 + mapOffset] : 0;
-          let tileY = rawTileY;
-          if (attr & 0x40) tileY = 7 - tileY;
-          const tileAddress = lcdc & 0x10
-            ? tileNumber * 16
-            : 0x1000 + signed8(tileNumber) * 16;
-          const bank = cgbRendering && (attr & 0x08) ? 0x2000 : 0;
-          cachedTileRow = decodedTileRows[(bank + tileAddress + tileY * 2) >> 1];
-          cachedTileAttr = attr;
-          cachedTileKey = tileKey;
-        }
-        const attr = cachedTileAttr;
-        let tileX = pixelX & 7;
-        if (attr & 0x20) tileX = 7 - tileX;
-        colorIndex = (cachedTileRow >> (tileX * 2)) & 3;
-        palette = attr & 7;
-        priority = (attr >> 7) & 1;
+        const tileNumber = vram[mapOffset];
+        attr = cgbRendering ? vram[0x2000 + mapOffset] : 0;
+        let tileY = rawTileY;
+        if (attr & 0x40) tileY = 7 - tileY;
+        const tileAddress = lcdc & 0x10
+          ? tileNumber * 16
+          : 0x1000 + signed8(tileNumber) * 16;
+        const bank = cgbRendering && (attr & 0x08) ? 0x2000 : 0;
+        tileRow = decodedTileRows[(bank + tileAddress + tileY * 2) >> 1];
       }
-      bgColors[x] = colorIndex;
-      bgPriority[x] = priority;
-      const packedColor = cgbRendering
-        ? this.bgPalettePacked[(palette * 4) + colorIndex]
-        : cgbCompatibility
-          ? this.bgPalettePacked[(this.ppuLineBgp >> (colorIndex * 2)) & 3]
-          : this.dmgBgPalettePacked[(this.ppuLineBgp >> (colorIndex * 2)) & 3];
-      framebuffer32[framebufferOffset + x] = packedColor;
+      const run = Math.min(
+        limit - x,
+        8 - (pixelX & 7),
+        !useWindow && windowEnabled && x < windowStart ? windowStart - x : limit - x,
+      );
+      const palette = attr & 7;
+      const priority = (attr >> 7) & 1;
+      for (let offset = 0; offset < run; offset += 1) {
+        let colorIndex = 0;
+        if (bgEnabled) {
+          let tileX = (pixelX + offset) & 7;
+          if (attr & 0x20) tileX = 7 - tileX;
+          colorIndex = (tileRow >> (tileX * 2)) & 3;
+        }
+        bgColors[x + offset] = colorIndex;
+        bgPriority[x + offset] = bgEnabled ? priority : 0;
+        framebuffer32[framebufferOffset + x + offset] = cgbRendering
+          ? this.bgPalettePacked[(palette * 4) + colorIndex]
+          : cgbCompatibility
+            ? this.bgPalettePacked[(this.ppuLineBgp >> (colorIndex * 2)) & 3]
+            : this.dmgBgPalettePacked[(this.ppuLineBgp >> (colorIndex * 2)) & 3];
+      }
+      x += run;
     }
 
     if (!(lcdc & 0x02)) return;
@@ -2637,6 +2718,7 @@ export class GameBoy {
         : x > 0 && (((x + this.ppuInitialScxLow) & 7) === 0);
       if (fetchTileBoundary) {
         this.ppuFetchScx = this.io[0x43];
+        if (this.model === "cgb") this.ppuFetchScy = this.io[0x42];
         this.ppuFetchLcdc = this.io[0x40];
         this.ppuFetchWindowMap = this.io[0x40] & 0x40;
       }
@@ -2644,9 +2726,20 @@ export class GameBoy {
       const pixelX = useWindow
         ? this.ppuWindowPixelX
         : (x + scrollX) & 0xff;
+      // DMG SCY is sampled by the fetcher at a source-tile boundary. When the
+      // boundary arrives before the short measured handoff has elapsed, the
+      // fetcher can expose the new row on that same transfer phase.
+      const sourceBoundary = x > 0
+        && (((x + this.ppuInitialScxLow + DMG_SCY_FETCH_BOUNDARY_OFFSET) & 7) === 0);
+      if (!useWindow && this.ppuScyDelay > 0 && sourceBoundary) this.ppuScyDelay = 0;
       if (!useWindow && this.ppuScyDelay > 0) this.ppuScyDelay -= 1;
       if (!useWindow && this.ppuScyDelay === 0) this.ppuScyApplied = this.ppuScyPending;
-      const scrollY = this.model === "dmg" ? this.ppuScyApplied : this.io[0x42];
+      // Later CGB revisions cache the vertical source row with the tile
+      // fetcher. DMG keeps its measured handoff path; compatibility mode is
+      // still a DMG LCD and therefore follows the DMG register semantics.
+      const scrollY = this.model === "cgb"
+        ? this.ppuFetchScy
+        : this.model === "dmg" ? this.ppuScyApplied : this.io[0x42];
       const pixelY = useWindow
         ? (this.ppuWindowRow & 0xff)
         : (line + scrollY) & 0xff;
@@ -3002,6 +3095,7 @@ export class GameBoy {
     // final two base clocks must therefore execute with the new register
     // value, not the old one.
     this.flushAPU(2);
+    this.audioMixDirty = true;
     if (
       register === 0x15
       || register === 0x1f
@@ -3217,6 +3311,7 @@ export class GameBoy {
     const value = this.io[register];
     if (!(value & 7)) return;
     channel.volume = (channel.volume + ((value & 8) ? 1 : -1)) & 0xf;
+    this.audioMixDirty = true;
   }
 
   prepareTriggeredLength(channel, previous, value) {
@@ -3336,8 +3431,53 @@ export class GameBoy {
     // all channel timers first, then the DAC sample for that same T-cycle.
     this.ch1.justReloaded = false;
     this.ch2.justReloaded = false;
+    // A CPU/APU batch cannot contain a register write; writes flush this
+    // method before mutating the register. Hoist stable channel references and
+    // the power gate out of the event loop so the hot path does not repeatedly
+    // traverse the emulator object graph.
+    const powered = !!(this.io[0x26] & 0x80);
+    const ch1 = this.ch1;
+    const ch2 = this.ch2;
+    const ch3 = this.ch3;
+    const ch4 = this.ch4;
+    const routing = this.io[0x25];
+    // A powered channel whose DAC is currently at zero still has to advance
+    // its phase (future register writes and PCM reads observe that state), but
+    // its timer does not need to split the host-audio integration interval.
+    // Keep the edge-by-edge path for audible square waves; silent squares are
+    // folded over whole periods below. This removes a large amount of timer
+    // churn in real games that leave unused channels enabled at volume zero.
+    // With no powered/routed channels the DAC is mathematically silent for
+    // the entire batch. Keep sample-clock advancement exact while skipping
+    // mixer work (common during boot, menus, and LCD-off intervals).
+    const audioSilent = !powered
+      || (!ch1.enabled || !(routing & 0x11))
+      && (!ch2.enabled || !(routing & 0x22))
+      && (!ch3.enabled || !(this.io[0x1a] & 0x80) || !(routing & 0x44))
+      && (!ch4.enabled || !(routing & 0x88));
+    if (audioSilent && !ch1.enabled && !ch2.enabled && !ch3.enabled && !ch4.enabled) {
+      // During BIOS/LCD-off silence there is no channel state to advance. Keep
+      // host sample phase and the powered divider phase exact, but avoid
+      // entering the four-channel event loop at all. Split only at host sample
+      // boundaries because integrateSilentAudioLevel intentionally consumes a
+      // single bounded interval at a time.
+      let remaining = clocks;
+      while (remaining > 0) {
+        const advance = Math.min(
+          remaining,
+          Math.max(1, Math.ceil((CPU_CLOCK - this.audioClock) / this.audioRate)),
+        );
+        this.integrateSilentAudioLevel(advance);
+        remaining -= advance;
+      }
+      if (powered) this.apuSquarePhase = (this.apuSquarePhase + clocks) & 3;
+      return;
+    }
     while (clocks > 0) {
-      const powered = !!(this.io[0x26] & 0x80);
+      const ch1Fine = ch1.enabled && (ch1.sampleSuppressed
+        || ((routing & 0x11) && ch1.volume !== 0));
+      const ch2Fine = ch2.enabled && (ch2.sampleSuppressed
+        || ((routing & 0x22) && ch2.volume !== 0));
       const clocksToSample = Math.max(
         1,
         Math.ceil((CPU_CLOCK - this.audioClock) / this.audioRate),
@@ -3346,54 +3486,68 @@ export class GameBoy {
       if (powered) {
         advance = Math.min(
           advance,
-          this.ch1.enabled ? Math.max(1, this.ch1.timer) : advance,
-          this.ch2.enabled ? Math.max(1, this.ch2.timer) : advance,
-          this.ch3.enabled ? Math.max(1, this.ch3.timer) : advance,
-          this.ch4.enabled ? Math.max(1, this.ch4.timer) : advance,
+          ch1Fine ? Math.max(1, ch1.timer) : advance,
+          ch2Fine ? Math.max(1, ch2.timer) : advance,
+          ch3.enabled ? Math.max(1, ch3.timer) : advance,
+          ch4.enabled ? Math.max(1, ch4.timer) : advance,
         );
-        if (this.ch1.enabled) this.ch1.timer -= advance;
-        if (this.ch2.enabled) this.ch2.timer -= advance;
-        if (this.ch3.enabled) {
-          this.ch3.timer -= advance;
-          this.ch3.waveAccess = Math.max(0, this.ch3.waveAccess - advance);
+        if (ch1.enabled) ch1.timer -= advance;
+        if (ch2.enabled) ch2.timer -= advance;
+        if (ch3.enabled) {
+          ch3.timer -= advance;
+          ch3.waveAccess = Math.max(0, ch3.waveAccess - advance);
         }
-        if (this.ch4.enabled) this.ch4.timer -= advance;
+        if (ch4.enabled) ch4.timer -= advance;
       }
-      this.integrateAudioLevel(advance);
+      if (audioSilent) this.integrateSilentAudioLevel(advance);
+      else this.integrateAudioLevel(advance);
       if (powered) this.apuSquarePhase = (this.apuSquarePhase + advance) & 3;
       clocks -= advance;
 
       if (powered) {
-        if (this.ch1.enabled && this.ch1.timer <= 0) {
-          this.ch1.timer += this.ch1.timerPeriod;
-          this.ch1.dutyPosition = (this.ch1.dutyPosition + 1) & 7;
-          this.ch1.duty = this.io[0x11] >> 6;
-          this.ch1.sampleSuppressed = false;
-          this.ch1.justReloaded = clocks === 0;
+        if (ch1.enabled && ch1.timer <= 0) {
+          const period = Math.max(1, ch1.timerPeriod);
+          const edges = ch1Fine ? 1 : Math.floor(-ch1.timer / period) + 1;
+          ch1.timer += edges * period;
+          ch1.dutyPosition = (ch1.dutyPosition + edges) & 7;
+          ch1.duty = this.io[0x11] >> 6;
+          ch1.sampleSuppressed = false;
+          ch1.justReloaded = clocks === 0;
+          // A channel that is silent or disconnected cannot change the
+          // terminal mix when its phase advances. Avoid rebuilding the
+          // four-channel mix for those edges (common during quiet menus and
+          // games that leave a square channel at volume zero).
+          if ((routing & 0x11) && ch1.volume) this.audioMixDirty = true;
         }
-        if (this.ch2.enabled && this.ch2.timer <= 0) {
-          this.ch2.timer += this.ch2.timerPeriod;
-          this.ch2.dutyPosition = (this.ch2.dutyPosition + 1) & 7;
-          this.ch2.duty = this.io[0x16] >> 6;
-          this.ch2.sampleSuppressed = false;
-          this.ch2.justReloaded = clocks === 0;
+        if (ch2.enabled && ch2.timer <= 0) {
+          const period = Math.max(1, ch2.timerPeriod);
+          const edges = ch2Fine ? 1 : Math.floor(-ch2.timer / period) + 1;
+          ch2.timer += edges * period;
+          ch2.dutyPosition = (ch2.dutyPosition + edges) & 7;
+          ch2.duty = this.io[0x16] >> 6;
+          ch2.sampleSuppressed = false;
+          ch2.justReloaded = clocks === 0;
+          if ((routing & 0x22) && ch2.volume) this.audioMixDirty = true;
         }
-        if (this.ch3.enabled && this.ch3.timer <= 0) {
-          this.ch3.timer += this.ch3.timerPeriod;
-          this.ch3.wavePosition = (this.ch3.wavePosition + 1) & 31;
-          const byte = this.io[0x30 + (this.ch3.wavePosition >> 1)];
-          this.ch3.currentSample = (this.ch3.wavePosition & 1)
+        if (ch3.enabled && ch3.timer <= 0) {
+          ch3.timer += ch3.timerPeriod;
+          ch3.wavePosition = (ch3.wavePosition + 1) & 31;
+          const byte = this.io[0x30 + (ch3.wavePosition >> 1)];
+          ch3.currentSample = (ch3.wavePosition & 1)
             ? byte & 0x0f
             : byte >> 4;
-          this.ch3.waveAccess = 1;
+          ch3.waveAccess = 1;
+          if ((routing & 0x44) && (this.io[0x1a] & 0x80)
+            && ((this.io[0x1c] >> 5) & 3)) this.audioMixDirty = true;
         }
-        if (this.ch4.enabled && this.ch4.timer <= 0) {
-          this.ch4.timer += this.ch4.timerPeriod;
-          const bit = (this.ch4.lfsr & 1) ^ ((this.ch4.lfsr >> 1) & 1);
-          this.ch4.lfsr = (this.ch4.lfsr >> 1) | (bit << 14);
+        if (ch4.enabled && ch4.timer <= 0) {
+          ch4.timer += ch4.timerPeriod;
+          const bit = (ch4.lfsr & 1) ^ ((ch4.lfsr >> 1) & 1);
+          ch4.lfsr = (ch4.lfsr >> 1) | (bit << 14);
           if (this.io[0x22] & 8) {
-            this.ch4.lfsr = (this.ch4.lfsr & ~(1 << 6)) | (bit << 6);
+            ch4.lfsr = (ch4.lfsr & ~(1 << 6)) | (bit << 6);
           }
+          if ((routing & 0x88) && ch4.volume) this.audioMixDirty = true;
         }
       }
     }
@@ -3426,10 +3580,17 @@ export class GameBoy {
 
   clockAPUSecondaryEvent() {
     if (this.model !== "cgb" || !(this.io[0x26] & 0x80)) return;
-    const channels = [[this.ch1, 0x12], [this.ch2, 0x17]];
+    // CGB's secondary envelope edge is shared by all envelope generators.
+    // Noise was previously omitted here, which left NR42 volume/divider tests
+    // one edge behind while square-channel tests happened to pass.
+    const channels = [[this.ch1, 0x12], [this.ch2, 0x17], [this.ch4, 0x21]];
     for (const [channel, register] of channels) {
       if (!channel.enabled || channel.cgbEnvelopeLegacy || channel.volumeCountdown !== 0) continue;
       this.setEnvelopeClock(channel, true, !!(this.io[register] & 8));
+      // The secondary edge arms the envelope counter with the programmed
+      // period. Leaving it at zero would retrigger the edge on every divider
+      // transition and drops one volume step in CGB PCM traces.
+      if (this.hardwareRevision === "cgbE") channel.volumeCountdown = this.io[register] & 7;
     }
   }
 
@@ -3454,6 +3615,7 @@ export class GameBoy {
     const frequency = this.calculateSweep();
     if (frequency > 0x7ff) {
       channel.enabled = false;
+      this.audioMixDirty = true;
       return;
     }
     if (shift === 0) return;
@@ -3461,7 +3623,10 @@ export class GameBoy {
     this.io[0x13] = frequency & 0xff;
     this.io[0x14] = (this.io[0x14] & 0xf8) | (frequency >> 8);
     this.updateSquareStep(this.ch1, 0x13, 0x14);
-    if (this.calculateSweep() > 0x7ff) channel.enabled = false;
+    if (this.calculateSweep() > 0x7ff) {
+      channel.enabled = false;
+      this.audioMixDirty = true;
+    }
   }
 
   clockLengths() {
@@ -3471,12 +3636,17 @@ export class GameBoy {
       [this.ch3, !!(this.io[0x1e] & 0x40)],
       [this.ch4, !!(this.io[0x23] & 0x40)],
     ];
+    let changed = false;
     for (const [channel, enabled] of clocks) {
       if (enabled && channel.length > 0) {
         channel.length -= 1;
-        if (channel.length === 0) channel.enabled = false;
+        if (channel.length === 0) {
+          channel.enabled = false;
+          changed = true;
+        }
       }
     }
+    if (changed) this.audioMixDirty = true;
   }
 
   clockEnvelopes(frameSequencer = false) {
@@ -3484,6 +3654,7 @@ export class GameBoy {
       ? [[this.ch1, 0x12], [this.ch2, 0x17], [this.ch4, 0x21]]
         .filter(([channel]) => channel === this.ch4 || channel.cgbEnvelopeLegacy)
       : [[this.ch1, 0x12], [this.ch2, 0x17], [this.ch4, 0x21]];
+    let changed = false;
     for (const [channel, register] of channels) {
       const period = (this.io[register] & 7) || 8;
       if (!channel.enabled || !channel.envRunning) continue;
@@ -3492,10 +3663,14 @@ export class GameBoy {
         channel.envCounter = period;
         const delta = (this.io[register] & 8) ? 1 : -1;
         const volume = channel.volume + delta;
-        if (volume >= 0 && volume <= 15) channel.volume = volume;
+        if (volume >= 0 && volume <= 15) {
+          channel.volume = volume;
+          changed = true;
+        }
         else channel.envRunning = false;
       }
     }
+    if (changed) this.audioMixDirty = true;
   }
 
   calculateAudioLevel() {
@@ -3504,61 +3679,96 @@ export class GameBoy {
     outputs[1] = 0;
     outputs[2] = 0;
     outputs[3] = 0;
-    for (let index = 0; index < 2; index += 1) {
-      const channel = index === 0 ? this.ch1 : this.ch2;
-      if (!channel.enabled || channel.sampleSuppressed) continue;
-      outputs[index] = (
-        DUTY_PATTERNS[channel.duty][channel.dutyPosition] ? 1 : -1
-      ) * (channel.volume / 15);
+    const channel1 = this.ch1;
+    const channel2 = this.ch2;
+    if (channel1.enabled && !channel1.sampleSuppressed) {
+      outputs[0] = AUDIO_SQUARE_LEVELS[
+        (channel1.duty * 8 + channel1.dutyPosition) * 16 + channel1.volume
+      ];
+    }
+    if (channel2.enabled && !channel2.sampleSuppressed) {
+      outputs[1] = AUDIO_SQUARE_LEVELS[
+        (channel2.duty * 8 + channel2.dutyPosition) * 16 + channel2.volume
+      ];
     }
 
-    if (this.ch3.enabled && (this.io[0x1a] & 0x80)) {
-      let sample = this.ch3.currentSample;
+    const channel3 = this.ch3;
+    if (channel3.enabled && (this.io[0x1a] & 0x80)) {
       const level = (this.io[0x1c] >> 5) & 3;
-      sample = level === 0 ? 0 : sample >> (level - 1);
-      outputs[2] = sample / 7.5 - 1;
+      outputs[2] = AUDIO_WAVE_LEVELS[(level * 16) + channel3.currentSample];
     }
 
-    if (this.ch4.enabled) {
-      outputs[3] = ((~this.ch4.lfsr & 1) ? 1 : -1) * (this.ch4.volume / 15);
+    const channel4 = this.ch4;
+    if (channel4.enabled) {
+      outputs[3] = AUDIO_NOISE_LEVELS[((~channel4.lfsr & 1) ? 16 : 0) + channel4.volume];
     }
 
     const routing = this.io[0x25];
     const volume = this.io[0x24];
+    // NR51 is a fixed four-channel crossbar. Keep the additions in channel
+    // order, but avoid a loop, shifts, and repeated gain divisions at every
+    // audio edge; the gain table is exact because all values are powers of
+    // two fractions.
     let left = 0;
+    if (routing & 0x10) left += outputs[0];
+    if (routing & 0x20) left += outputs[1];
+    if (routing & 0x40) left += outputs[2];
+    if (routing & 0x80) left += outputs[3];
     let right = 0;
-    for (let i = 0; i < 4; i += 1) {
-      if (routing & (1 << i)) right += outputs[i];
-      if (routing & (1 << (i + 4))) left += outputs[i];
-    }
-    left *= (((volume >> 4) & 7) + 1) / 32;
-    right *= ((volume & 7) + 1) / 32;
+    if (routing & 0x01) right += outputs[0];
+    if (routing & 0x02) right += outputs[1];
+    if (routing & 0x04) right += outputs[2];
+    if (routing & 0x08) right += outputs[3];
+    left *= AUDIO_OUTPUT_GAINS[(volume >> 4) & 7];
+    right *= AUDIO_OUTPUT_GAINS[volume & 7];
     outputs[4] = left;
     outputs[5] = right;
+    this.audioMixDirty = false;
     return outputs;
   }
 
   integrateAudioLevel(clocks) {
-    const outputs = this.calculateAudioLevel();
+    if (this.audioMixDirty) this.calculateAudioLevel();
+    const left = this.audioMix[4];
+    const right = this.audioMix[5];
     let phase = clocks * this.audioRate;
     const untilSample = CPU_CLOCK - this.audioClock;
     if (phase < untilSample) {
-      this.audioIntegralLeft += outputs[4] * phase;
-      this.audioIntegralRight += outputs[5] * phase;
+      this.audioIntegralLeft += left * phase;
+      this.audioIntegralRight += right * phase;
       this.audioClock += phase;
       return;
     }
 
-    this.audioIntegralLeft += outputs[4] * untilSample;
-    this.audioIntegralRight += outputs[5] * untilSample;
+    this.audioIntegralLeft += left * untilSample;
+    this.audioIntegralRight += right * untilSample;
     this.pushAudioSample(
       this.audioIntegralLeft / CPU_CLOCK,
       this.audioIntegralRight / CPU_CLOCK,
     );
     phase -= untilSample;
     this.audioClock = phase;
-    this.audioIntegralLeft = outputs[4] * phase;
-    this.audioIntegralRight = outputs[5] * phase;
+    this.audioIntegralLeft = left * phase;
+    this.audioIntegralRight = right * phase;
+  }
+
+  integrateSilentAudioLevel(clocks) {
+    // A channel can stop exactly on a waveform edge, leaving a partial host
+    // sample from the powered mix in the integrator.  Once the APU is known
+    // to be silent, that partial area is no longer part of the signal. Clear
+    // it before advancing the silent clock so a later trigger in the same
+    // host sample cannot resurrect stale audio.
+    this.audioIntegralLeft = 0;
+    this.audioIntegralRight = 0;
+    let phase = clocks * this.audioRate;
+    const untilSample = CPU_CLOCK - this.audioClock;
+    if (phase < untilSample) {
+      this.audioClock += phase;
+      return;
+    }
+    this.pushAudioSample(0, 0);
+    phase -= untilSample;
+    this.audioClock = phase;
   }
 
   pushAudioSample(left, right) {
@@ -4108,6 +4318,7 @@ export class GameBoy {
     return {
       version: STATE_VERSION,
       model: this.model,
+      hardwareRevision: this.hardwareRevision,
       title: this.title,
       scalars,
       memory: {
@@ -4152,6 +4363,8 @@ export class GameBoy {
       !snapshot
       || snapshot.version !== STATE_VERSION
       || snapshot.model !== this.model
+      || (snapshot.hardwareRevision
+        && snapshot.hardwareRevision !== this.hardwareRevision)
       || snapshot.title !== this.title
     ) return false;
     for (const key of STATE_SCALARS) {
@@ -4234,6 +4447,7 @@ export class GameBoy {
     this.ch3 = { ...this.ch3, ...(snapshot.channels?.ch3 ?? {}) };
     this.ch4 = { ...this.ch4, ...(snapshot.channels?.ch4 ?? {}) };
     this.refreshAudioSteps();
+    this.audioMixDirty = true;
     this.serialOutput = snapshot.serialOutput ?? "";
     this.compatibilityPaletteId = snapshot.compatibilityPaletteId ?? "auto";
     this.capturedCompatibilityPalette = snapshot.capturedCompatibilityPalette

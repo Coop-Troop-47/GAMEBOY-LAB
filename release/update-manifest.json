@@ -1,12 +1,13 @@
 {
-  "version": "2.5.7",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v2.5.7/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v2.5.7",
+  "version": "3.0.0",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v3.0.0/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v3.0.0",
   "changes": [
-    "Original Game Boy window scenes at the six-pixel left-edge position now line up instead of starting on the wrong tile row.",
-    "DMG reference-picture matching improved from 94.9946% to 95.9639% (+1.02% relative).",
-    "The focused WX=6 scene improved by 23.2639 percentage points (+31.07% relative); the other 23 scenes held steady.",
-    "Other window positions, native Game Boy Color rendering, saves, and representative game timing checksums remain unchanged.",
-    "The full project suite is green (64/64); v3.0 remains reserved for the broader accuracy milestone."
+    "Scrolling scenes and status panels on original Game Boy games now keep their tile rows lined up more reliably; the focused raster check improved by 2.03%.",
+    "Monochrome games running on Game Boy Color keep vertical scrolling and mid-frame colour changes in the correct phase, reducing shifted or torn effects.",
+    "Wave-channel mute behavior is corrected, helping prevent stale clicks and low-frequency tails when games turn that channel down.",
+    "Measured host headroom is up by 23.83% in a DMG run and 14.07% in a GBC run, while game speed and frame checksums stay unchanged.",
+    "The regression suite is green (73/73), with production-model acceptance at 66/66 applicable checks and no timeouts.",
+    "The portable one-file build includes the supplied legal BIOS files, library artwork, saves, and the same emulator core."
   ]
 }

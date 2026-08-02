@@ -64,6 +64,60 @@ function rgbKey(bytes, offset) {
   return (bytes[offset] << 16) | (bytes[offset + 1] << 8) | bytes[offset + 2];
 }
 
+function maximumColorAssignment(weights, size) {
+  // Hungarian assignment is the exact maximum-weight matching for the color
+  // correspondence. The small bitmask dynamic program below is quicker for
+  // four-color DMG images; CGB raster tests legitimately use more colors and
+  // previously failed before they could be measured at all.
+  const u = new Float64Array(size + 1);
+  const v = new Float64Array(size + 1);
+  const p = new Int32Array(size + 1);
+  const way = new Int32Array(size + 1);
+  for (let row = 1; row <= size; row += 1) {
+    p[0] = row;
+    let column = 0;
+    const min = new Float64Array(size + 1);
+    min.fill(Number.POSITIVE_INFINITY);
+    const used = new Uint8Array(size + 1);
+    do {
+      used[column] = 1;
+      const matchedRow = p[column];
+      let delta = Number.POSITIVE_INFINITY;
+      let nextColumn = 0;
+      for (let candidate = 1; candidate <= size; candidate += 1) {
+        if (used[candidate]) continue;
+        const cost = -(weights[matchedRow - 1][candidate - 1] || 0)
+          - u[matchedRow] - v[candidate];
+        if (cost < min[candidate]) {
+          min[candidate] = cost;
+          way[candidate] = column;
+        }
+        if (min[candidate] < delta) {
+          delta = min[candidate];
+          nextColumn = candidate;
+        }
+      }
+      for (let candidate = 0; candidate <= size; candidate += 1) {
+        if (used[candidate]) {
+          u[p[candidate]] += delta;
+          v[candidate] -= delta;
+        } else min[candidate] -= delta;
+      }
+      column = nextColumn;
+    } while (p[column] !== 0);
+    do {
+      const previous = way[column];
+      p[column] = p[previous];
+      column = previous;
+    } while (column !== 0);
+  }
+  let score = 0;
+  for (let column = 1; column <= size; column += 1) {
+    score += weights[p[column] - 1][column - 1] || 0;
+  }
+  return score;
+}
+
 function compareStructure(actual, expected) {
   const actualColors = new Map();
   const expectedColors = new Map();
@@ -80,7 +134,17 @@ function compareStructure(actual, expected) {
   const expectedKeys = [...expectedColors.keys()];
   const colorCount = Math.max(actualKeys.length, expectedKeys.length);
   if (colorCount > 12) {
-    throw new Error(`Structural comparison supports at most 12 colors, received ${colorCount}.`);
+    const weights = Array.from(
+      { length: colorCount },
+      (_, actualIndex) => Float64Array.from(
+        { length: colorCount },
+        (_, expectedIndex) => actualIndex < actualKeys.length
+          && expectedIndex < expectedKeys.length
+          ? pairs.get(`${actualKeys[actualIndex]}:${expectedKeys[expectedIndex]}`) || 0
+          : 0,
+      ),
+    );
+    return SCREEN_BYTES / 4 - maximumColorAssignment(weights, colorCount);
   }
   let scores = new Float64Array(1 << colorCount);
   scores.fill(Number.NEGATIVE_INFINITY);

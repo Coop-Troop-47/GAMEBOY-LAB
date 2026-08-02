@@ -75,13 +75,16 @@ function modelForMooneye(path) {
 
 function runUntilResult(path, {
   model,
+  hardwareRevision = null,
   cycleBudget = DEFAULT_CYCLE_BUDGET,
   protocol = "auto",
   boot = true,
   dumpRam = 0,
 } = {}) {
   const rom = new Uint8Array(readFileSync(path));
-  const emulator = new EmulatorClass(model);
+  const emulator = new EmulatorClass(model, hardwareRevision
+    ? { hardwareRevision }
+    : undefined);
   if (boot) emulator.setBootROM(getEmbeddedBootROM(model));
   emulator.loadROM(rom);
   const start = performance.now();
@@ -160,6 +163,7 @@ function parseArguments(argv) {
     quiet: false,
     baselineRef: null,
     model: null,
+    hardwareRevision: null,
     dumpRam: 0,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -172,6 +176,7 @@ function parseArguments(argv) {
     else if (argument === "--quiet") options.quiet = true;
     else if (argument === "--baseline-ref") options.baselineRef = argv[++index];
     else if (argument === "--model") options.model = argv[++index];
+    else if (argument === "--hardware-revision") options.hardwareRevision = argv[++index];
     else if (argument === "--dump-ram") options.dumpRam = Number(argv[++index]);
     else if (!options.root) options.root = resolve(argument);
     else throw new Error(`Unexpected argument: ${argument}`);
@@ -179,6 +184,9 @@ function parseArguments(argv) {
   if (!options.root) throw new Error("Provide the root directory containing test ROMs.");
   if (options.model && !["dmg", "cgb"].includes(options.model)) {
     throw new Error("--model must be dmg or cgb.");
+  }
+  if (options.hardwareRevision && !["production", "cgb0", "cgbA", "cgbB", "cgbC", "cgbD", "cgbE"].includes(options.hardwareRevision)) {
+    throw new Error("--hardware-revision must be production, cgb0, cgbA, cgbB, cgbC, cgbD, or cgbE.");
   }
   return options;
 }
@@ -209,6 +217,7 @@ for (const path of files) {
     if (!model) continue;
     const result = runUntilResult(path, {
       model,
+      hardwareRevision: options.hardwareRevision,
       cycleBudget: options.cycleBudget,
       protocol: "mooneye",
       boot: options.boot,
@@ -225,6 +234,7 @@ for (const path of files) {
       : "dmg");
     const result = runUntilResult(path, {
       model,
+      hardwareRevision: options.hardwareRevision,
       cycleBudget: options.cycleBudget,
       // SameSuite deliberately terminates with the Fibonacci-register
       // software breakpoint also used by Mooneye. Keep that signal enabled;
