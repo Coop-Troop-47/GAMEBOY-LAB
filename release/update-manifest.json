@@ -1,14 +1,13 @@
 {
-  "version": "3.0.2",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v3.0.2/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v3.0.2",
+  "version": "3.0.3",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v3.0.3/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v3.0.3",
   "changes": [
-    "The library toolbar is cleaner: the old stored-ROM paragraph is gone, Add ROM shows the current cartridge count in both views, and the table action stays at the far right.",
-    "The table/detail control is now one compact tabletop button, the table close action has the same hover feedback as the other drawers, and wide screens no longer move the console unnecessarily.",
-    "LCD contrast controls no longer repeat a technical baseline sentence underneath the slider, leaving the option row easier to scan.",
-    "The README now starts with a plain accuracy table, uses the latest screenshots, and explains exactly why Gambatte's revision-limited diagnostic run is not a strict score.",
-    "The local verification remains stable at 99/99 project tests, 70/70 applicable Mooneye checks, and no conformance timeouts.",
-    "The controlled SameSuite matrix remains 60/76 for GAMEBOY LAB and 65/76 for SameBoy 1.0.3; failures and unsupported hardware are listed instead of hidden.",
-    "The nine-trial core-only smoke medians remain 792.70 FPS for DMG Tetris and 665.75 FPS for CGB Tetris DX; game timing is unchanged."
+    "The library search is now simply SEARCH, and Add ROM is a cleaner one-line action in both library views.",
+    "Library, tabletop, and empty-state buttons now have a quicker lift-and-shadow hover response.",
+    "The contrast slider and the LCD correction panel now use the same comfortable vertical spacing.",
+    "The accuracy snapshot now uses one pinned ROM set and separates strict passes from diagnostic reference results.",
+    "Core-only testing shows LAB ahead of SameBoy by 86.9% on the DMG workload and 48.4% on the CGB workload on the release laptop.",
+    "The README has been rebuilt around the single-file experience, saves, screenshots, accuracy, and practical performance outcomes."
   ]
 }

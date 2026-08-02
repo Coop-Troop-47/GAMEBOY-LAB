@@ -1,0 +1,57 @@
+{
+  "release": "3.0.3",
+  "runDate": "2026-08-03",
+  "host": "Apple M1 Pro MacBook Pro (16 GB)",
+  "conformance": {
+    "sameSuite": {
+      "suiteCommit": "f15645fb049a47ea235f6d2c9a033e72d8087901",
+      "romManifestSha256": "589528fa4273246504c38acc2dee8b7d03cdf8180c2c4fb3e2b2286fa8e993fb",
+      "policy": "76 non-SGB CGB cases; revision-aware boot mapping; 80,000,000 DMG base-clock cycles; 30,000 ms safety timeout",
+      "gameboyLab": { "pass": 60, "fail": 16, "timeout": 0, "crash": 0, "error": 0, "unsupported": 0 },
+      "sameBoy103": { "pass": 65, "fail": 11, "timeout": 0, "crash": 0, "error": 0, "unsupported": 0 },
+      "gambatteLibretro": {
+        "strictComparable": false,
+        "diagnosticPass": 8,
+        "diagnosticFail": 61,
+        "unsupported": 7,
+        "reason": "The public adapter exposes generic CGB mode and the result byte, but not the revision or CPU-register marker required for a strict SameSuite score."
+      }
+    },
+    "mooneyeAcceptance": {
+      "romManifestSha256": "fd3e40f337da1e09b41d61282cc83343d0786ff0ab7cd7a93e17461cb6b74a61",
+      "policy": "70 applicable DMG/MGB cases; five SGB/AGB cases excluded; per-case BIOS profile; 80,000,000 DMG base-clock cycles",
+      "gameboyLab": { "pass": 70, "fail": 0, "timeout": 0, "crash": 0, "error": 0, "unsupported": 5 },
+      "sameBoy103": { "pass": 70, "fail": 0, "timeout": 0, "crash": 0, "error": 0, "unsupported": 5 },
+      "gambatteLibretro": {
+        "strictComparable": false,
+        "unsupported": 70,
+        "reason": "Gambatte's public interface does not expose the CPU-register marker used by this suite."
+      }
+    },
+    "mealybugDmgBlob": {
+      "romManifestSha256": "see the complete local report from scripts/mealybug-conformance.mjs",
+      "policy": "24 DMG image cases; post-boot; opcode 0x40 breakpoint; structural colour correspondence",
+      "gameboyLab": { "pass": 1, "fail": 23, "averageMatchPercent": 96.0343 },
+      "sameBoy103": {
+        "strictComparable": false,
+        "reason": "The pinned command-line adapter does not expose the same breakpoint framebuffer to the image comparator."
+      },
+      "gambatteLibretro": {
+        "strictComparable": false,
+        "reason": "The public libretro adapter does not expose the same breakpoint framebuffer to the image comparator."
+      }
+    }
+  },
+  "coreThroughputRelative": {
+    "policy": "Same post-boot Tetris ROMs; 120-frame warm-up; 600 measured frames; nine rotated-order trials; core and native framebuffer delivery only",
+    "gameboyLabVsSameBoy103": {
+      "dmg": 86.9,
+      "cgb": 48.4
+    },
+    "gambatteLibretroVsGameboyLab": {
+      "dmg": 357.8,
+      "cgb": 446.1,
+      "note": "Native reference adapter; not an end-to-end browser comparison."
+    }
+  }
+}

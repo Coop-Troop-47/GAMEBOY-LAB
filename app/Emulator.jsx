@@ -1457,7 +1457,7 @@ function RomLibraryDrawer({
                 type="search"
                 value={libraryQuery}
                 onChange={(event) => onQuery(event.target.value)}
-                placeholder="SEARCH TITLE OR FILE…"
+                placeholder="SEARCH"
               />
             </label>
             <div className="library-filters" aria-label="Filter game library">
@@ -1488,7 +1488,7 @@ function RomLibraryDrawer({
               TABLE VIEW
             </button>
             <button className="library-add-button" type="button" onClick={onAddRom}>
-              + ADD ROM · {String(libraryRoms.length).padStart(2, "0")}
+              + ADD ROM
             </button>
           </div>
         </>
@@ -1520,7 +1520,7 @@ function RomLibraryDrawer({
               DETAIL VIEW
             </button>
             <button type="button" onClick={onAddRom}>
-              + ADD · {String(libraryRoms.length).padStart(2, "0")}
+              + ADD
             </button>
           </div>
         </div>

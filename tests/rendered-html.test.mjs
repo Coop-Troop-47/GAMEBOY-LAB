@@ -257,6 +257,10 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /LIBRARY_DISCOVERY_KEY/);
   assert.match(source, /rom\.system === "gbc" \? "GBC" : "DMG"/);
   assert.match(source, /className="library-title-row"[\s\S]*<OverflowTitle as="h3"[\s\S]*library-system-tag system-/);
+  assert.match(source, /placeholder="SEARCH"/);
+  assert.doesNotMatch(source, /SEARCH TITLE OR FILE/);
+  assert.match(css, /\.library-add-button[\s\S]*transition:/);
+  assert.match(css, /\.library-view-toggle[\s\S]*transition:/);
   assert.match(source, /className="tabletop-cartridge-caption"[\s\S]*library-system-tag system-/);
   assert.match(css, /\.library-title-row\s*\{[^}]*display:\s*flex[^}]*align-items:\s*center/s);
   assert.match(css, /\.library-system-tag\s*\{[^}]*font:\s*900 9px\/1/s);
@@ -282,7 +286,8 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /aria-label="Game Boy contrast adjustment"/);
   assert.doesNotMatch(source, /Relative adjustment · LCD baseline/);
   assert.doesNotMatch(source, /ROMs and artwork stay on this device/);
-  assert.match(source, /\+ ADD ROM · \{String\(libraryRoms\.length\)\.padStart\(2, "0"\)\}/);
+  assert.match(source, /\+ ADD ROM/);
+  assert.doesNotMatch(source, /\+ ADD ROM · \{String\(libraryRoms\.length\)\.padStart\(2, "0"\)\}/);
   assert.doesNotMatch(source, /disabled=\{lcdMode !== "response"\}/);
   assert.doesNotMatch(source, /lcd-pixel-grid|context\.fillRect\(column \* scale/);
   assert.match(source, /className="lcd-output"/);

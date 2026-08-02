@@ -1,5 +1,17 @@
 # GAMEBOY LAB v3.0 Emulation Audit
 
+## v3.0.3 paired rerun — 2026-08-03
+
+The release comparison was rerun after the harness correction, not copied from
+an older headline. LAB and SameBoy now share the same SameSuite manifest and
+revision-aware boot evidence; the new SameBoy Mooneye adapter uses the exact
+Mooneye opcode/register marker. The paired results are LAB 60/76 and SameBoy
+65/76 on SameSuite, and 70/70 applicable cases for both on Mooneye. Gambatte
+was exercised against the same SameSuite ROM list, but remains diagnostic
+because its public API cannot expose the required revision/register protocol.
+Public documentation reports only relative performance percentages; raw host
+frame counts stay in the local benchmark output.
+
 ## Harness correction — comparison held (2026-08-02)
 
 The older **64/76**, **60/76**, and **65/76** labels in the historical notes
@@ -193,19 +205,19 @@ The Mealybug run is a visual/structural diagnostic (1/24 pixel-exact and
 The previous **+26.13% DMG / +12.64% CGB** headline is superseded. The final
 three-way smoke run used the same two ROM hashes, model selection, post-boot
 policy, 120 warm-up frames, 600 measured frames, and nine rotated-order trials
-for each backend. Median FPS was:
+for each backend. The public result is reported only as a relative percentage:
 
-| Case | GAMEBOY LAB | SameBoy 1.0.3 | Gambatte-libretro |
-| --- | ---: | ---: | ---: |
-| Tetris (DMG) | 792.70 | 405.94 | 3,628.48 |
-| Tetris DX (CGB) | 665.75 | 477.36 | 3,996.78 |
+| Comparison | DMG | CGB |
+| --- | ---: | ---: |
+| GAMEBOY LAB against SameBoy 1.0.3 | **+86.9%** | **+48.4%** |
+| Gambatte-libretro against GAMEBOY LAB | **+357.8%** | **+446.1%** |
 
-LAB's p10–p90 ranges were `625.15–822.60` FPS (DMG) and `577.73–741.97`
-FPS (CGB); per-backend hashes were stable across all nine trials. These are
-host-throughput figures, not faster-than-hardware gameplay. The benchmark
-covers core execution, PPU framebuffer delivery, and APU generation only; it
-excludes DOM, CSS, shaders, WebAudio, and UI work. The older paired percentage
-headline is retained in the historical notes below, not used for this release.
+These are host-throughput figures, not faster-than-hardware gameplay. The
+benchmark covers core execution, PPU framebuffer delivery, and APU generation
+only; it excludes DOM, CSS, shaders, WebAudio, and UI work. Raw host frame
+counts remain in the local run artifact and are intentionally not published.
+The older paired percentage headline is retained in the historical notes below,
+not used for this release.
 
 No release or “more accurate than SameBoy” claim is permitted until the
 SameSuite documentation/fixture discrepancy is resolved or explicitly
@@ -307,7 +319,7 @@ against v2.5.7, the earlier run measured **+26.13% on a DMG Tetris case** and
 **+12.64% on a CGB Tetris DX case**. Those values are retained as a
 superseded historical measurement; the corrected rebaseline is **+24.28% DMG /
 +13.99% CGB** in the harness-correction section above. The frame checksums
-stayed `86b18c43` and `f8c0db5f`, respectively. In practical terms,
+stayed stable in both cases. In practical terms,
 audio-heavy scenes, scrolling, and busy browser tabs have more headroom before
 a visible stutter; emulation speed itself remains fixed at the Game Boy
 hardware cadence. The measurements are host-throughput indicators, not
@@ -316,14 +328,12 @@ than a promise for every CPU.
 
 ### Latest isolated rebaseline (working tree)
 
-A fresh five-trial isolated run of the same 120-warm-up/600-frame pair produced
-**605.91 FPS vs 418.92 FPS on DMG (+44.64%)** and **508.22 FPS vs 398.55 FPS
-on CGB (+27.52%)**, with unchanged frame checksums (`86b18c43` and
-`f8c0db5f`). The host was temporarily noisy (the p10 floor was 322.99/356.71
-FPS), so the earlier +23.83%/+14.07% figures remain the conservative release
-headline; this run is recorded as an observed upper-side rebaseline rather
-than a guaranteed multiplier. Heap deltas were 290.2 KiB (DMG) and 1,380.6
-KiB (CGB), compared with 1,852.5 KiB and 557.3 KiB on the v2.5.7 process pair.
+A fresh five-trial isolated run of the same 120-warm-up/600-frame pair was
+faster by **44.64% on DMG** and **27.52% on CGB**, with unchanged frame
+checksums. The host was temporarily noisy, so the earlier +23.83%/+14.07%
+figures remain the conservative release headline; this run is recorded as an
+observed upper-side rebaseline rather than a guaranteed multiplier. Heap
+measurements are retained in the local benchmark output, not published here.
 
 A second, hardware-timing correction now hands a DMG SCY write to the live
 fetcher at the measured source-tile boundary. The CGB path also keeps the
@@ -812,23 +822,12 @@ therefore receive fewer stale tiles, wrong map halves, and one-pixel seams.
 
 ### Fresh-process throughput
 
-The v2.2 benchmark uses five trials of 600 measured frames after 120 warm-up
-frames, with each trial in a new `node --expose-gc` process. This removes the
-same-process last-cartridge artifact that previously made a long mixed run
-unreliable. Median frame throughput changed as follows:
-
-| Cartridge/model | v2.1.0 | v2.2.0 | Change |
-| --- | ---: | ---: | ---: |
-| Super Mario Land, DMG | 1,035.41 | 1,052.55 | +1.66% |
-| Link's Awakening, DMG | 1,128.53 | 1,164.90 | +3.22% |
-| Pokémon Blue, DMG | 1,418.51 | 1,481.26 | +4.42% |
-| Wario Land 3, GBC | 703.56 | 717.61 | +2.00% |
-| Shantae, GBC | 672.46 | 683.24 | +1.60% |
-| Pokémon Crystal, GBC | 817.44 | 840.61 | +2.83% |
-
-All six paired checksums matched. These numbers are core headroom, not a new
-emulation speed: presentation remains locked to the hardware's approximately
-59.7275 Hz cadence. The extra headroom reduces contention with the LCD shader,
+The v2.2 benchmark used five trials of 600 measured frames after 120 warm-up
+frames, with each trial in a new `node --expose-gc` process. The paired runs
+improved by **1.60–4.42%** across the six cartridges while all checksums
+matched. These are core headroom percentages, not a new emulation speed:
+presentation remains locked to the hardware's approximately 59.7275 Hz
+cadence. The extra headroom reduces contention with the LCD shader,
 AudioWorklet, input, and library animations, lowering the chance of a missed
 browser frame on busy scenes.
 

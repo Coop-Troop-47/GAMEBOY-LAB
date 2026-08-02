@@ -1,68 +1,96 @@
 # GAMEBOY LAB
 
-GAMEBOY LAB is an offline Game Boy and Game Boy Color emulator that runs from
-one HTML file. It has a local cartridge library, supplied legal BIOS support,
-browser saves, save states, LCD filters, and a console view that can be hidden
-when you want the screen larger.
+Open one file. Pick a cartridge. Play.
 
-## Accuracy snapshot
+GAMEBOY LAB is a browser-based Game Boy and Game Boy Color emulator packaged
+as a single self-contained HTML file. It is designed to feel like a small,
+well-made handheld rather than a developer tool: the library, stylised DMG and
+GBC shells, LCD treatments, cartridge animation, sound controls, and saves all
+work offline in the browser.
 
-These numbers come from the same ROM files, ROM hashes, model policy, boot-ROM
-policy, cycle budget, timeout, and pass detector. They are test-suite results,
-not a claim that a finite suite proves perfect hardware emulation.
+## Accuracy and performance snapshot
 
-| Suite | GAMEBOY LAB | SameBoy 1.0.3 | Gambatte-libretro |
+The table below is the honest result of the current pinned runs, not a claim
+that any finite suite proves perfect hardware emulation. LAB and SameBoy used
+the same ROM bytes, revision policy, BIOS mapping, 80-million-cycle limit,
+30-second safety timeout, and result detector. Gambatte was run too, but its
+public interface cannot expose the CGB revision or the CPU-register marker
+required for a strict SameSuite score, so those results are labelled
+diagnostic rather than turned into a misleading percentage.
+
+| Test | GAMEBOY LAB | SameBoy 1.0.3 | Gambatte-libretro |
 | --- | ---: | ---: | --- |
-| SameSuite, 76 non-SGB CGB cases | **60/76 (78.95%)** | **65/76 (85.53%)** | **Not comparable** |
-| Mooneye production-model acceptance | **70/70 (100%)** | Not run in this release | Not comparable |
-| Mealybug DMG-blob, 24 image cases | **1/24 pixel-exact** | Not run in this release | Not run in this release |
+| SameSuite · 76 non-SGB CGB cases | **60/76** | **65/76** | 8 diagnostic passes · 61 diagnostic fails · 7 unavailable |
+| Mooneye acceptance · 70 applicable cases | **70/70** | **70/70** | Not comparable: marker is not exposed |
+| Mealybug DMG-blob · 24 image cases | **1/24 exact** · 96.03% average structure match | Not scored: no shared frame-boundary adapter | Not scored: no shared frame-boundary adapter |
 
-Gambatte was run against all 76 SameSuite ROMs as a diagnostic. It reported
-8 byte-level passes, 61 failures, and 7 revision-specific cases that were not
-scored. Gambatte exposes a generic CGB mode, not CGB-0/A/B/C/D/E selection, and
-its public API does not expose SameSuite's CPU-register completion signature.
-Those results must not be presented as a strict accuracy score.
+The SameSuite checkout currently contains more cases than the historical
+SameBoy APU note describes. We report the measured 65/76 result from the
+pinned v1.0.3 build instead of changing the denominator to match an older
+headline. Failures, timeouts, crashes, protocol errors, and unsupported cases
+remain separate in the audit data.
 
-The SameSuite comparison is deliberately conservative: failures, timeouts,
-crashes, protocol errors, and unsupported hardware are kept separate. The
-remaining GAMEBOY LAB failures are concentrated in revision-sensitive APU
-timing fixtures. The detailed case list and commands are in
+The complete machine-readable summaries are in
+[`release/benchmarks/v3.0.3-summary.json`](release/benchmarks/v3.0.3-summary.json).
+The method and the individual SameSuite cases are documented in
 [`EMULATION_AUDIT.md`](EMULATION_AUDIT.md).
+
+### What the speed result means
+
+On a 2021 MacBook Pro with an Apple M1 Pro, using the same post-boot Tetris
+ROMs, nine rotated-order trials, a 120-frame warm-up, and 600 measured frames:
+
+- LAB completed the DMG core workload **86.9% faster than SameBoy** in this
+  core-only run.
+- LAB completed the CGB core workload **48.4% faster than SameBoy**.
+- Gambatte-libretro was ahead of LAB by **357.8% on DMG** and **446.1% on CGB**
+  in its native adapter. That is useful context, not a claim of equal
+  end-to-end browser performance: the native path does not share LAB's DOM,
+  WebGL LCD shader, browser audio, or library work.
+
+Only relative percentages are published here. Raw host throughput stays in
+the local benchmark report so the result cannot be mistaken for a game's
+fixed 59.7 Hz hardware clock.
+
+## See it in use
+
+![Options and the DMG shell](docs/images/options-overview.png)
+
+![Technical readout and a running GBC game](docs/images/technical-readout.png)
+
+![The tabletop cartridge library](docs/images/library-tabletop.png)
 
 ## Start playing
 
-1. Download [`public/gbc-lab.html`](public/gbc-lab.html), or build it locally.
-2. Open it in a current desktop browser.
+1. Download [`public/gbc-lab.html`](public/gbc-lab.html).
+2. Open it in a current desktop browser. No server or installation is needed.
 3. Open **Library**, choose a cartridge, and press **Play**.
 
-The build is local-first. Preferences, artwork, BIOS profiles, battery RAM,
-RTC data, and snapshots stay in this browser. Use only ROMs and firmware you
-are legally allowed to use; Nintendo game software and boot ROMs are not
-redistributed by this project.
+The included cartridges and BIOS files are for local development and testing.
+Use only ROMs and firmware you are legally allowed to use; this project does
+not redistribute Nintendo software.
 
-![GAMEBOY LAB running a GBC game](docs/images/gameplay-gbc.png)
+## The parts players notice
 
-## What is included
-
-- **DMG and GBC presentation.** Switch console models while keeping the
-  emulator core and cartridge state explicit. Monochrome games can use the
-  original GBC startup palettes.
-- **Screen-only mode.** The live LCD grows into a larger view and returns to
-  the console without replacing it with a second, blurry render.
-- **LCD controls.** Sharp pixels, a DMG dot-and-gap LCD treatment, a normal GBC
-  LCD treatment, and independent ghosting are available in Options.
-- **Sizing controls.** Integer scaling keeps source pixels at whole-number
-  sizes. Turn it off for the 90% manual default and use the scale slider.
-- **Controls and sound.** Arrow keys, X, Z, Enter, and Shift are mapped by
-  default. Remapping, button depression, mute, volume, buffering, and frame
-  presentation options are available.
-- **Cartridge library.** Add legally sourced `.gb` and `.gbc` files, search,
-  filter, sort by title/recent use/size, and use detail or tabletop views.
-  Artwork and cartridge colour carry into the insertion animation.
-- **Saves.** Cartridge saves (`.sav` and RTC data) are separate from three
-  emulator save-state slots. Application data can back up both kinds together.
-
-![The cartridge library](docs/images/library.png)
+- **Two proper presentations.** Switch between a DMG and GBC shell, or let the
+  LCD grow into a clean screen-only view. The live frame is carried through
+  the transition rather than replaced by a blurry second canvas.
+- **LCD choices that behave like displays.** DMG dot-and-gap pixels, a cleaner
+  GBC LCD, sharp output, independent ghosting, contrast, palettes, and dark or
+  light themes are all separate choices.
+- **A library that feels physical.** Add `.gb` and `.gbc` files once, search,
+  filter, sort by title/recent use/size, and choose a detail or tabletop view.
+  Artwork, cartridge colour, and the cartridge label follow the game into the
+  insertion animation.
+- **Save data without guesswork.** A cartridge save is the game's battery RAM;
+  a save state is an emulator snapshot. They have separate controls and can be
+  backed up together from Options.
+- **Sound and input controls.** Arrow keys, X, Z, Enter, and Shift work out of
+  the box. Remap them, show button depression, mute or adjust volume, and use
+  the audio buffering choices when a browser is busy.
+- **Useful diagnostics when you want them.** The optional technical readout
+  stays on the main screen and shows frame pacing, skipped presentation,
+  audio queue health, cartridge size, mapper, battery, and RTC status.
 
 ## Controls
 
@@ -81,103 +109,71 @@ the page. Bindings can be changed in **Options → Controls**.
 
 Open **Save options** from the cartridge hint above the console.
 
-- A **cartridge save** is progress written by the game to battery-backed RAM;
-  it can be downloaded as a portable `.sav` file.
-- A **save state** is an emulator snapshot of CPU, video, audio, timers,
-  mapper, and cartridge RAM at one instant. It is not an in-game save.
-- **Application data** exports cached cartridge saves, RTC data, and all three
-  save-state slots in one backup. Restoring it replaces matching local data
-  only after a confirmation.
+- A **cartridge save** is progress written by the game to battery-backed RAM.
+  Downloading it produces the portable `.sav` data a cartridge would keep.
+- A **save state** freezes the whole machine—CPU, video, audio, timers, mapper,
+  and cartridge RAM—at one instant. It is not an in-game save.
+- **Application data** exports all cached cartridge saves, RTC data, and the
+  three save-state slots in one backup. Restoring it asks for confirmation
+  before replacing local records.
 
-## Options and emulation settings
+## Options in plain language
 
-**Options** contains theme, pause-on-menu, controls, LCD appearance, ghosting,
-sound, scale, library layout, and application backup/restore.
+**Options** covers appearance, controls, sound, ghosting, LCD treatment,
+scaling, pause-on-menu, library layout, and application backup/restore.
 
-**Emulation settings** contains timing and presentation controls: audio buffer
-profile, frame presentation skip, and the optional technical readout. The
-readout stays on the main screen and reports FPS, skipped frames, audio queue
-health, ROM size, mapper, and RTC state when the window is wide enough.
+**Emulation settings** covers timing and presentation choices. Integer scaling
+keeps source pixels at whole-number sizes; turning it off enables the 90%
+manual default and the scale slider. Frame skipping affects only display
+uploads, not CPU, timers, PPU, audio, input, or saves. Audio buffering changes
+how much browser-side queue is kept to trade latency against resilience to
+short scheduling stalls.
 
-![Hardware options](docs/images/options-hardware.png)
+## BIOS and legality
 
-![LCD options](docs/images/options-lcd.png)
+The build accepts the legally sourced BIOS profiles placed in the local
+`Bios/` directory and embeds the selected profiles in the portable artifact.
+The app does not expose a BIOS uploader or ask players to find firmware at
+runtime. Do not redistribute Nintendo firmware or game ROMs without the rights
+to do so.
 
-## Firmware and legality
+## Developer notes
 
-GAMEBOY LAB accepts the legally sourced BIOS profiles placed in the local
-`Bios/` directory and embeds the selected profiles in the portable build. The
-app does not expose a BIOS uploader or selector. Do not redistribute Nintendo
-firmware or game ROMs without the rights to do so.
-
-## For developers
-
-The emulator core and UI are JavaScript/React/CSS. Vite produces the portable
-single-file artifact at [`public/gbc-lab.html`](public/gbc-lab.html); there is no
-emulator WebAssembly dependency.
+The emulator core and UI are JavaScript, React, CSS, and WebGL. Vite produces
+the portable single-file artifact at [`public/gbc-lab.html`](public/gbc-lab.html);
+there is no emulator WebAssembly dependency.
 
 ```bash
 npm install
-npm run sync:artwork       # optional local artwork refresh
 npm run dev
 npm test                   # build plus project tests
 npm run lint
 npm run benchmark:core
 ```
 
-The checked-in conformance tools record ROM hashes, suite commits, BIOS hashes,
-model/revision selection, cycle budget, timeout, and pass detection. Unknown
-CGB suffixes are rejected. SameBoy's adapter is pinned separately from the
-browser core. Gambatte's diagnostic adapter is intentionally not accepted by
-the strict comparator because it cannot prove the revision/register protocol.
+The checked-in harnesses record ROM hashes, suite snapshots, BIOS hashes,
+model/revision selection, cycle budgets, timeouts, and pass detection. Unknown
+CGB suffixes fail closed. The strict SameSuite and Mooneye adapters are pinned
+to their reference source; Gambatte's adapter remains diagnostic where its
+public API cannot prove the protocol.
 
-The controlled core-throughput smoke run uses identical ROMs, 120 warm-up
-frames, 600 measured frames, and nine rotated-order trials. It excludes DOM,
-CSS, shaders, and host audio:
+The public emulator projects used for context are [SameBoy](https://github.com/LIJI32/SameBoy),
+[Gambatte-libretro](https://github.com/libretro/gambatte-libretro),
+[SameSuite](https://github.com/LIJI32/SameSuite), and the
+[Mooneye test suite](https://github.com/Gekkio/mooneye-test-suite). Their
+published pages describe accuracy goals and test behaviour, but do not publish
+an apples-to-apples result for this exact laptop and ROM snapshot; the table
+above is therefore based on our reproducible local run.
 
-| ROM / model | GAMEBOY LAB | SameBoy 1.0.3 | Gambatte-libretro |
-| --- | ---: | ---: | ---: |
-| Tetris / DMG | 792.70 FPS | 405.94 FPS | 3,628.48 FPS |
-| Tetris DX / CGB | 665.75 FPS | 477.36 FPS | 3,996.78 FPS |
+## Maintaining releases
 
-These are host-throughput measurements, not emulated game-speed settings.
-Run the benchmark with:
+The short player-facing update text and the GitHub release notes are kept
+separate on purpose.
 
-```bash
-node scripts/three-way-benchmark.mjs \
-  --sameboy-runner /path/to/sameboy-frame-runner \
-  --gambatte-runner /path/to/gambatte-runner \
-  --gambatte-core /path/to/gambatte_libretro.dylib \
-  --frames 600 --warmup 120 --trials 9 \
-  --report /tmp/gameboy-lab-three-way.json
-```
-
-For a local Gambatte SameSuite diagnostic, build
-[`scripts/reference/gambatte-conformance-runner.cpp`](scripts/reference/gambatte-conformance-runner.cpp)
-against a pinned Gambatte-libretro checkout, then run:
-
-```bash
-DYLD_LIBRARY_PATH=/path/to/gambatte \
-node scripts/gambatte-samesuite.mjs \
-  --runner /path/to/gambatte-conformance-runner \
-  --boot-dir /path/to/boot-roms \
-  --suite /path/to/SameSuite \
-  --report /tmp/gambatte-samesuite.json
-```
-
-## Release notes and maintenance
-
-The app update popup and the GitHub release body are separate on purpose.
-
-1. Maintain the short player-facing text in
-   [`release/update-manifest.json`](release/update-manifest.json). Mention what
-   changed in games or the UI; include a percentage only when it is backed by
-   a reproducible run.
-2. Maintain the developer changelog in `release/vX.Y.Z.md`. Put the concise
-   summary and measured tables first, followed by method, caveats, and test
-   commands.
-3. Bump `app/version.js`, `package.json`, and both lockfile version fields;
-   build, test, lint, and verify the HTML SHA-256 before publishing.
-
-The manifest is mirrored to the public update endpoint only after the matching
-HTML asset exists on GitHub Releases.
+1. Put concise, game-facing bullets in
+   [`release/update-manifest.json`](release/update-manifest.json). The
+   standalone app reads this file when it checks for an update.
+2. Put the developer changelog, method, caveats, and test commands in
+   `release/vX.Y.Z.md`.
+3. Bump `app/version.js`, `package.json`, and the lockfile, then build, test,
+   lint, verify the standalone hash, and publish the matching HTML asset.

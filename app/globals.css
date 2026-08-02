@@ -3176,6 +3176,21 @@ html[data-theme="dark"] body {
   cursor: pointer;
   font: 900 9px/1 var(--font-mono);
   letter-spacing: .08em;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease,
+    translate 140ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.library-add-button:hover,
+.library-add-button:focus-visible,
+.library-empty button:hover,
+.library-empty button:focus-visible {
+  color: var(--acid-ink);
+  background: var(--acid);
+  translate: -2px -2px;
+  box-shadow: 6px 6px 0 var(--cyan);
 }
 
 .library-add-button:active,
@@ -3290,6 +3305,11 @@ html[data-theme="dark"] body {
   font: 900 8px/1 var(--font-mono);
   letter-spacing: .06em;
   white-space: nowrap;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease,
+    translate 140ms cubic-bezier(.2, .8, .2, 1);
 }
 
 .library-view-toggle span {
@@ -3300,6 +3320,14 @@ html[data-theme="dark"] body {
 .library-view-toggle:active {
   translate: 2px 2px;
   box-shadow: 1px 1px 0 var(--magenta);
+}
+
+.library-view-toggle:hover,
+.library-view-toggle:focus-visible {
+  color: var(--acid-ink);
+  background: var(--acid);
+  translate: -2px -2px;
+  box-shadow: 5px 5px 0 var(--magenta);
 }
 
 .library-results {
@@ -3498,6 +3526,11 @@ html[data-theme="dark"] body {
   cursor: pointer;
   font: 900 9px/1 var(--font-mono);
   letter-spacing: .07em;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease,
+    translate 140ms cubic-bezier(.2, .8, .2, 1);
 }
 
 .tabletop-toolbar .tabletop-filter-tabs button {
@@ -3528,6 +3561,8 @@ html[data-theme="dark"] body {
 .tabletop-toolbar button:focus-visible {
   color: var(--acid-ink);
   background: var(--acid);
+  translate: -1px -1px;
+  box-shadow: 3px 3px 0 var(--magenta);
 }
 
 .library-results.library-tabletop {
@@ -4522,7 +4557,7 @@ html[data-theme="dark"] body {
 
 .dmg-contrast-control {
   margin-top: 16px;
-  margin-bottom: 0;
+  margin-bottom: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--line);
 }
