@@ -75,6 +75,7 @@ function modelForMooneye(path) {
 
 function bootProfileFor(path, model) {
   if (model === "dmg" && /boot_.*-dmg0\.gb$/i.test(basename(path))) return "dmg0";
+  if (model === "dmg" && /boot_.*-mgb\.gb$/i.test(basename(path))) return "mgb";
   return model;
 }
 

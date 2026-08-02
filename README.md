@@ -45,7 +45,9 @@ JavaScript. No third-party emulator core or WebAssembly binary is used.
 - Header/logo lockout checks and model-specific startup animation
 - Guarded physical cartridge swaps with neutral LCD fade, power-light sequencing,
   and drawer pauses queued to the first safe BIOS frame
-- Embedded production DMG and GBC startup firmware
+- Embedded production DMG/GBC startup firmware plus the supplied DMG-0 and MGB
+  diagnostic BIOS profiles used by the maintainer conformance suites; BIOS
+  selection is never exposed in the app
 - Every `.gb` and `.gbc` cartridge in `SELECT_ROMS/` embedded into the local
   library, with offline Libretro cover artwork, detail cards, and filterable
   tabletop layouts

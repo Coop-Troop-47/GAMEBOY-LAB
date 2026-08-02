@@ -5,6 +5,10 @@ const BIOS_BASE64 = {
   // conformance profile; the application still starts with the production
   // DMG BIOS and never exposes a BIOS picker.
   dmg0: "Mf7/ryH/nzLLfCD7ISb/DhE+gDLiDD7z4jI+d3c+/OBHIQQB5RHLABoTviBrI33+NCD1Bhl4hiMFIPuGIFrRIRCAGs2pAM2qABN7/jQg8z4YIS+ZDgwyPSgJDSD5Eez/GRjxZz5kV+BCPpHgQAQeAs28AA4TJHweg/5iKAYewf5kIAZ74gw+h+LwQpDgQhUg3QUgaRYgGNY+keBAHhTNvADwR+7/4EcY808GBMXLERfByxEXBSD1IiMiI8kODPBE/pAg+g0g9x0g8snO7WZmzA0ACwNzAIMADAANAAgRH4iJAA7czG7m3d3Zmbu7Z2NuDuzM3dyZn7u5Mz7//zzgUA==",
+  // User-supplied MGB diagnostic boot ROM. It is kept internal to the
+  // conformance runner; normal GAMEBOY LAB starts with the production DMG
+  // BIOS and never exposes a BIOS picker.
+  mgb: "Mf7/ryH/nzLLfCD7ISb/DhE+gDLiDD7z4jI+d3c+/OBHEQQBIRCAGs2VAM2WABN7/jQg8xHYAAYIGhMiIwUg+T4Z6hCZIS+ZDgw9KAgyDSD5Lg8Y82c+ZFfgQj6R4EAEHgIODPBE/pAg+g0g9x0g8g4TJHweg/5iKAYewf5kIAZ74gw+h+LwQpDgQhUg0gUgTxYgGMtPBgTFyxEXwcsRFwUg9SIjIiPJzu1mZswNAAsDcwCDAAwADQAIER+IiQAO3Mxu5t3d2Zm7u2djbg7szN3cmZ+7uTM+PEK5pbmlQjwhBAERqAAaE74g/iN9/jQg9QYZeIYjBSD7hiD+Pv/gUA==",
   dmg: [
     "Mf7/ryH/nzLLfCD7ISb/DhE+gDLiDD7z4jI+d3c+/OBHEQQBIRCAGs2VAM2WABN7/jQg8xHYAAYIGhMiIwUg+T4Z6hCZ",
     "IS+ZDgw9KAgyDSD5Lg8Y82c+ZFfgQj6R4EAEHgIODPBE/pAg+g0g9x0g8g4TJHweg/5iKAYewf5kIAZ74gw+h+LwQpDgQ",
@@ -54,12 +58,14 @@ function decodeBase64(value) {
 
 const BIOS_BYTES = {
   dmg0: decodeBase64(BIOS_BASE64.dmg0),
+  mgb: decodeBase64(BIOS_BASE64.mgb),
   dmg: decodeBase64(BIOS_BASE64.dmg),
   cgb: decodeBase64(BIOS_BASE64.cgb),
 };
 
 export const EMBEDDED_BIOS_INFO = Object.freeze({
   dmg0: Object.freeze({ size: BIOS_BYTES.dmg0.length, revision: "DMG-0 diagnostic" }),
+  mgb: Object.freeze({ size: BIOS_BYTES.mgb.length, revision: "MGB diagnostic" }),
   dmg: Object.freeze({ size: BIOS_BYTES.dmg.length, revision: "Production DMG" }),
   cgb: Object.freeze({ size: BIOS_BYTES.cgb.length, revision: "Production GBC" }),
 });

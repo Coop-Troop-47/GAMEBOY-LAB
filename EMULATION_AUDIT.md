@@ -28,13 +28,12 @@ sample boundaries, framebuffer bytes, or save-state format.
 
 ## Post-v3 accuracy checkpoint (working tree)
 
-The supplied `Bios/dmg0_rom.bin` is now embedded as an internal diagnostic
-profile and routed only to the three Mooneye ROMs that explicitly require a
-DMG-0 boot image. Those cases moved from **0/3 to 3/3** without changing the
-production DMG boot path. The applicable acceptance run is now **69/70
-(98.57%)**; the single remaining failure is `boot_regs-mgb.gb`, which requires
-an MGB boot image that is not present in the supplied BIOS set and is therefore
-not silently substituted with a different Nintendo firmware image.
+The supplied `Bios/dmg0_rom.bin` and `Bios/mgb_boot.bin` are embedded as
+internal diagnostic profiles and routed only to the Mooneye ROMs that require
+those historical boot images. DMG-0 moved from **0/3 to 3/3**, and the newly
+supplied MGB image moves `boot_regs-mgb.gb` to a real pass without changing the
+production DMG boot path. The applicable acceptance run is now **70/70
+(100%)**, with zero timeouts. No boot ROM picker is exposed in GAMEBOY LAB.
 
 The revision-aware SameSuite matrix now applies the documented pre-CGB-C
 extra-length-write quirk only to the internal CGB-0/A/B profiles, including

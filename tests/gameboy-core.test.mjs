@@ -1198,6 +1198,7 @@ test("maps and executes DMG and GBC boot ROMs", () => {
 test("embeds the supplied production BIOS revisions byte-for-byte", () => {
   const expected = {
     dmg0: ["26e71cf01e301e5dc40e987cd2ecbf6d0276245890ac829db2a25323da86818e", 0x100],
+    mgb: ["a8cb5f4f1f16f2573ed2ecd8daedb9c5d1dd2c30a481f9b179b5d725d95eafe2", 0x100],
     dmg: ["cf053eccb4ccafff9e67339d4e78e98dce7d1ed59be819d2a1ba2232c6fce1c7", 0x100],
     cgb: ["b4f2e416a35eef52cba161b159c7c8523a92594facb924b3ede0d722867c50c7", 0x900],
   };
@@ -1209,17 +1210,22 @@ test("embeds the supplied production BIOS revisions byte-for-byte", () => {
   }
 });
 
-test("boots through both embedded production BIOS images", () => {
-  for (const [model, cgb] of [["dmg", 0], ["cgb", 0], ["cgb", 0x80]]) {
+test("boots through every embedded BIOS image", () => {
+  for (const [model, bios, cgb] of [
+    ["dmg", "dmg", 0],
+    ["dmg", "mgb", 0],
+    ["cgb", "cgb", 0],
+    ["cgb", "cgb", 0x80],
+  ]) {
     const gb = new GameBoy(model);
-    gb.setBootROM(getEmbeddedBootROM(model));
+    gb.setBootROM(getEmbeddedBootROM(bios));
     gb.loadROM(makeRom([0x18, 0xfe], { cgb }));
     let frames = 0;
     while (gb.bootEnabled && frames < 400) {
       gb.runFrame();
       frames += 1;
     }
-    assert.equal(gb.bootEnabled, false, `${model} BIOS did not hand off`);
+    assert.equal(gb.bootEnabled, false, `${bios} BIOS did not hand off`);
     assert.ok(gb.pc >= 0x0100);
   }
 });
