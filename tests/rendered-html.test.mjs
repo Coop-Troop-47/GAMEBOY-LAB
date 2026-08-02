@@ -280,7 +280,9 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /effectiveDmgContrast = dmgContrastBase \+ dmgContrastAdjustment/);
   assert.match(source, /dmgContrast: effectiveDmgContrast \/ 100/);
   assert.match(source, /aria-label="Game Boy contrast adjustment"/);
-  assert.match(source, /Relative adjustment/);
+  assert.doesNotMatch(source, /Relative adjustment · LCD baseline/);
+  assert.doesNotMatch(source, /ROMs and artwork stay on this device/);
+  assert.match(source, /\+ ADD ROM · \{String\(libraryRoms\.length\)\.padStart\(2, "0"\)\}/);
   assert.doesNotMatch(source, /disabled=\{lcdMode !== "response"\}/);
   assert.doesNotMatch(source, /lcd-pixel-grid|context\.fillRect\(column \* scale/);
   assert.match(source, /className="lcd-output"/);

@@ -1,13 +1,14 @@
 {
-  "version": "3.0.1",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v3.0.1/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v3.0.1",
+  "version": "3.0.2",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v3.0.2/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v3.0.2",
   "changes": [
-    "Audio now hands off cleanly when a cartridge starts, so the end of the GBC startup jingle is no longer clipped and short underruns recover more quietly.",
-    "The options drawers now use one consistent centre-grown green selection bar, with even spacing around LCD and sound sliders.",
-    "The one-file offline library, artwork, supplied legal BIOS profiles, browser saves, snapshots, and cartridge-switch protections stay together in this build.",
-    "In a nine-trial core-only smoke run, median throughput was 792.70 FPS on the DMG Tetris case and 665.75 FPS on the CGB Tetris DX case; actual game speed is unchanged.",
-    "The controlled conformance harness reports 60/76 for GAMEBOY LAB and 65/76 for SameBoy 1.0.3 with failures, timeouts, crashes, and unsupported cases separated instead of hidden.",
-    "The full verification suite is green (99/99), with 70/70 applicable Mooneye checks and no conformance timeouts."
+    "The library toolbar is cleaner: the old stored-ROM paragraph is gone, Add ROM shows the current cartridge count in both views, and the table action stays at the far right.",
+    "The table/detail control is now one compact tabletop button, the table close action has the same hover feedback as the other drawers, and wide screens no longer move the console unnecessarily.",
+    "LCD contrast controls no longer repeat a technical baseline sentence underneath the slider, leaving the option row easier to scan.",
+    "The README now starts with a plain accuracy table, uses the latest screenshots, and explains exactly why Gambatte's revision-limited diagnostic run is not a strict score.",
+    "The local verification remains stable at 99/99 project tests, 70/70 applicable Mooneye checks, and no conformance timeouts.",
+    "The controlled SameSuite matrix remains 60/76 for GAMEBOY LAB and 65/76 for SameBoy 1.0.3; failures and unsupported hardware are listed instead of hidden.",
+    "The nine-trial core-only smoke medians remain 792.70 FPS for DMG Tetris and 665.75 FPS for CGB Tetris DX; game timing is unchanged."
   ]
 }

@@ -1450,16 +1450,6 @@ function RomLibraryDrawer({
 
       {libraryView === "detail" ? (
         <>
-          <section className="library-intro">
-            <div>
-              <span>{String(libraryRoms.length).padStart(2, "0")} STORED</span>
-              <p>ROMs and artwork stay on this device. Nothing is uploaded.</p>
-            </div>
-            <button className="library-add-button" type="button" onClick={onAddRom}>
-              + ADD ROM
-            </button>
-          </section>
-
           <div className="library-tools">
             <label>
               <span className="visually-hidden">Search game library</span>
@@ -1488,23 +1478,18 @@ function RomLibraryDrawer({
               ))}
             </div>
             {sortControl}
-            <div className="library-view-switch" aria-label="Game library layout">
-              <button
-                className="active"
-                type="button"
-                aria-pressed="true"
-                onClick={() => onView("detail")}
-              >
-                DETAIL
-              </button>
-              <button
-                type="button"
-                aria-pressed="false"
-                onClick={() => onView("tabletop")}
-              >
-                TABLE
-              </button>
-            </div>
+            <button
+              className="library-view-toggle"
+              type="button"
+              onClick={() => onView("tabletop")}
+              aria-label="Open tabletop cartridge view"
+            >
+              <span aria-hidden="true">▦</span>
+              TABLE VIEW
+            </button>
+            <button className="library-add-button" type="button" onClick={onAddRom}>
+              + ADD ROM · {String(libraryRoms.length).padStart(2, "0")}
+            </button>
           </div>
         </>
       ) : (
@@ -1531,14 +1516,11 @@ function RomLibraryDrawer({
           </div>
           {sortControl}
           <div className="tabletop-actions">
-            <button
-              type="button"
-              onClick={onAddRom}
-            >
-              + ADD
-            </button>
             <button type="button" onClick={() => onView("detail")}>
               DETAIL VIEW
+            </button>
+            <button type="button" onClick={onAddRom}>
+              + ADD · {String(libraryRoms.length).padStart(2, "0")}
             </button>
           </div>
         </div>
@@ -5512,10 +5494,6 @@ export default function Emulator() {
                   onChange={(event) => setDmgContrastAdjustment(Number(event.target.value))}
                   aria-label="Game Boy contrast adjustment"
                 />
-                <small>
-                  Relative adjustment · {lcdMode === "response" ? "LCD" : "SHARP"} baseline{" "}
-                  {dmgContrastBase}% · active {effectiveDmgContrast}%
-                </small>
               </label>
             )}
             <button

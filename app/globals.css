@@ -1155,7 +1155,10 @@ kbd {
 
 }
 
-@media (min-width: 1150px) {
+/* Keep the physical console centred once the viewport can hold it beside a
+   drawer. The side push is only needed in the overlap range; on genuinely
+   wide screens a drawer should not make the console drift for no reason. */
+@media (min-width: 1150px) and (max-width: 1499px) {
   .app-shell:has(.control-deck.open:not(.library-deck)) .console-wrap {
     width: calc(100% - 480px);
     margin-right: 480px;
@@ -3151,7 +3154,6 @@ html[data-theme="dark"] body {
   box-shadow: 0 -12px 0 12px var(--paper);
 }
 
-.library-deck.open .library-intro,
 .library-deck.open .library-tools,
 .library-deck.open .library-results,
 .library-deck.open .library-footer {
@@ -3161,29 +3163,6 @@ html[data-theme="dark"] body {
 .library-deck.open .library-tools { animation-delay: 45ms; }
 .library-deck.open .library-results { animation-delay: 80ms; }
 .library-deck.open .library-footer { animation-delay: 115ms; }
-
-.library-intro {
-  padding: 19px 0 17px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  border-bottom: 1px solid var(--ink);
-}
-
-.library-intro span {
-  font: 900 12px/1 var(--font-mono);
-  letter-spacing: .1em;
-}
-
-.library-intro p {
-  max-width: 310px;
-  margin: 7px 0 0;
-  color: var(--muted);
-  font: 700 10px/1.45 var(--font-mono);
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
 
 .library-add-button,
 .library-empty button {
@@ -3214,8 +3193,8 @@ html[data-theme="dark"] body {
   margin-inline: -28px;
   padding: 15px 28px;
   display: grid;
-  grid-template-columns: minmax(110px, 1fr) auto minmax(132px, auto) auto;
-  gap: 10px;
+  grid-template-columns: minmax(86px, 1fr) auto minmax(100px, auto) auto auto;
+  gap: 6px;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
   box-shadow:
@@ -3235,11 +3214,18 @@ html[data-theme="dark"] body {
   letter-spacing: .05em;
 }
 
+.library-tools .library-add-button {
+  min-width: 110px;
+  padding-inline: 8px;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
 .library-tools input::placeholder { color: #8b8d88; opacity: 1; }
 
 .library-filters {
   display: grid;
-  grid-template-columns: repeat(3, 43px);
+  grid-template-columns: repeat(3, 32px);
   border: 1px solid var(--ink);
 }
 
@@ -3255,7 +3241,7 @@ html[data-theme="dark"] body {
 .library-filters button.active { color: var(--acid-ink); background: var(--acid); }
 
 .library-sort-control {
-  min-width: 132px;
+  min-width: 100px;
   height: 38px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -3266,7 +3252,7 @@ html[data-theme="dark"] body {
 }
 
 .library-sort-control > span {
-  padding: 0 7px;
+  padding: 0 5px;
   display: grid;
   place-items: center;
   color: var(--muted);
@@ -3277,35 +3263,43 @@ html[data-theme="dark"] body {
 
 .library-sort-control select {
   min-width: 0;
-  padding: 0 22px 0 8px;
+  padding: 0 18px 0 6px;
   color: inherit;
   border: 0;
   border-radius: 0;
   outline-offset: -2px;
   background: color-mix(in srgb, var(--paper) 92%, transparent);
   cursor: pointer;
-  font: 900 8px/1 var(--font-mono);
+  font: 900 7px/1 var(--font-mono);
   letter-spacing: .035em;
 }
 
-.library-view-switch {
-  display: grid;
-  grid-template-columns: repeat(2, 49px);
-  border: 1px solid var(--ink);
-}
-
-.library-view-switch button {
-  border: 0;
-  border-left: 1px solid var(--ink);
-  background: transparent;
+.library-view-toggle {
+  min-height: 38px;
+  min-width: 88px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #f1f0e9;
+  border: 1px solid #2d211b;
+  background: #76533f;
+  box-shadow: 3px 3px 0 var(--magenta);
   cursor: pointer;
-  font: 900 9px/1 var(--font-mono);
+  font: 900 8px/1 var(--font-mono);
+  letter-spacing: .06em;
+  white-space: nowrap;
 }
 
-.library-view-switch button:first-child { border-left: 0; }
-.library-view-switch button.active {
-  color: var(--paper);
-  background: var(--ink);
+.library-view-toggle span {
+  font-size: 16px;
+  line-height: .7;
+}
+
+.library-view-toggle:active {
+  translate: 2px 2px;
+  box-shadow: 1px 1px 0 var(--magenta);
 }
 
 .library-results {
@@ -3430,6 +3424,13 @@ html[data-theme="dark"] body {
   background: rgba(45,33,27,.18);
 }
 
+.library-deck.tabletop-mode .drawer-heading button:hover,
+.library-deck.tabletop-mode .drawer-heading button:focus-visible {
+  color: var(--acid-ink);
+  border-color: #2d211b;
+  background: var(--acid);
+}
+
 .tabletop-toolbar {
   flex: none;
   min-height: 48px;
@@ -3452,6 +3453,12 @@ html[data-theme="dark"] body {
 .tabletop-toolbar > div {
   display: flex;
   gap: 8px;
+}
+
+.tabletop-toolbar .tabletop-actions {
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .tabletop-toolbar .tabletop-filter-tabs {
@@ -3484,7 +3491,7 @@ html[data-theme="dark"] body {
 
 .tabletop-toolbar button {
   min-height: 30px;
-  padding: 0 10px;
+  padding: 0 8px;
   color: #f1f0e9;
   border: 1px solid #2d211b;
   background: rgba(45,33,27,.18);
@@ -3497,6 +3504,15 @@ html[data-theme="dark"] body {
   min-width: 34px;
   padding-inline: 8px;
   border-left: 0;
+}
+
+.tabletop-toolbar .tabletop-actions button:last-child {
+  box-shadow: 3px 3px 0 var(--magenta);
+}
+
+.tabletop-toolbar .tabletop-actions button:last-child:active {
+  translate: 2px 2px;
+  box-shadow: 1px 1px 0 var(--magenta);
 }
 
 .tabletop-toolbar .tabletop-filter-tabs button:first-child {
@@ -4092,11 +4108,6 @@ html[data-theme="dark"] body {
     padding-inline: 18px;
   }
 
-  .library-intro {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
   .library-tools {
     margin-inline: -18px;
     padding-inline: 18px;
@@ -4125,7 +4136,6 @@ html[data-theme="dark"] body {
     row-gap: 8px;
   }
   .library-footer { margin-inline: -18px; padding-inline: 18px; }
-  .library-view-switch { min-height: 36px; grid-template-columns: 1fr 1fr; }
   .tabletop-toolbar {
     margin-inline: -18px;
     padding-inline: 12px;
@@ -4515,16 +4525,6 @@ html[data-theme="dark"] body {
   margin-bottom: 0;
   padding-top: 16px;
   border-top: 1px solid var(--line);
-}
-
-.dmg-contrast-control small {
-  margin-top: 8px;
-  display: block;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 8px;
-  letter-spacing: .04em;
-  text-transform: uppercase;
 }
 
 @media (max-width: 900px) {
