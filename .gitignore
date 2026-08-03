@@ -4,6 +4,7 @@
 .DS_Store
 *.log
 .env*
+/Images/
 
 # Keep raw cartridge and firmware dumps out of source control. Approved
 # production firmware for the local one-file build is encoded in source.

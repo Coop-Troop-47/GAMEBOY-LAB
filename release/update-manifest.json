@@ -1,13 +1,13 @@
 {
-  "version": "3.0.3",
-  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v3.0.3/gbc-lab.html",
-  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v3.0.3",
+  "version": "3.0.4",
+  "downloadUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/download/v3.0.4/gbc-lab.html",
+  "notesUrl": "https://github.com/Coop-Troop-47/GAMEBOY-LAB/releases/tag/v3.0.4",
   "changes": [
-    "The library search is now simply SEARCH, and Add ROM is a cleaner one-line action in both library views.",
-    "Library, tabletop, and empty-state buttons now have a quicker lift-and-shadow hover response.",
-    "The contrast slider and the LCD correction panel now use the same comfortable vertical spacing.",
-    "The accuracy snapshot now uses one pinned ROM set and separates strict passes from diagnostic reference results.",
-    "Core-only testing shows LAB ahead of SameBoy by 86.9% on the DMG workload and 48.4% on the CGB workload on the release laptop.",
-    "The README has been rebuilt around the single-file experience, saves, screenshots, accuracy, and practical performance outcomes."
+    "Selected controls are now consistently white, while hover colours clearly distinguish Options from Emulation settings.",
+    "Sliders stay visually calm while dragging and reveal their hover highlight only after the pointer leaves and returns.",
+    "Library filters are now flat and shadow-free, with separate animations for Add ROM and switching library views.",
+    "Save-state cards now capture the real game screen and preserve whether the state belongs to the Game Boy or Game Boy Color.",
+    "Dark-mode ON, OFF, year, and helper labels remain readable across every highlighted control.",
+    "The README now opens with all three current screenshots and explains the single-file experience, library, LCD, and save tools more clearly."
   ]
 }

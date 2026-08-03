@@ -393,6 +393,15 @@ input:focus-visible {
   opacity: 1;
 }
 
+/* The first frame of a cartridge swap is covered without an opacity
+   interpolation.  This prevents the compositor from exposing a clear/white
+   canvas for one refresh; once the new core has presented a frame, the normal
+   short fade restores the LCD. */
+.console-wrap.cartridge-screen-covered .cartridge-power-cover {
+  opacity: 1;
+  transition: none;
+}
+
 .pause-overlay {
   position: absolute;
   inset: -4px;
@@ -677,6 +686,19 @@ input:focus-visible {
   text-transform: uppercase;
 }
 
+.drawer-title-with-icon {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.drawer-title-with-icon .setting-icon {
+  width: 30px;
+  height: 30px;
+  margin-bottom: 2px;
+  color: var(--acid-ink);
+}
+
 .drawer-heading button {
   min-height: 36px;
   padding: 0 12px;
@@ -699,7 +721,10 @@ input:focus-visible {
   padding: 0;
   border: 0;
   background: rgba(22, 25, 29, .34);
-  backdrop-filter: blur(3px);
+  /* Keep the live shell and LCD crisp while a drawer is open.  The scrim
+     provides separation; blurring the entire viewport made large displays
+     look soft and also made the drawer feel closer than it was. */
+  backdrop-filter: none;
   cursor: default;
 }
 
@@ -853,6 +878,20 @@ kbd {
   cursor: pointer;
   font: 800 10px/1 monospace;
   text-transform: uppercase;
+  transition: color 140ms ease, background-color 140ms ease, translate 140ms ease;
+}
+
+.segmented button:not(:disabled):hover {
+  color: var(--acid-ink);
+  background: color-mix(in srgb, var(--acid) 20%, transparent);
+}
+
+/* The selected segment is deliberately dark.  A translucent wash is almost
+   invisible on that surface, so promote the hover to a full acid tile. */
+.segmented button.active:not(:disabled):hover,
+.segmented button.active:not(:disabled):focus-visible {
+  color: var(--acid-ink);
+  background: var(--acid);
 }
 
 .segmented button.active {
@@ -875,6 +914,12 @@ kbd {
   align-items: center;
   justify-content: center;
   gap: 10px;
+  transition: color 150ms ease, background-color 150ms ease, translate 150ms ease;
+}
+
+.model-switch button:not(:disabled):hover {
+  translate: 0 -1px;
+  background: color-mix(in srgb, var(--acid) 16%, transparent);
 }
 
 .model-switch button b {
@@ -905,7 +950,12 @@ kbd {
 }
 
 .ghost-strength-control {
-  margin-bottom: 0;
+  /* Leave room for the 16 px thumb before the next bordered control. */
+  margin-bottom: 18px;
+}
+
+.dmg-contrast-control {
+  margin-bottom: 18px;
 }
 
 .range-control > span {
@@ -943,6 +993,40 @@ kbd {
   border-radius: 0;
   background: var(--acid);
   cursor: pointer;
+}
+
+.range-control input::-webkit-slider-thumb {
+  box-shadow: none;
+  transition: background-color 140ms ease, transform 140ms ease;
+}
+
+.range-control input::-moz-range-thumb {
+  box-shadow: none;
+  transition: background-color 140ms ease, transform 140ms ease;
+}
+
+.range-control input:not(.range-hover-latched):hover::-webkit-slider-thumb,
+.range-control input:focus-visible::-webkit-slider-thumb {
+  background: var(--cyan);
+  transform: scale(1.08);
+}
+
+.range-control input:not(.range-hover-latched):hover::-moz-range-thumb,
+.range-control input:focus-visible::-moz-range-thumb {
+  background: var(--cyan);
+  transform: scale(1.08);
+}
+
+.range-control input.range-hover-latched::-webkit-slider-thumb {
+  background: var(--acid);
+  box-shadow: none;
+  transform: none;
+}
+
+.range-control input.range-hover-latched::-moz-range-thumb {
+  background: var(--acid);
+  box-shadow: none;
+  transform: none;
 }
 
 .technical-readout {
@@ -1158,15 +1242,19 @@ kbd {
 /* Keep the physical console centred once the viewport can hold it beside a
    drawer. The side push is only needed in the overlap range; on genuinely
    wide screens a drawer should not make the console drift for no reason. */
-@media (min-width: 1150px) and (max-width: 1499px) {
+@media (min-width: 1150px) and (max-width: 1849px) {
   .app-shell:has(.control-deck.open:not(.library-deck)) .console-wrap {
-    width: calc(100% - 480px);
-    margin-right: 480px;
+    /* Reserve the full drawer plus a deliberate 24 px breathing room.  The
+       previous 480 px reserve was narrower than the drawer itself, so the
+       shell could sit directly under its edge before the overlay mode kicked
+       in. */
+    width: calc(100% - 564px);
+    margin-right: 564px;
   }
 
   .app-shell:has(.library-deck.open) .console-wrap {
-    width: calc(100% - 500px);
-    margin-left: 500px;
+    width: calc(100% - 614px);
+    margin-left: 614px;
   }
 
   .app-shell:has(.control-deck.open) .drawer-backdrop {
@@ -1342,6 +1430,14 @@ html[data-theme="dark"] body {
   --cream: #23272f;
   --muted: #a7abb2;
   --line: rgba(242, 241, 233, 0.18);
+  --selected-bg: #f2f1e9;
+  --selected-ink: #17191e;
+  --options-hover-bg: #b8bbb9;
+  --options-hover-ink: #17191e;
+  --options-hover-border: #e2e3de;
+  --emulation-hover-bg: #3d4148;
+  --emulation-hover-ink: #f2f1e9;
+  --emulation-hover-border: #858b94;
   color: var(--ink);
   background: var(--paper);
 }
@@ -1369,17 +1465,12 @@ html[data-theme="dark"] body {
 
 .theme-dark .segmented::before,
 .theme-dark .options-trigger {
-  background: #f2f1e9;
+  background: var(--selected-bg);
 }
 
 .theme-dark .segmented button.active,
 .theme-dark .options-trigger {
-  color: #17191e;
-}
-
-.theme-dark .options-trigger:not(:disabled):hover {
-  color: var(--acid-ink);
-  background: var(--acid);
+  color: var(--selected-ink);
 }
 
 .workspace {
@@ -1954,6 +2045,8 @@ html[data-theme="dark"] body {
 .manual-scale-control button:hover {
   color: var(--acid-ink);
   background: var(--acid);
+  translate: 0 -1px;
+  box-shadow: 3px 3px 0 var(--cyan);
 }
 
 .save-actions button:disabled,
@@ -2015,6 +2108,208 @@ html[data-theme="dark"] body {
   background: #b5244d;
 }
 
+/* Three little machine screens make the snapshot slots legible at a glance.
+   The shallow 3-D angle gives the group a carousel feel without hiding any
+   controls or relying on a timed auto-rotation. */
+.save-state-carousel {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  perspective: 900px;
+}
+
+.save-state-slot {
+  min-width: 0;
+  padding: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--ink);
+  border: 1px solid var(--ink);
+  background: color-mix(in srgb, var(--paper) 82%, var(--cyan));
+  box-shadow: 4px 4px 0 var(--cyan);
+  transform: perspective(900px) rotateY(0deg);
+  transition:
+    opacity 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 220ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.save-state-slot:first-child {
+  transform: perspective(900px) rotateY(4deg);
+}
+
+.save-state-slot:last-child {
+  transform: perspective(900px) rotateY(-4deg);
+}
+
+.save-state-carousel:hover .save-state-slot:not(:hover) {
+  opacity: .78;
+  transform: perspective(900px) translateZ(-10px) scale(.98);
+}
+
+.save-state-slot:hover,
+.save-state-slot:focus-within {
+  z-index: 1;
+  background: color-mix(in srgb, var(--paper) 72%, var(--cyan));
+  box-shadow: 6px 6px 0 var(--magenta);
+  transform: perspective(900px) translateY(-4px) rotateY(0deg);
+}
+
+.save-state-preview-console {
+  --preview-shell: #24272e;
+  width: 100%;
+  padding: 5px;
+  border: 1px solid var(--ink);
+  background: var(--preview-shell);
+  box-shadow: inset 0 0 0 2px #111318;
+  transition: background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.save-state-preview-console.model-cgb {
+  --preview-shell: #5140bd;
+}
+
+.save-state-preview-console.model-dmg {
+  --preview-shell: #9ea09b;
+}
+
+.save-state-preview-screen {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 160 / 144;
+  display: grid;
+  place-items: center;
+  border: 1px solid #111318;
+  background: #9da31d;
+}
+
+.save-state-preview-screen img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  image-rendering: pixelated;
+}
+
+.save-state-preview-placeholder {
+  width: 54%;
+  height: 58%;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 5px;
+  color: #4c5f42;
+  border: 2px solid #4c5f42;
+  background: #c8dc9f;
+  font: 900 7px/1 var(--font-mono);
+  letter-spacing: .08em;
+}
+
+.save-state-preview-placeholder i {
+  width: 22px;
+  height: 15px;
+  display: block;
+  border: 2px solid currentColor;
+  box-shadow: inset 0 -5px 0 currentColor;
+}
+
+.save-state-slot-meta {
+  min-width: 0;
+}
+
+.save-state-slot-meta b,
+.save-state-slot-meta span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.save-state-slot-meta b {
+  font: 900 10px/1 var(--font-mono);
+  letter-spacing: .07em;
+}
+
+.save-state-slot-meta span {
+  margin-top: 5px;
+  color: var(--muted);
+  font: 700 8px/1.2 var(--font-mono);
+}
+
+.save-state-slot-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.save-state-slot-actions button {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 4px;
+  color: var(--ink);
+  border: 1px solid var(--ink);
+  background: transparent;
+  cursor: pointer;
+  font: 900 8px/1 var(--font-mono);
+  letter-spacing: .04em;
+}
+
+.save-state-slot-actions button:hover:not(:disabled),
+.save-state-slot-actions button:focus-visible {
+  color: var(--acid-ink);
+  background: var(--acid);
+  box-shadow: 2px 2px 0 var(--cyan);
+}
+
+.save-state-slot-actions button:disabled {
+  cursor: not-allowed;
+  opacity: .32;
+}
+
+.save-state-slot-actions .save-state-save-button {
+  grid-column: 1 / -1;
+}
+
+.save-state-slot-actions .hold-load-safety b {
+  font-size: 7px;
+}
+
+.theme-dark .save-state-slot {
+  background: color-mix(in srgb, var(--paper) 88%, var(--cyan));
+}
+
+.theme-dark .save-state-slot:hover,
+.theme-dark .save-state-slot:focus-within {
+  background: color-mix(in srgb, var(--paper) 78%, var(--cyan));
+}
+
+.theme-dark .save-state-preview-console.model-dmg {
+  --preview-shell: #777a77;
+}
+
+@media (max-width: 480px) {
+  .save-state-carousel {
+    gap: 5px;
+  }
+
+  .save-state-slot {
+    padding: 6px;
+    gap: 6px;
+    box-shadow: 3px 3px 0 var(--cyan);
+  }
+
+  .save-state-slot-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .save-state-slot-actions .save-state-save-button {
+    grid-column: auto;
+  }
+}
+
 .sound-toggle,
 .preference-toggle {
   position: relative;
@@ -2059,6 +2354,19 @@ html[data-theme="dark"] body {
 .sound-toggle.active::before,
 .preference-toggle.active::before {
   transform: scaleY(1);
+}
+
+.sound-toggle:not(:disabled):hover,
+.preference-toggle:not(:disabled):hover {
+  color: var(--acid-ink);
+  background: color-mix(in srgb, var(--acid) 13%, transparent);
+  translate: 0 -1px;
+}
+
+.sound-toggle:not(:disabled):focus-visible,
+.preference-toggle:not(:disabled):focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
 }
 
 .preference-toggle:disabled {
@@ -2197,6 +2505,14 @@ html[data-theme="dark"] body {
   font: 900 9px/1 monospace;
   letter-spacing: .08em;
   text-transform: uppercase;
+  transition: color 140ms ease, background-color 140ms ease, padding-left 140ms ease;
+}
+
+.setting-info summary:hover,
+.setting-info summary:focus-visible {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--acid) 12%, transparent);
+  padding-left: 15px;
 }
 
 .setting-info summary::-webkit-details-marker {
@@ -2410,6 +2726,17 @@ html[data-theme="dark"] body {
   font: 900 9px/1 monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: color 140ms ease, background-color 140ms ease, translate 140ms ease, box-shadow 140ms ease;
+}
+
+.keybind-grid button:not(:disabled):hover,
+.reset-bindings:hover,
+.keybind-grid button:focus-visible,
+.reset-bindings:focus-visible {
+  color: var(--acid-ink);
+  background: color-mix(in srgb, var(--acid) 18%, transparent);
+  translate: 0 -1px;
+  box-shadow: 3px 3px 0 var(--cyan);
 }
 
 .keybind-grid button.listening {
@@ -2420,6 +2747,10 @@ html[data-theme="dark"] body {
 .reset-bindings {
   width: 100%;
   margin-top: 9px;
+}
+
+.keyboard-motion-toggle {
+  margin-top: 12px;
 }
 
 .key-hint > span {
@@ -3165,12 +3496,13 @@ html[data-theme="dark"] body {
 .library-deck.open .library-footer { animation-delay: 115ms; }
 
 .library-add-button,
+.tabletop-add-button,
 .library-empty button {
   flex: none;
   min-height: 39px;
   padding: 0 14px;
   color: var(--paper);
-  border: 1px solid var(--ink);
+  border: 1px solid var(--cyan);
   background: var(--ink);
   box-shadow: 4px 4px 0 var(--cyan);
   cursor: pointer;
@@ -3185,15 +3517,34 @@ html[data-theme="dark"] body {
 
 .library-add-button:hover,
 .library-add-button:focus-visible,
+.tabletop-add-button:hover,
+.tabletop-add-button:focus-visible,
 .library-empty button:hover,
 .library-empty button:focus-visible {
   color: var(--acid-ink);
   background: var(--acid);
+}
+
+.library-add-button:hover,
+.library-add-button:focus-visible,
+.tabletop-add-button:hover,
+.tabletop-add-button:focus-visible {
+  translate: 0 -2px;
+  box-shadow: 0 6px 0 var(--cyan);
+}
+
+.library-empty button:hover,
+.library-empty button:focus-visible {
   translate: -2px -2px;
   box-shadow: 6px 6px 0 var(--cyan);
 }
 
 .library-add-button:active,
+.tabletop-add-button:active {
+  translate: 0 3px;
+  box-shadow: 0 1px 0 var(--cyan);
+}
+
 .library-empty button:active {
   translate: 3px 3px;
   box-shadow: 1px 1px 0 var(--cyan);
@@ -3219,7 +3570,7 @@ html[data-theme="dark"] body {
 
 .library-tools input {
   width: 100%;
-  height: 38px;
+  height: 39px;
   padding: 0 12px;
   color: var(--ink);
   border: 1px solid var(--ink);
@@ -3238,26 +3589,64 @@ html[data-theme="dark"] body {
 
 .library-tools input::placeholder { color: #8b8d88; opacity: 1; }
 
+/* Search and sort inputs can lift; filter strips remain flat so their selected
+   tile is the only moving visual signal. */
+.library-tools input,
+.library-sort-control,
+.tabletop-search input,
+.tabletop-toolbar .library-sort-control {
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    background-color 140ms ease;
+}
+
+.library-tools input:hover,
+.library-tools input:focus-visible,
+.library-sort-control:hover,
+.tabletop-search input:hover,
+.tabletop-search input:focus-visible,
+.tabletop-toolbar .library-sort-control:hover {
+  border-color: var(--cyan);
+  box-shadow: 3px 3px 0 var(--cyan);
+}
+
 .library-filters {
+  --filter-active-color: var(--acid);
+  --filter-active-ink: var(--acid-ink);
+  height: 39px;
   display: grid;
   grid-template-columns: repeat(3, 32px);
   border: 1px solid var(--ink);
 }
 
 .library-filters button {
+  min-height: 39px;
   border: 0;
   border-left: 1px solid var(--ink);
   background: transparent;
   cursor: pointer;
   font: 900 9px/1 var(--font-mono);
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    translate 140ms cubic-bezier(.2, .8, .2, 1);
 }
 
 .library-filters button:first-child { border-left: 0; }
-.library-filters button.active { color: var(--acid-ink); background: var(--acid); }
+.library-filters button.active {
+  color: var(--filter-active-ink);
+  background: var(--filter-active-color);
+}
+.library-filters button:not(.active):hover,
+.library-filters button:not(.active):focus-visible {
+  color: var(--filter-active-ink);
+  background: var(--filter-active-color);
+}
 
 .library-sort-control {
   min-width: 100px;
-  height: 38px;
+  height: 39px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: stretch;
@@ -3290,7 +3679,8 @@ html[data-theme="dark"] body {
 }
 
 .library-view-toggle {
-  min-height: 38px;
+  min-height: 39px;
+  height: 39px;
   min-width: 88px;
   padding: 0 8px;
   display: inline-flex;
@@ -3315,6 +3705,7 @@ html[data-theme="dark"] body {
 .library-view-toggle span {
   font-size: 16px;
   line-height: .7;
+  transition: transform 180ms cubic-bezier(.2, .8, .2, 1);
 }
 
 .library-view-toggle:active {
@@ -3324,10 +3715,15 @@ html[data-theme="dark"] body {
 
 .library-view-toggle:hover,
 .library-view-toggle:focus-visible {
-  color: var(--acid-ink);
-  background: var(--acid);
-  translate: -2px -2px;
-  box-shadow: 5px 5px 0 var(--magenta);
+  color: #f1f0e9;
+  background: #8b634b;
+  translate: 3px 0;
+  box-shadow: -5px 0 0 var(--magenta);
+}
+
+.library-view-toggle:hover span,
+.library-view-toggle:focus-visible span {
+  transform: rotate(90deg) scale(1.08);
 }
 
 .library-results {
@@ -3465,17 +3861,36 @@ html[data-theme="dark"] body {
   margin-inline: -28px;
   padding: 8px 20px;
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
-  align-items: center;
+  grid-template-columns: minmax(112px, 1fr) auto minmax(144px, auto) auto;
+  align-items: stretch;
   gap: 12px;
   color: #f1f0e9;
   border-bottom: 1px solid #2d211b;
   background: #76533f;
 }
 
-.tabletop-toolbar > span {
-  font: 900 10px/1 var(--font-mono);
-  letter-spacing: .1em;
+.tabletop-search {
+  min-width: 0;
+  display: block;
+}
+
+.tabletop-search input {
+  width: 100%;
+  height: 39px;
+  min-width: 0;
+  padding: 0 12px;
+  color: #f1f0e9;
+  border: 1px solid #2d211b;
+  border-radius: 0;
+  outline-offset: -2px;
+  background: rgba(45,33,27,.18);
+  font: 900 9px/1 var(--font-mono);
+  letter-spacing: .07em;
+}
+
+.tabletop-search input::placeholder {
+  color: rgba(241,240,233,.72);
+  opacity: 1;
 }
 
 .tabletop-toolbar > div {
@@ -3490,13 +3905,16 @@ html[data-theme="dark"] body {
 }
 
 .tabletop-toolbar .tabletop-filter-tabs {
+  --filter-active-color: var(--acid);
+  --filter-active-ink: var(--acid-ink);
   justify-content: center;
   gap: 0;
+  height: 39px;
 }
 
 .tabletop-toolbar .library-sort-control {
   min-width: 126px;
-  height: 30px;
+  height: 39px;
   color: #f1f0e9;
   border-color: #2d211b;
   background: rgba(45,33,27,.18);
@@ -3518,7 +3936,7 @@ html[data-theme="dark"] body {
 }
 
 .tabletop-toolbar button {
-  min-height: 30px;
+  min-height: 39px;
   padding: 0 8px;
   color: #f1f0e9;
   border: 1px solid #2d211b;
@@ -3540,12 +3958,29 @@ html[data-theme="dark"] body {
 }
 
 .tabletop-toolbar .tabletop-actions button:last-child {
-  box-shadow: 3px 3px 0 var(--magenta);
+  box-shadow: 4px 4px 0 var(--cyan);
 }
 
 .tabletop-toolbar .tabletop-actions button:last-child:active {
   translate: 2px 2px;
-  box-shadow: 1px 1px 0 var(--magenta);
+  box-shadow: 1px 1px 0 var(--cyan);
+}
+
+.tabletop-toolbar .tabletop-actions .tabletop-add-button {
+  min-height: 39px;
+  padding-inline: 14px;
+  color: var(--paper);
+  border-color: var(--cyan);
+  background: var(--ink);
+  box-shadow: 4px 4px 0 var(--cyan);
+}
+
+.tabletop-toolbar .tabletop-actions .tabletop-add-button:hover,
+.tabletop-toolbar .tabletop-actions .tabletop-add-button:focus-visible {
+  color: var(--acid-ink);
+  border-color: var(--cyan);
+  background: var(--acid);
+  box-shadow: 6px 6px 0 var(--cyan);
 }
 
 .tabletop-toolbar .tabletop-filter-tabs button:first-child {
@@ -3553,8 +3988,16 @@ html[data-theme="dark"] body {
 }
 
 .tabletop-toolbar .tabletop-filter-tabs button.active {
-  color: var(--acid-ink);
-  background: var(--acid);
+  color: var(--filter-active-ink);
+  background: var(--filter-active-color);
+}
+
+.library-filters button:not(:disabled):hover,
+.library-filters button:not(:disabled):focus-visible,
+.tabletop-toolbar .tabletop-filter-tabs button:not(:disabled):hover,
+.tabletop-toolbar .tabletop-filter-tabs button:not(:disabled):focus-visible {
+  translate: 0 -1px;
+  box-shadow: none;
 }
 
 .tabletop-toolbar button:hover,
@@ -3563,6 +4006,14 @@ html[data-theme="dark"] body {
   background: var(--acid);
   translate: -1px -1px;
   box-shadow: 3px 3px 0 var(--magenta);
+}
+
+.tabletop-toolbar .tabletop-view-toggle:hover,
+.tabletop-toolbar .tabletop-view-toggle:focus-visible {
+  color: #f1f0e9;
+  background: #8b634b;
+  translate: -3px 0;
+  box-shadow: 5px 0 0 var(--magenta);
 }
 
 .library-results.library-tabletop {
@@ -3896,6 +4347,21 @@ html[data-theme="dark"] body {
   cursor: pointer;
   font: 900 9px/1 var(--font-mono);
   letter-spacing: .07em;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease,
+    translate 140ms cubic-bezier(.2, .8, .2, 1),
+    box-shadow 140ms ease;
+}
+
+.library-card-actions button:hover:not(:disabled),
+.library-card-actions button:focus-visible {
+  color: var(--acid-ink);
+  background: var(--acid);
+  border-color: var(--ink);
+  translate: 0 -1px;
+  box-shadow: 3px 3px 0 var(--cyan);
 }
 
 .hold-to-load {
@@ -4177,7 +4643,8 @@ html[data-theme="dark"] body {
     grid-template-columns: auto minmax(0, 1fr);
     gap: 7px 10px;
   }
-  .tabletop-toolbar > span { white-space: nowrap; }
+  .tabletop-toolbar .tabletop-search,
+  .tabletop-toolbar .tabletop-actions { min-width: 0; }
   .tabletop-toolbar .tabletop-filter-tabs,
   .tabletop-toolbar .tabletop-actions { justify-content: flex-end; }
   .tabletop-toolbar .library-sort-control {
@@ -4557,7 +5024,7 @@ html[data-theme="dark"] body {
 
 .dmg-contrast-control {
   margin-top: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   padding-top: 16px;
   border-top: 1px solid var(--line);
 }
@@ -4933,7 +5400,8 @@ html[data-theme="dark"] body {
   animation: app-data-status-in 240ms cubic-bezier(.2, .8, .2, 1) both;
 }
 
-.app-data-section:hover .app-data-summary {
+.app-data-summary:hover,
+.app-data-summary:focus-within {
   background: color-mix(in srgb, var(--cyan) 17%, transparent);
   box-shadow: 7px 7px 0 var(--cyan);
   transform: translate(-1px, -1px);
@@ -5440,4 +5908,184 @@ html[data-theme="dark"] body {
     animation-duration: 1ms !important;
   }
 
+}
+
+/* Interaction-state contract -------------------------------------------------
+   White is reserved for selected segments and filters. Options hover with a
+   light grey tile; Emulation uses a deeper graphite across buttons, summaries,
+   and range thumbs. Filters and sliders stay flat, while true action buttons
+   retain their physical coloured shadows. */
+.theme-dark .library-tools input::placeholder {
+  color: var(--muted);
+}
+
+.theme-dark .segmented::before,
+.theme-dark .library-filters button.active,
+.theme-dark .tabletop-filter-tabs button.active {
+  background: var(--selected-bg);
+}
+
+.theme-dark .segmented button.active,
+.theme-dark .library-filters button.active,
+.theme-dark .tabletop-filter-tabs button.active {
+  color: var(--selected-ink);
+}
+
+.theme-dark .library-filters,
+.theme-dark .tabletop-filter-tabs {
+  --filter-active-color: var(--selected-bg);
+  --filter-active-ink: var(--selected-ink);
+  box-shadow: none;
+}
+
+.library-filters,
+.library-filters button,
+.tabletop-filter-tabs,
+.tabletop-filter-tabs button,
+.tabletop-toolbar .tabletop-filter-tabs button:hover,
+.tabletop-toolbar .tabletop-filter-tabs button:focus-visible {
+  box-shadow: none;
+}
+
+/* Options drawer and the ordinary dark-mode interface. */
+.theme-dark #options-drawer .segmented button:not(:disabled):hover,
+.theme-dark #options-drawer .segmented button:not(:disabled):focus-visible,
+.theme-dark #options-drawer .sound-toggle:not(:disabled):hover,
+.theme-dark #options-drawer .sound-toggle:not(:disabled):focus-visible,
+.theme-dark #options-drawer .preference-toggle:not(:disabled):hover,
+.theme-dark #options-drawer .preference-toggle:not(:disabled):focus-visible,
+.theme-dark #options-drawer .keybind-grid button:not(:disabled):hover,
+.theme-dark #options-drawer .keybind-grid button:not(:disabled):focus-visible,
+.theme-dark #options-drawer .reset-bindings:hover,
+.theme-dark #options-drawer .reset-bindings:focus-visible,
+.theme-dark #options-drawer .setting-info summary:hover,
+.theme-dark #options-drawer .setting-info summary:focus-visible,
+.theme-dark #options-drawer .backup-restore-actions button:hover,
+.theme-dark #options-drawer .backup-restore-actions button:focus-visible,
+.theme-dark .options-trigger:not(.emulation-trigger):not(:disabled):hover,
+.theme-dark .options-trigger:not(.emulation-trigger):not(:disabled):focus-visible {
+  color: var(--options-hover-ink);
+  background: var(--options-hover-bg);
+  border-color: var(--options-hover-border);
+  box-shadow: none;
+}
+
+.theme-dark #options-drawer .model-switch button:not(:disabled):hover b,
+.theme-dark #options-drawer .model-switch button:not(:disabled):focus-visible b,
+.theme-dark #options-drawer .model-switch button:not(:disabled):hover small,
+.theme-dark #options-drawer .model-switch button:not(:disabled):focus-visible small,
+.theme-dark #options-drawer .sound-toggle:not(:disabled):hover b,
+.theme-dark #options-drawer .sound-toggle:not(:disabled):focus-visible b,
+.theme-dark #options-drawer .preference-toggle:not(:disabled):hover b,
+.theme-dark #options-drawer .preference-toggle:not(:disabled):focus-visible b,
+.theme-dark #options-drawer .setting-info summary:hover::after,
+.theme-dark #options-drawer .setting-info summary:focus-visible::after {
+  color: var(--options-hover-ink);
+}
+
+/* Emulation settings use the same deep hover on every interactive surface,
+   not just segmented buttons. Selected segments still remain white. */
+.theme-dark .emulation-deck .segmented button:not(:disabled):hover,
+.theme-dark .emulation-deck .segmented button:not(:disabled):focus-visible,
+.theme-dark .emulation-deck .sound-toggle:not(:disabled):hover,
+.theme-dark .emulation-deck .sound-toggle:not(:disabled):focus-visible,
+.theme-dark .emulation-deck .preference-toggle:not(:disabled):hover,
+.theme-dark .emulation-deck .preference-toggle:not(:disabled):focus-visible,
+.theme-dark .emulation-deck .setting-info summary:hover,
+.theme-dark .emulation-deck .setting-info summary:focus-visible,
+.theme-dark .emulation-deck .backup-restore-actions button:hover,
+.theme-dark .emulation-deck .backup-restore-actions button:focus-visible,
+.theme-dark .emulation-deck .manual-scale-control button:hover,
+.theme-dark .emulation-deck .manual-scale-control button:focus-visible,
+.theme-dark .emulation-trigger:not(:disabled):hover,
+.theme-dark .emulation-trigger:not(:disabled):focus-visible {
+  color: var(--emulation-hover-ink);
+  background: var(--emulation-hover-bg);
+  border-color: var(--emulation-hover-border);
+  box-shadow: none;
+}
+
+.theme-dark .emulation-deck .range-control input:not(.range-hover-latched):hover::-webkit-slider-thumb,
+.theme-dark .emulation-deck .range-control input:focus-visible::-webkit-slider-thumb {
+  background: var(--emulation-hover-bg);
+}
+
+.theme-dark .emulation-deck .range-control input:not(.range-hover-latched):hover::-moz-range-thumb,
+.theme-dark .emulation-deck .range-control input:focus-visible::-moz-range-thumb {
+  background: var(--emulation-hover-bg);
+}
+
+.theme-dark .emulation-deck .sound-toggle:not(:disabled):hover b,
+.theme-dark .emulation-deck .sound-toggle:not(:disabled):focus-visible b,
+.theme-dark .emulation-deck .preference-toggle:not(:disabled):hover b,
+.theme-dark .emulation-deck .preference-toggle:not(:disabled):focus-visible b,
+.theme-dark .emulation-deck .setting-info summary:hover::after,
+.theme-dark .emulation-deck .setting-info summary:focus-visible::after {
+  color: var(--emulation-hover-ink);
+}
+
+/* Hovering an already-selected segment must not replace its white selection
+   tile with either drawer hover colour. */
+.theme-dark #options-drawer .segmented button.active:not(:disabled):hover,
+.theme-dark #options-drawer .segmented button.active:not(:disabled):focus-visible,
+.theme-dark .emulation-deck .segmented button.active:not(:disabled):hover,
+.theme-dark .emulation-deck .segmented button.active:not(:disabled):focus-visible {
+  color: var(--selected-ink);
+  background: transparent;
+  border-color: currentColor;
+  box-shadow: none;
+  translate: 0;
+}
+
+.theme-dark #options-drawer .segmented button.active:not(:disabled):hover b,
+.theme-dark #options-drawer .segmented button.active:not(:disabled):focus-visible b,
+.theme-dark #options-drawer .segmented button.active:not(:disabled):hover small,
+.theme-dark #options-drawer .segmented button.active:not(:disabled):focus-visible small {
+  color: var(--selected-ink);
+}
+
+/* Save and library controls use a neutral grey hover. Selected filters are
+   white, and their flat layout never acquires a coloured drop shadow. */
+.theme-dark .save-deck button:hover:not(:disabled),
+.theme-dark .save-deck button:focus-visible:not(:disabled),
+.theme-dark .library-deck .library-card-actions button:hover:not(:disabled),
+.theme-dark .library-deck .library-card-actions button:focus-visible,
+.theme-dark .library-empty button:hover,
+.theme-dark .library-empty button:focus-visible,
+.theme-dark .app-data-actions button:hover,
+.theme-dark .app-data-actions button:focus-visible {
+  color: var(--options-hover-ink);
+  background: var(--options-hover-bg);
+  border-color: var(--options-hover-border);
+}
+
+.theme-dark .library-filters button:not(.active):hover,
+.theme-dark .library-filters button:not(.active):focus-visible,
+.theme-dark .tabletop-filter-tabs button:not(.active):hover,
+.theme-dark .tabletop-filter-tabs button:not(.active):focus-visible {
+  color: var(--options-hover-ink);
+  background: var(--options-hover-bg);
+  box-shadow: none;
+}
+
+/* Add ROM rises vertically on cyan; switching views slides sideways on
+   magenta. They deliberately do not share a generic toolbar hover. */
+.theme-dark .library-add-button:hover,
+.theme-dark .library-add-button:focus-visible,
+.theme-dark .tabletop-add-button:hover,
+.theme-dark .tabletop-add-button:focus-visible {
+  color: var(--selected-ink);
+  background: var(--selected-bg);
+  border-color: var(--cyan);
+  box-shadow: 0 6px 0 var(--cyan);
+}
+
+.theme-dark .library-view-toggle:hover,
+.theme-dark .library-view-toggle:focus-visible,
+.theme-dark .tabletop-toolbar .tabletop-view-toggle:hover,
+.theme-dark .tabletop-toolbar .tabletop-view-toggle:focus-visible {
+  color: #f1f0e9;
+  background: #8b634b;
+  border-color: #2d211b;
+  box-shadow: -5px 0 0 var(--magenta);
 }

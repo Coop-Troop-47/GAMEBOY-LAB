@@ -162,6 +162,31 @@ function keyLabel(code) {
   return labels[code] ?? code.replace(/^Key/, "").replace(/^Digit/, "");
 }
 
+/* A dragged range input remains :hover after pointer-up. Keep its hover
+   treatment dormant until the pointer actually leaves and re-enters, so the
+   finished thumb does not flash underneath the cursor. */
+const RANGE_POINTER_BEHAVIOUR = {
+  onPointerDown(event) {
+    event.currentTarget.classList.add("range-hover-latched");
+  },
+  onPointerUp(event) {
+    if (!event.currentTarget.matches(":hover")) {
+      event.currentTarget.classList.remove("range-hover-latched");
+    }
+  },
+  onPointerLeave(event) {
+    if (event.buttons === 0) {
+      event.currentTarget.classList.remove("range-hover-latched");
+    }
+  },
+  onPointerCancel(event) {
+    event.currentTarget.classList.remove("range-hover-latched");
+  },
+  onBlur(event) {
+    event.currentTarget.classList.remove("range-hover-latched");
+  },
+};
+
 const EMPTY_INFO = {
   title: "NO CARTRIDGE",
   mapper: "—",
@@ -1014,6 +1039,7 @@ function HoldToLoadButton({
   children,
   className = "",
   confirmName,
+  holdVerb = "LOAD",
   onConfirm,
   requiresHold = false,
   ...buttonProps
@@ -1066,7 +1092,7 @@ function HoldToLoadButton({
     if (!requiresHold) cancelHold();
   }, [cancelHold, requiresHold]);
 
-  const safetyLabel = `Hold for 1 second to load ${confirmName}. Unsaved progress will be lost.`;
+  const safetyLabel = `Hold for 1 second to ${holdVerb.toLowerCase()} ${confirmName}. Unsaved progress will be lost.`;
 
   return (
     <button
@@ -1117,7 +1143,7 @@ function HoldToLoadButton({
       {children}
       {requiresHold && (
         <span className="hold-load-safety" aria-hidden="true">
-          <b>{holding ? "ARE YOU SURE? UNSAVED PROGRESS WILL BE LOST" : "HOLD 1S TO LOAD"}</b>
+          <b>{holding ? "ARE YOU SURE? UNSAVED PROGRESS WILL BE LOST" : `HOLD 1S TO ${holdVerb}`}</b>
         </span>
       )}
     </button>
@@ -1494,9 +1520,16 @@ function RomLibraryDrawer({
         </>
       ) : (
         <div className="tabletop-toolbar">
-          <span>
-            TABLETOP · {String(visibleRoms.length).padStart(2, "0")} {visibleRoms.length === 1 ? "CART" : "CARTS"}
-          </span>
+          <label className="tabletop-search">
+            <span className="visually-hidden">Search game library</span>
+            <input
+              type="search"
+              value={libraryQuery}
+              onChange={(event) => onQuery(event.target.value)}
+              placeholder="SEARCH"
+              aria-label="Search game library"
+            />
+          </label>
           <div className="tabletop-filter-tabs" aria-label="Filter tabletop cartridges">
             {[
               ["all", "ALL"],
@@ -1512,14 +1545,14 @@ function RomLibraryDrawer({
               >
                 {label}
               </button>
-              ))}
+            ))}
           </div>
           {sortControl}
           <div className="tabletop-actions">
-            <button type="button" onClick={() => onView("detail")}>
+            <button className="tabletop-view-toggle" type="button" onClick={() => onView("detail")}>
               DETAIL VIEW
             </button>
-            <button type="button" onClick={onAddRom}>
+            <button className="tabletop-add-button" type="button" onClick={onAddRom}>
               + ADD
             </button>
           </div>
@@ -1756,21 +1789,53 @@ function SaveCenter({
           A state freezes the entire machine at one instant: CPU, video, audio,
           memory, and cartridge RAM. It is not an in-game save and is emulator-specific.
         </p>
-        <div className="state-slots">
+        <div className="save-state-carousel" aria-label="Three emulator save-state slots">
           {saveSlots.map((slot, index) => (
-            <article key={index} className={slot ? "occupied" : ""}>
-              <div>
+            <article
+              key={index}
+              className={`save-state-slot ${slot ? "occupied" : "empty"}`}
+              aria-label={`Save state slot ${index + 1}${slot ? " occupied" : " empty"}`}
+            >
+              <div
+                className={`save-state-preview-console${slot ? ` model-${slot.model === "cgb" ? "cgb" : "dmg"}` : ""}`}
+                data-model={slot?.model || "empty"}
+                role="img"
+                aria-label={slot
+                  ? `${slot.model === "cgb" ? "GBC" : "DMG"} save-state preview`
+                  : "Empty save-state slot preview"}
+              >
+                <div className="save-state-preview-screen">
+                  {slot?.preview ? (
+                    <img src={slot.preview} alt={`Slot ${index + 1} preview`} />
+                  ) : (
+                    <div className="save-state-preview-placeholder" aria-hidden="true">
+                      <i /><span>EMPTY</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="save-state-slot-meta">
                 <b>SLOT {index + 1}</b>
                 <span>
                   {slot
                     ? `${modelLabel(slot.model)} · ${formatSavedAt(slot.savedAt)}`
-                    : "EMPTY"}
+                    : "NO SNAPSHOT YET"}
                 </span>
               </div>
-              <div>
-                <button onClick={() => saveStateSlot(index)} disabled={!running}>
+              <div className="save-state-slot-actions">
+                <HoldToLoadButton
+                  className="save-state-save-button"
+                  confirmName={`save state slot ${index + 1}`}
+                  holdVerb="OVERWRITE"
+                  onConfirm={() => saveStateSlot(index)}
+                  requiresHold={Boolean(slot)}
+                  disabled={!running}
+                  aria-label={slot
+                    ? `Hold to overwrite save state slot ${index + 1}`
+                    : `Save current game to slot ${index + 1}`}
+                >
                   {slot ? "OVERWRITE" : "SAVE"}
-                </button>
+                </HoldToLoadButton>
                 <button onClick={() => loadStateSlot(index)} disabled={!slot}>LOAD</button>
                 {slot && (
                   <button
@@ -2071,6 +2136,7 @@ export default function Emulator() {
   const cartridgeSwitchRunRef = useRef(0);
   const cartridgeSwitchingRef = useRef(false);
   const cartridgeStartingRef = useRef(false);
+  const cartridgeScreenCoveredRef = useRef(false);
   const pauseOnStartupRef = useRef(false);
   const transitionFrameTimerRef = useRef(0);
   const viewTransitionTimerRef = useRef(0);
@@ -2173,6 +2239,7 @@ export default function Emulator() {
   const [cartridgeInserting, setCartridgeInserting] = useState(false);
   const [cartridgeSwitching, setCartridgeSwitching] = useState(false);
   const [cartridgeStarting, setCartridgeStarting] = useState(false);
+  const [cartridgeScreenCovered, setCartridgeScreenCovered] = useState(false);
   const [cartridgeName, setCartridgeName] = useState("GAME CARTRIDGE");
   const [cartridgeKind, setCartridgeKind] = useState("gb");
   const [cartridgeArtwork, setCartridgeArtwork] = useState("");
@@ -2206,6 +2273,17 @@ export default function Emulator() {
     || emulationDrawerOpen
     || saveDrawerOpen
     || libraryDrawerOpen;
+
+  const coverCartridgeScreen = useCallback(() => {
+    cartridgeScreenCoveredRef.current = true;
+    setCartridgeScreenCovered(true);
+  }, []);
+
+  const revealCartridgeScreen = useCallback(() => {
+    if (!cartridgeScreenCoveredRef.current) return;
+    cartridgeScreenCoveredRef.current = false;
+    setCartridgeScreenCovered(false);
+  }, []);
 
   const refreshLibrary = useCallback(async () => {
     try {
@@ -2430,6 +2508,7 @@ export default function Emulator() {
           savedAt: parsed.savedAt,
           model: parsed.model,
           title: parsed.title,
+          preview: typeof parsed.preview === "string" ? parsed.preview : "",
         };
       } catch {
         return null;
@@ -2906,6 +2985,10 @@ export default function Emulator() {
     // asynchronous file, artwork, geometry or storage work can begin.
     cartridgeSwitchingRef.current = true;
     cartridgeStartingRef.current = true;
+    // Cover the live LCD in the same turn as the switch request. The cover is
+    // released only after the replacement core has produced its first safe
+    // frame, so an old/white compositor frame cannot leak between cartridges.
+    coverCartridgeScreen();
     setCartridgeSwitching(true);
     setCartridgeStarting(true);
     setStatus("Changing cartridge");
@@ -3062,6 +3145,7 @@ export default function Emulator() {
         pauseOnStartupRef.current = false;
         setCartridgeSwitching(false);
         setCartridgeStarting(false);
+        revealCartridgeScreen();
         setMessage("Hardware lockout: cartridge logo or header checksum is invalid.");
         return;
       }
@@ -3144,6 +3228,7 @@ export default function Emulator() {
       setCartridgeKind(previousVisual.kind);
       setCartridgeName(previousVisual.name);
       setCartridgePresent(previousVisual.present);
+      revealCartridgeScreen();
       setMessage(error instanceof Error ? error.message : "Unable to read this cartridge.");
       if (hadRunningCartridge) {
         runningRef.current = true;
@@ -3166,6 +3251,7 @@ export default function Emulator() {
     clearDisplayTransition,
     closeDrawers,
     compatibilityPalette,
+    coverCartridgeScreen,
     flushAudio,
     model,
     pauseGame,
@@ -3173,6 +3259,7 @@ export default function Emulator() {
     readStoredBattery,
     refreshLibrary,
     refreshSaveSlots,
+    revealCartridgeScreen,
     saveBattery,
     startAudio,
     status,
@@ -3729,9 +3816,32 @@ export default function Emulator() {
   ]);
 
   const saveStateSlot = useCallback((slot) => {
-    const snapshot = emulatorRef.current.exportState();
+    const emulator = emulatorRef.current;
+    const snapshot = emulator.exportState();
     if (!snapshot || !romKeyRef.current) return;
     const savedAt = Date.now();
+    let preview = "";
+    try {
+      /* The visible LCD is a shader target and the source canvas is only used
+         for startup screens. Build the thumbnail from the exact framebuffer
+         captured in the state instead, so a running game cannot save a
+         blank/old preview. No shader or display scale is baked in. */
+      const frame = snapshot.memory?.framebuffer || emulator.framebuffer;
+      if (frame?.length === GAMEBOY_WIDTH * GAMEBOY_HEIGHT * 4) {
+        const previewCanvas = document.createElement("canvas");
+        previewCanvas.width = GAMEBOY_WIDTH;
+        previewCanvas.height = GAMEBOY_HEIGHT;
+        const previewContext = previewCanvas.getContext("2d", { alpha: false });
+        const imageData = previewContext?.createImageData(GAMEBOY_WIDTH, GAMEBOY_HEIGHT);
+        if (previewContext && imageData) {
+          imageData.data.set(frame);
+          previewContext.putImageData(imageData, 0, 0);
+          preview = previewCanvas.toDataURL("image/png");
+        }
+      }
+    } catch {
+      preview = "";
+    }
     try {
       localStorage.setItem(`gbc-lab-state:${romKeyRef.current}:${slot}`, JSON.stringify({
         version: 1,
@@ -3739,6 +3849,7 @@ export default function Emulator() {
         title: snapshot.title,
         model: snapshot.model,
         savedAt,
+        preview,
         state: encodeStateValue(snapshot),
       }));
       refreshSaveSlots();
@@ -4750,6 +4861,7 @@ export default function Emulator() {
           if (pendingPresentationRef.current) {
             releaseDisplayTransition();
             finishCartridgeStartup();
+            revealCartridgeScreen();
           }
           pendingPresentationRef.current = false;
           pendingPresentationFramesRef.current = 0;
@@ -4835,6 +4947,7 @@ export default function Emulator() {
             pendingPresentationFramesRef.current = 0;
             presentFrameRef.current?.({ resetHistory: true });
             releaseDisplayTransition();
+            revealCartridgeScreen();
           } else {
             shouldPresent = false;
           }
@@ -4903,6 +5016,7 @@ export default function Emulator() {
     enqueueAudio,
     finishCartridgeStartup,
     releaseDisplayTransition,
+    revealCartridgeScreen,
     uploadSoftwareScreen,
   ]);
 
@@ -5103,7 +5217,7 @@ export default function Emulator() {
       <section className="workspace">
         <div
           ref={consoleWrapRef}
-          className={`console-wrap model-${model} ${integerScaling ? "integer-scale" : "flexible-scale"} ${viewModeTransition ? `view-${viewModeTransition}` : ""} ${dragging ? "is-dragging" : ""} ${cartridgePresent ? "has-cartridge" : ""} ${cartridgeSwitching ? "cartridge-changing" : ""} ${cartridgeHovered ? "cartridge-hovered" : ""} ${cartridgePreflight ? "cartridge-preflight" : ""} ${cartridgeInserting && cartridgeAnimationEnabled ? "cartridge-inserting" : ""} ${showSaveTooltip || cartridgePreflight ? "tooltip-visible" : ""}`}
+          className={`console-wrap model-${model} ${integerScaling ? "integer-scale" : "flexible-scale"} ${viewModeTransition ? `view-${viewModeTransition}` : ""} ${dragging ? "is-dragging" : ""} ${cartridgePresent ? "has-cartridge" : ""} ${cartridgeSwitching ? "cartridge-changing" : ""} ${cartridgeScreenCovered ? "cartridge-screen-covered" : ""} ${cartridgeHovered ? "cartridge-hovered" : ""} ${cartridgePreflight ? "cartridge-preflight" : ""} ${cartridgeInserting && cartridgeAnimationEnabled ? "cartridge-inserting" : ""} ${showSaveTooltip || cartridgePreflight ? "tooltip-visible" : ""}`}
           onWheel={resizeWithWheel}
           style={{
             "--console-scale": consoleScale,
@@ -5183,7 +5297,7 @@ export default function Emulator() {
                   />
                   <span className="screen-glass" aria-hidden="true" />
                   <span
-                    className={`cartridge-power-cover ${cartridgeSwitching ? "visible" : ""}`}
+                    className={`cartridge-power-cover ${cartridgeSwitching || cartridgeScreenCovered ? "visible" : ""}`}
                     aria-hidden="true"
                   />
                   {paused && running && (
@@ -5468,6 +5582,7 @@ export default function Emulator() {
               <span><b>Ghosting strength</b><output>{ghostStrength}%</output></span>
               <input
                 type="range"
+                {...RANGE_POINTER_BEHAVIOUR}
                 min="8"
                 max="72"
                 value={ghostStrength}
@@ -5487,6 +5602,7 @@ export default function Emulator() {
                 </span>
                 <input
                   type="range"
+                  {...RANGE_POINTER_BEHAVIOUR}
                   min={-DMG_CONTRAST_ADJUSTMENT_LIMIT}
                   max={DMG_CONTRAST_ADJUSTMENT_LIMIT}
                   step="1"
@@ -5509,10 +5625,12 @@ export default function Emulator() {
               <b>{cgbColorCorrection ? "ON" : "RAW"}</b>
             </button>
             <details className="setting-info compact-setting-info">
-              <summary>About GBC color correction</summary>
+              <summary>Why the GBC colours look different</summary>
               <p>
-                Models the dimmer, cross-coupled color response of the original reflective
-                GBC panel. Raw keeps decoded cartridge colors untouched for clean captures.
+                Keeps the colours closer to an original reflective GBC screen. Turn it off when
+                you want the game&apos;s decoded colours exactly as the cartridge provides them.
+                The correction models the dimmer, cross-coupled response of the original panel;
+                Raw keeps decoded cartridge colours untouched for clean captures.
               </p>
             </details>
           </section>
@@ -5542,6 +5660,7 @@ export default function Emulator() {
               <span><b>Volume</b><output>{volume}%</output></span>
               <input
                 type="range"
+                {...RANGE_POINTER_BEHAVIOUR}
                 min="0"
                 max="100"
                 value={volume}
@@ -5574,14 +5693,6 @@ export default function Emulator() {
                 </span>
               ))}
             </p>
-            <button
-              className={`preference-toggle ${keyboardMotion ? "active" : ""}`}
-              onClick={() => setKeyboardMotion((value) => !value)}
-              aria-pressed={keyboardMotion}
-            >
-              <span>Keyboard button motion</span>
-              <b>{keyboardMotion ? "ON" : "OFF"}</b>
-            </button>
             <div className="keybind-grid" aria-label="Keyboard bindings">
               {BINDING_ORDER.map((button) => (
                 <div key={button}>
@@ -5605,6 +5716,14 @@ export default function Emulator() {
             >
               RESET KEYBINDS
             </button>
+            <button
+              className={`preference-toggle keyboard-motion-toggle ${keyboardMotion ? "active" : ""}`}
+              onClick={() => setKeyboardMotion((value) => !value)}
+              aria-pressed={keyboardMotion}
+            >
+              <span>Keyboard button motion</span>
+              <b>{keyboardMotion ? "ON" : "OFF"}</b>
+            </button>
           </section>
 
           <section className="deck-section app-behavior-section">
@@ -5624,11 +5743,11 @@ export default function Emulator() {
               <b>{pauseOnMenu ? "ON" : "OFF"}</b>
             </button>
             <details className="setting-info">
-              <summary>Pause behavior</summary>
+              <summary>What happens when a drawer opens</summary>
               <p>
-                Pauses the entire emulated machine before a drawer moves, then resumes from
-                the same machine cycle when it closes. Turn this off only if you want a game
-                to keep running while changing settings.
+                When this is on, the whole emulated machine pauses before a drawer moves and
+                resumes from the same machine cycle when it closes. Turn it off only if you
+                deliberately want a game to keep running while you change settings.
               </p>
             </details>
             <button
@@ -5640,11 +5759,12 @@ export default function Emulator() {
               <b>{cartridgeAnimationEnabled ? "ON" : "OFF"}</b>
             </button>
             <details className="setting-info">
-              <summary>Insertion presentation</summary>
+              <summary>What the cartridge animation does</summary>
               <p>
-                Controls the cartridge slide and console knockback when a library game is
-                launched. The separate library-cataloguing sequence always completes so a
-                newly added ROM cannot be left half-written.
+                Controls the short cartridge slide and console knockback when a library game is
+                launched. It changes presentation only, not emulation timing. The separate
+                library-cataloguing sequence always completes so a newly added ROM cannot be
+                left half-written.
               </p>
             </details>
           </section>
@@ -5686,11 +5806,11 @@ export default function Emulator() {
               }}
             />
             <details className="setting-info">
-              <summary>Restore safety</summary>
+              <summary>What a restore replaces</summary>
               <p>
-                The complete backup is validated before storage changes. Restore replaces
-                all locally cached save records only after a second confirmation showing the
-                exact game and record counts.
+                A restore replaces the save records currently cached in this browser. The file
+                is checked before anything changes, then a second confirmation shows the exact
+                game and record counts so an accidental overwrite is easy to catch.
               </p>
             </details>
           </section>
@@ -5704,9 +5824,12 @@ export default function Emulator() {
           inert={!emulationDrawerOpen}
         >
           <div className="drawer-heading emulation-drawer-heading">
-            <div>
-              <span>GAMEBOY LAB · CORE CONTROL</span>
-              <h2>Emulation settings</h2>
+            <div className="drawer-title-with-icon">
+              <SettingIcon type="chip" />
+              <div>
+                <span>GAMEBOY LAB · CORE CONTROL</span>
+                <h2>Emulation settings</h2>
+              </div>
             </div>
             <button onClick={closeEmulationSettings} aria-label="Close emulation settings">
               CLOSE ×
@@ -5714,14 +5837,6 @@ export default function Emulator() {
           </div>
 
           <section className="deck-section advanced-section">
-            <div className="section-heading">
-              <span>00</span>
-              <SettingIcon type="chip" />
-              <div>
-                <h2>Core controls</h2>
-                <p>Timing, scaling, diagnostics, and audio path</p>
-              </div>
-            </div>
             <div className="advanced-settings">
               <article className="advanced-setting">
                 <button
@@ -5742,13 +5857,13 @@ export default function Emulator() {
                   </b>
                 </button>
                 <details className="setting-info">
-                  <summary>What this shows</summary>
+                  <summary>Readout in plain English</summary>
                   <p>
-                    Opens a live monitor on the main emulator screen. It separates emulated
-                    frame rate from frames actually presented by the browser, reports skipped
-                    presentations, audio queue depth and target, underruns, latency trims,
-                    current CPU/PPU state, and the inserted cartridge&apos;s mapper, memory,
-                    target hardware, header result, and real-time clock support.
+                    Adds a live health panel to the main screen. It shows how smoothly the game
+                    is being emulated and displayed, whether audio is running short, and the
+                    inserted cartridge&apos;s type, size, save support, hardware target, and clock.
+                    The extra counters are there when you are tuning a setup, not because you
+                    need to understand emulator internals to play.
                   </p>
                   <p>
                     The monitor only reads counters that the core already maintains. It does
@@ -5770,7 +5885,7 @@ export default function Emulator() {
                   <b>{integerScaling ? "ON" : "OFF"}</b>
                 </button>
                 <details className="setting-info">
-                  <summary>What this changes</summary>
+                  <summary>How pixel scaling works</summary>
                   <p>
                     A Game Boy frame is exactly 160×144 source pixels. Integer scaling maps every
                     source pixel to a whole block of physical display pixels—such as 3×3 or 6×6—
@@ -5798,6 +5913,7 @@ export default function Emulator() {
                       <span><b>Manual device scale</b><output>{manualScale}%</output></span>
                       <input
                         type="range"
+                        {...RANGE_POINTER_BEHAVIOUR}
                         min="55"
                         max="100"
                         step="1"
@@ -5843,10 +5959,11 @@ export default function Emulator() {
                   ))}
                 </div>
                 <details className="setting-info">
-                  <summary>What this changes</summary>
+                  <summary>How much sound stays ready</summary>
                   <p>
-                    Sets how much completed stereo audio is ready on the browser&apos;s dedicated
-                    audio thread before playback starts. At 48 kHz, the targets are roughly
+                    Sets how much completed stereo audio the browser keeps ready before playback
+                    starts. More room is safer on a busy computer; less room responds faster.
+                    At 48 kHz, the targets are roughly
                     8 ms for Minimal, 16 ms for Low, 27 ms for Balanced, 53 ms for Stable,
                     and 85 ms for Deep.
                     The browser and audio device add their own output latency after this queue.
@@ -5887,10 +6004,10 @@ export default function Emulator() {
                   ))}
                 </div>
                 <details className="setting-info">
-                  <summary>What this changes</summary>
+                  <summary>How the emulator catches up</summary>
                   <p>
-                    Controls how much real CPU time one browser refresh may spend recovering
-                    emulated frames after the host stalls: Cool allows 4 ms, Balanced 8 ms, and
+                    Controls how much real CPU time one browser refresh may spend catching up
+                    after the computer stalls: Cool allows 4 ms, Balanced 8 ms, and
                     Aggressive 14 ms. Recovery remains cycle-accurate—the core executes every
                     missed CPU, timer, PPU, APU, DMA, and mapper step in order.
                   </p>
@@ -5927,7 +6044,7 @@ export default function Emulator() {
                   ))}
                 </div>
                 <details className="setting-info">
-                  <summary>What this changes</summary>
+                  <summary>What frame skipping actually skips</summary>
                   <p>
                     Off presents every completed Game Boy frame at its native 59.7275 Hz cadence.
                     Skip 1 presents every second frame (about 29.86 Hz); Skip 2 presents every
@@ -5960,7 +6077,7 @@ export default function Emulator() {
                   <b>{backgroundPause ? "ON" : "OFF"}</b>
                 </button>
                 <details className="setting-info">
-                  <summary>What this changes</summary>
+                  <summary>What happens in another tab</summary>
                   <p>
                     Stops the emulated machine when the page becomes hidden. Browsers heavily
                     throttle animation callbacks in background tabs; without this guard, the
@@ -5986,7 +6103,7 @@ export default function Emulator() {
                   <b>{audioFilter ? "ON" : "RAW"}</b>
                 </button>
                 <details className="setting-info">
-                  <summary>What this changes</summary>
+                  <summary>Why the audio filter exists</summary>
                   <p>
                     Applies a DC-blocking high-pass stage like the handheld&apos;s output
                     coupling capacitors. The filter removes constant speaker offset and slow
