@@ -6089,3 +6089,20 @@ html[data-theme="dark"] body {
   border-color: #2d211b;
   box-shadow: -5px 0 0 var(--magenta);
 }
+
+/* Add ROM is one action in both library layouts. Keep this rule after the
+   tabletop toolbar rules so its older positional hover styles cannot diverge
+   from the detail button. */
+.library-tools .library-add-button:hover,
+.library-tools .library-add-button:focus-visible,
+.tabletop-toolbar .tabletop-add-button:hover,
+.tabletop-toolbar .tabletop-add-button:focus-visible {
+  translate: 0 -2px;
+  box-shadow: 0 6px 0 var(--cyan);
+}
+
+.library-tools .library-add-button:active,
+.tabletop-toolbar .tabletop-add-button:active {
+  translate: 0 3px;
+  box-shadow: 0 1px 0 var(--cyan);
+}

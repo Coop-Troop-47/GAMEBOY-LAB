@@ -475,6 +475,7 @@ test("keeps every hardware input and new option accessible", async () => {
   assert.match(source, /type="range"\s*\{\.\.\.RANGE_POINTER_BEHAVIOUR\}/s);
   assert.match(source, /className="tabletop-view-toggle"/);
   assert.match(css, /\.library-add-button:hover,[\s\S]*box-shadow:\s*0 6px 0 var\(--cyan\)/s);
+  assert.match(css, /\.library-tools \.library-add-button:hover,[\s\S]*\.tabletop-toolbar \.tabletop-add-button:hover[\s\S]*box-shadow:\s*0 6px 0 var\(--cyan\)/s);
   assert.match(css, /\.library-view-toggle:hover,[\s\S]*box-shadow:\s*-5px 0 0 var\(--magenta\)/s);
   assert.match(css, /\.app-data-summary:hover,\s*\.app-data-summary:focus-within/);
   assert.doesNotMatch(css, /\.app-data-section:hover\s+\.app-data-summary/);
